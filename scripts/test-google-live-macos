@@ -1,0 +1,202 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+source "$(cd "$(dirname "$0")" && pwd)/lib/xcode-env.sh"
+
+ensure_dirs
+sync_google_client_config
+require_project
+
+if ! command -v cliclick >/dev/null 2>&1; then
+  echo "Missing required dependency: cliclick" >&2
+  exit 1
+fi
+
+set -a
+source "${ROOT_DIR}/.env"
+set +a
+
+: "${TEST_GOOGLE_USER:?Missing TEST_GOOGLE_USER in .env}"
+: "${TEST_GOOGLE_USER_PASSWORD:?Missing TEST_GOOGLE_USER_PASSWORD in .env}"
+: "${TEST_GOOGLE_CALENDAR_NAME:?Missing TEST_GOOGLE_CALENDAR_NAME in .env}"
+
+APP_NAME="${APP_PRODUCT_NAME}"
+APP_PATH="$(app_bundle_path)"
+AX_QUERY_SCRIPT="${ROOT_DIR}/scripts/lib/ax-query.swift"
+
+"${ROOT_DIR}/scripts/build" --platform macos >/dev/null
+
+pkill -f "${APP_NAME}.app/Contents/MacOS/${APP_NAME}" || true
+defaults delete "${BUNDLE_IDENTIFIER}" >/dev/null 2>&1 || true
+
+launchctl setenv CALENDAR_BUSY_SYNC_LIVE_E2E 1
+launchctl setenv CALENDAR_BUSY_SYNC_E2E_CALENDAR_NAME "${TEST_GOOGLE_CALENDAR_NAME}"
+trap 'launchctl unsetenv CALENDAR_BUSY_SYNC_LIVE_E2E >/dev/null 2>&1 || true; launchctl unsetenv CALENDAR_BUSY_SYNC_E2E_CALENDAR_NAME >/dev/null 2>&1 || true' EXIT
+
+open -n "${APP_PATH}" --args
+
+sleep 3
+osascript -e "tell application \"${APP_NAME}\" to activate" >/dev/null 2>&1 || true
+
+app_value() {
+  local identifier="$1"
+  swift "${AX_QUERY_SCRIPT}" value "${APP_NAME}" "${identifier}" 2>/dev/null || true
+}
+
+app_center() {
+  local identifier="$1"
+  swift "${AX_QUERY_SCRIPT}" center "${APP_NAME}" "${identifier}" 2>/dev/null || true
+}
+
+click_identifier() {
+  local identifier="$1"
+  local center
+  center="$(app_center "${identifier}")"
+  [[ -n "${center}" ]] || return 1
+  local x="${center%% *}"
+  local y="${center##* }"
+  cliclick c:"${x},${y}"
+}
+
+wait_for_identifier() {
+  local identifier="$1"
+  local timeout_seconds="${2:-20}"
+  local start_epoch now_epoch
+  start_epoch="$(date +%s)"
+
+  while true; do
+    if center="$(app_center "${identifier}")"; [[ -n "${center}" ]]; then
+      return 0
+    fi
+
+    now_epoch="$(date +%s)"
+    if (( now_epoch - start_epoch >= timeout_seconds )); then
+      return 1
+    fi
+
+    sleep 1
+  done
+}
+
+chrome_auth_url() {
+  osascript <<'APPLESCRIPT' 2>/dev/null || true
+tell application "Google Chrome"
+  if (count of windows) is 0 then return ""
+  set currentTab to active tab of front window
+  return URL of currentTab
+end tell
+APPLESCRIPT
+}
+
+safari_auth_url() {
+  osascript <<'APPLESCRIPT' 2>/dev/null || true
+tell application "Safari"
+  if (count of windows) is 0 then return ""
+  return URL of current tab of front window
+end tell
+APPLESCRIPT
+}
+
+type_google_text() {
+  local text="$1"
+  osascript - "${text}" <<'APPLESCRIPT' >/dev/null 2>&1
+on run argv
+tell application "System Events"
+  keystroke (item 1 of argv)
+end tell
+end run
+APPLESCRIPT
+}
+
+press_keycode() {
+  local keycode="$1"
+  osascript <<APPLESCRIPT >/dev/null 2>&1
+tell application "System Events"
+  key code ${keycode}
+end tell
+APPLESCRIPT
+}
+
+maybe_drive_google_auth() {
+  local chrome_url safari_url
+  chrome_url="$(chrome_auth_url)"
+  safari_url="$(safari_auth_url)"
+
+  if [[ "${chrome_url}" == *"accounts.google.com"* || "${chrome_url}" == *"oauth"* ]]; then
+    osascript -e 'tell application "Google Chrome" to activate' >/dev/null 2>&1 || true
+    sleep 1
+    type_google_text "${TEST_GOOGLE_USER}"
+    press_keycode 36
+    sleep 2
+    type_google_text "${TEST_GOOGLE_USER_PASSWORD}"
+    press_keycode 36
+    return 0
+  fi
+
+  if [[ "${safari_url}" == *"accounts.google.com"* || "${safari_url}" == *"oauth"* ]]; then
+    osascript -e 'tell application "Safari" to activate' >/dev/null 2>&1 || true
+    sleep 1
+    type_google_text "${TEST_GOOGLE_USER}"
+    press_keycode 36
+    sleep 2
+    type_google_text "${TEST_GOOGLE_USER_PASSWORD}"
+    press_keycode 36
+    return 0
+  fi
+
+  return 1
+}
+
+wait_for_identifier "google-auth.connect" 20 || {
+  echo "Timed out waiting for the Google connect control to appear in the app UI." >&2
+  exit 1
+}
+
+if [[ "$(app_value "google-auth.status")" != "Connecting…" ]]; then
+  click_identifier "google-auth.connect"
+fi
+
+start_epoch="$(date +%s)"
+auth_window_seen=0
+connect_attempts=1
+
+while true; do
+  auth_status="$(app_value "google-auth.status")"
+  live_status="$(app_value "google-calendar.live-smoke-status")"
+  calendar_message="$(app_value "google-calendar.message")"
+
+  if [[ "${live_status}" == "Passed" ]]; then
+    echo "Live Google smoke passed."
+    exit 0
+  fi
+
+  if [[ "${live_status}" == "Failed" ]]; then
+    echo "Live Google smoke failed: ${calendar_message}" >&2
+    exit 1
+  fi
+
+  if maybe_drive_google_auth; then
+    auth_window_seen=1
+  fi
+
+  if [[ "${auth_status}" != "Connecting…" && "${auth_window_seen}" -eq 0 && "${connect_attempts}" -lt 3 ]]; then
+    click_identifier "google-auth.connect" || true
+    connect_attempts="$((connect_attempts + 1))"
+  fi
+
+  now_epoch="$(date +%s)"
+  elapsed="$((now_epoch - start_epoch))"
+
+  if (( elapsed > 45 )); then
+    if [[ "${auth_status}" == "Connecting…" && "${auth_window_seen}" -eq 0 ]]; then
+      echo "Google sign-in never surfaced a browser/authentication window. This machine currently cannot complete live Google auth from the local debug build; verify Apple signing/account state in Xcode before retrying." >&2
+      exit 1
+    fi
+
+    echo "Timed out waiting for live Google smoke to finish. Status=${auth_status} Smoke=${live_status} Message=${calendar_message}" >&2
+    exit 1
+  fi
+
+  sleep 2
+done

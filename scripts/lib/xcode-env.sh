@@ -22,11 +22,18 @@ TEST_RESULTS_DIR="${ARTIFACTS_DIR}/test-results"
 CHECKPOINTS_DIR="${ARTIFACTS_DIR}/checkpoints"
 DERIVED_DATA_DIR="${ARTIFACTS_DIR}/DerivedData"
 FIXTURE_ROOT="${ROOT_DIR}/Fixtures/scenarios"
+GOOGLE_CLIENT_CONFIG_SYNC_SCRIPT="${ROOT_DIR}/scripts/sync-google-client-config.py"
+GOOGLE_DEFAULT_CLIENT_PLIST_PATH="${ROOT_DIR}/Calendar Busy Sync/Calendar Busy Sync/DefaultGoogleOAuth.plist"
+GOOGLE_INFO_PLIST_PATH="${ROOT_DIR}/Calendar Busy Sync/Info.plist"
 
 MAC_DESTINATION="platform=macOS,arch=arm64"
 
 ensure_dirs() {
   mkdir -p "${ARTIFACTS_DIR}" "${XCODEBUILD_DIR}" "${TEST_RESULTS_DIR}" "${CHECKPOINTS_DIR}" "${DERIVED_DATA_DIR}"
+}
+
+sync_google_client_config() {
+  python3 "${GOOGLE_CLIENT_CONFIG_SYNC_SCRIPT}"
 }
 
 preferred_sim_id() {

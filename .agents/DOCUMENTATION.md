@@ -1,27 +1,35 @@
 # Running implementation notes
 
 - active ExecPlans:
-  - none
+  - `docs/exec-plans/active/2026-04-19-google-sign-in-wiring.md`
+  - `docs/exec-plans/active/2026-04-19-google-calendar-live-integration-e2e.md`
+  - `docs/exec-plans/active/2026-04-19-icloud-calendar-connection.md`
 - recent completed ExecPlans:
   - `docs/exec-plans/completed/2026-04-18-initial-apple-app-and-smoke-path.md`
   - `docs/exec-plans/completed/2026-04-18-apple-codex-harness-bootstrap.md`
 - current milestone:
-  - the repo now has a real universal SwiftUI app project wired into the imported Apple Codex harness, with deterministic scenario-backed smoke captures for macOS, iPhone, and iPad
+  - the repo now has live Google Sign-In wiring, writable Google calendar loading, managed Google busy-slot create/delete actions, and a second live Apple / iCloud calendar slice backed by EventKit inside the settings-and-audit shell
+- Apple identifiers:
+  - bundle identifier: `com.matthewpaulmoore.Calendar-Busy-Sync`
+  - Apple bundle ID resource ID: `7NFDF46V3H`
 - commands run:
+  - `python3 scripts/check_execplan.py docs/exec-plans/active/2026-04-19-icloud-calendar-connection.md`
   - `./scripts/bootstrap-apple`
-  - `./scripts/verify-product-identity`
   - `./scripts/build --platform all`
   - `./scripts/test-unit`
   - `./scripts/test-integration`
   - `./scripts/test-ui-macos --smoke`
   - `./scripts/test-ui-ios --device both --smoke`
-  - `python3 scripts/check_execplan.py docs/exec-plans/completed/2026-04-18-initial-apple-app-and-smoke-path.md`
+  - `./scripts/test-google-live-macos`
   - `python3 scripts/knowledge/check_docs.py`
-  - `python3 scripts/knowledge/generate_repo_map.py`
-  - `python3 scripts/knowledge/update_quality_score.py`
 - evidence gathered:
-  - `Calendar Busy Sync/Calendar Busy Sync.xcodeproj` now builds a universal app target plus matching unit-test and UI-test targets
-  - the app accepts harness launch arguments, loads `Fixtures/scenarios/basic-cross-busy.json`, computes cross-calendar busy mirrors, and emits `state.json`, `perf.json`, and `window.png`
-  - the smoke scripts now pass end-to-end on macOS, iPhone simulator, and iPad simulator
+  - `scripts/sync-google-client-config.py` now turns `.env` + `GOOGLE_CLIENT_PLIST_PATH` into the checked-in app plist inputs used by build/test commands
+  - `Calendar Busy Sync/Calendar Busy Sync.xcodeproj` now links `GoogleSignIn-iOS`, uses a generated project-root `Info.plist`, and includes a macOS keychain access-group entitlement
+  - the app now restores a previous Google session on launch, exposes connect/disconnect controls plus writable Google calendar selection and managed event create/delete in settings, and keeps custom native OAuth app overrides behind callback-scheme validation
+  - the app now exposes a live Apple / iCloud calendar workflow through EventKit, including in-app connect/disconnect semantics, writable-calendar selection, and managed busy-slot create/delete verification
+  - `scripts/lib/ax-query.swift` and `scripts/test-google-live-macos` can drive the app's accessibility identifiers and report when the OS/browser auth handoff fails to surface
+  - macOS, iPhone simulator, and iPad simulator smoke scripts still pass end-to-end after the auth wiring landed
 - open risks or blockers:
-  - the current app surface is still scenario-backed only; provider auth, account selection flows, and real calendar writes remain future feature work
+  - the current app surface now supports live Google calendar enumeration and a managed verification write/delete, but the full multi-account mirror engine is still future work
+  - local macOS live auth is currently blocked on this machine by the OS auth-session handoff: `SafariLaunchAgent` starts the Google flow and then logs `User cancelled request with flags: 3` plus `Could not activate app with pid ...`, so the browser/authentication UI never surfaces and the real connect flow cannot finish here yet
+  - custom Google native client IDs still require a build that already includes the matching reversed callback scheme, so arbitrary runtime swaps remain intentionally blocked

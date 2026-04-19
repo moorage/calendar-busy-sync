@@ -69,6 +69,13 @@ struct BusySyncScenario: Codable, Equatable {
     let accounts: [ConnectedAccountScenario]
     let sourceEvents: [SourceEventScenario]
     let expectedMirrorPreview: [MirrorPreviewEntry]
+
+    static let emptyLiveShell = BusySyncScenario(
+        scenarioName: "live-google-shell",
+        accounts: [],
+        sourceEvents: [],
+        expectedMirrorPreview: []
+    )
 }
 
 struct ScenarioState: Equatable {
@@ -115,6 +122,30 @@ struct ScenarioState: Equatable {
             .filter(\.role.canDestination)
     }
 
+    func selectedCalendarName(for id: String) -> String? {
+        scenario.accounts
+            .flatMap(\.selectedCalendars)
+            .first(where: { $0.id == id })?
+            .name
+    }
+
+    func auditTimestampLabel(forPreviewAt index: Int) -> String {
+        guard mirrorPreview.indices.contains(index) else {
+            return "Queued"
+        }
+
+        let preview = mirrorPreview[index]
+        guard let sourceCalendar = scenario.accounts
+            .flatMap(\.selectedCalendars)
+            .first(where: { $0.name == preview.sourceCalendar }),
+            let event = scenario.sourceEvents.first(where: { $0.calendarId == sourceCalendar.id && $0.blocksTime })
+        else {
+            return "Queued"
+        }
+
+        return event.shortStartLabel
+    }
+
     static func build(from scenario: BusySyncScenario) -> ScenarioState {
         let calendarsByID = scenario.accounts
             .flatMap(\.selectedCalendars)
@@ -143,5 +174,25 @@ struct ScenarioState: Equatable {
         }
 
         return ScenarioState(scenario: scenario, mirrorPreview: preview)
+    }
+
+    static let emptyLiveShell = ScenarioState.build(from: .emptyLiveShell)
+}
+
+extension SourceEventScenario {
+    var shortStartLabel: String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let fallbackFormatter = ISO8601DateFormatter()
+
+        let parsedDate = formatter.date(from: start) ?? fallbackFormatter.date(from: start)
+        guard let parsedDate else {
+            return start
+        }
+
+        let display = DateFormatter()
+        display.locale = Locale(identifier: "en_US_POSIX")
+        display.dateFormat = "MMM d, HH:mm"
+        return display.string(from: parsedDate)
     }
 }

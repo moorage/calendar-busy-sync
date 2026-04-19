@@ -28,3 +28,4 @@ tmp
 distribution.cer
 CertificateSigningRequest.certSigningRequest
 AuthKey.p8
+client.apps.googleusercontent.com.plist

@@ -5,6 +5,7 @@ set -euo pipefail
 source "$(cd "$(dirname "$0")" && pwd)/lib/xcode-env.sh"
 
 ensure_dirs
+sync_google_client_config
 require_project
 
 PLATFORM="${1:-}"

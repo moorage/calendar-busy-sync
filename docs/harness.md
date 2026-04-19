@@ -10,9 +10,12 @@ The harness is the shell-first control plane for this repository.
 - `./scripts/test-integration`
 - `./scripts/test-ui-macos --smoke`
 - `./scripts/test-ui-ios --device both --smoke`
+- `./scripts/test-google-live-macos`
 - `./scripts/capture-checkpoint --scenario basic-cross-busy.json --platform-target macos --checkpoint shell-smoke-macos`
 - `./scripts/agent-loop`
 - `./scripts/verify-product-identity`
+
+All build/test wrappers now run `scripts/sync-google-client-config.py` first. That script reads `.env`, loads `GOOGLE_CLIENT_PLIST_PATH`, copies the source Google plist into `Calendar Busy Sync/Calendar Busy Sync/DefaultGoogleOAuth.plist`, and regenerates `Calendar Busy Sync/Info.plist`.
 
 ## Artifacts
 
@@ -32,12 +35,13 @@ The app is responsible for:
 - writing `state.json`
 - writing `perf.json`
 - writing `window.png`
-- honoring `--ui-test-mode 1` so harness launches avoid live-provider side effects
+- honoring `--ui-test-mode 1` so harness launches avoid live-provider side effects such as interactive Google auth or Apple calendar permission prompts
 - honoring `--harness-command-dir <path>` for file-based smoke commands once write reconciliation exists
 
 The scripts are responsible for:
 
 - creating output directories
+- syncing the Google OAuth plist declared in `.env` into the checked-in app paths before build/test work
 - passing launch arguments or UI-test environment
 - copying scenario fixtures into the simulator container when needed
 - waiting for the snapshot files to exist
@@ -45,6 +49,6 @@ The scripts are responsible for:
 
 ## Current scope
 
-This harness currently covers local bootstrap, build, unit-test, integration-test, and checkpoint-capture scaffolding.
+This harness currently covers local bootstrap, build, unit-test, integration-test, checkpoint capture, Google client-plist sync for the default auth configuration, the live Apple / iCloud EventKit settings slice, and a macOS live Google smoke runner that drives the app through accessibility identifiers.
 
-Release automation, App Store export flows, and provider-backed end-to-end sync verification are intentionally out of scope until the Xcode targets and first sync slice exist.
+The live macOS smoke runner attempts the real Google auth handoff, waits for writable-calendar selection and managed event create/delete, and fails explicitly when local Apple signing/account state prevents the OS auth session from surfacing.

@@ -4,7 +4,7 @@ This document is the top-level codemap for the live repository. It names the maj
 
 ## System overview
 
-This repository is building a universal Apple-platform calendar busy-sync app with five major subsystems:
+This repository contains a universal Apple-platform calendar busy-sync app with five major subsystems:
 
 1. connected account management
 2. calendar selection and routing
@@ -12,7 +12,7 @@ This repository is building a universal Apple-platform calendar busy-sync app wi
 4. mirrored busy-slot writing and reconciliation
 5. platform shells and harness tooling
 
-The live codebase is still early. The Xcode project is not checked in yet, and most durable structure currently lives in the harness bootstrap layer.
+The live codebase is still early, but the Xcode project, harness shell, first Google auth slice, and first live Google Calendar read/write slice are checked in.
 
 ## Top-level domains
 
@@ -21,7 +21,7 @@ The live codebase is still early. The Xcode project is not checked in yet, and m
 Purpose:
 
 - host the app on macOS, iPhone, and iPad
-- expose shared navigation, account configuration, and sync-status surfaces through platform-specific host adapters
+- expose shared navigation, account configuration, advanced OAuth settings, audit-trail surfaces, and sync-status surfaces through platform-specific host adapters
 
 Expected primary code area:
 
@@ -34,6 +34,13 @@ Stable concepts:
 - `BusyMirrorRule`
 - `MirrorCandidate`
 - `MirrorWriteRequest`
+- `AuditTrailEntry`
+- `AppleCalendarSummary`
+- `AppleManagedEventRecord`
+- `GoogleOAuthOverrideConfiguration`
+- `DefaultGoogleOAuthConfiguration`
+- `ResolvedGoogleOAuthConfiguration`
+- `GoogleConnectedAccount`
 - `HarnessLaunchOptions`
 - `HarnessStateSnapshot`
 
@@ -59,6 +66,15 @@ Purpose:
 Expected primary code area:
 
 - `Calendar Busy Sync/Calendar Busy Sync/App/Providers/`
+
+Current live slice:
+
+- `Calendar Busy Sync/Calendar Busy Sync/App/Providers/Apple/`
+- `AppleCalendarService` owns EventKit authorization, writable Apple-calendar discovery, and managed busy-slot create/delete for Apple / iCloud calendars on the current device
+- `Calendar Busy Sync/Calendar Busy Sync/App/Providers/Google/`
+- `GoogleSignInService` owns restore/sign-in/disconnect and platform presenter lookup
+- `GoogleOAuthConfigurationResolver` enforces the current build's callback-scheme compatibility for custom native client IDs
+- `GoogleCalendarService` owns writable-calendar discovery plus managed busy-slot create/delete through direct Calendar REST calls with the current Google access token
 
 ### Tests and fixtures
 
@@ -93,8 +109,11 @@ Primary code areas:
 - shared sync state and contracts stay in platform-neutral Swift files
 - AppKit usage stays behind `#if os(macOS)` adapters
 - UIKit usage stays behind `#if os(iOS)` adapters
+- macOS-only polling controls stay behind platform-specific UI because iOS does not guarantee a fixed background schedule
 - provider SDK or HTTP payload handling stays inside provider adapters
 - shell scripts call shared helpers in `scripts/lib/`
+- Google client plist sync happens in `scripts/sync-google-client-config.py` before build/test commands
+- accessibility-driven live smoke helpers live in `scripts/lib/ax-query.swift` and are used by the macOS Google E2E script
 - docs verification and repo-map generation use only standard Python 3 library modules
 
 ## Cross-cutting concerns
@@ -116,6 +135,7 @@ Critical commands should fail clearly when:
 - the shared scheme is absent
 - the requested simulator device is unavailable
 - required docs or plans are missing
+- the Google client plist declared in `.env` is missing or malformed
 - the app attempts to mirror to an unselected calendar
 
 ### Privacy and trust boundaries
@@ -125,5 +145,6 @@ If code changes affect:
 - mirrored event payload shape -> update `docs/product-specs/calendar-sync.md`
 - harness-visible command surface -> update `docs/harness.md`
 - snapshot schema or accessibility identifiers -> update `docs/debug-contracts.md`
+- Google auth flow, Apple calendar access, plist sync, or provider-boundary behavior -> update this file and `README.md`
 - architecture boundaries -> update this file
 - workflow expectations -> update `AGENTS.md` and `README.md`

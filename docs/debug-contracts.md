@@ -22,11 +22,40 @@ Supported debug launch arguments:
 Stable identifiers should include:
 
 - `accounts.list`
+- `audit-trail.list`
 - `accounts.add`
 - `accounts.disconnect.<id>`
+- `apple-calendar.connection-status`
+- `apple-calendar.status`
+- `apple-calendar.message`
+- `apple-calendar.connect`
+- `apple-calendar.disconnect`
+- `apple-calendar.refresh`
+- `apple-calendar.picker`
+- `apple-calendar.create`
+- `apple-calendar.delete`
+- `apple-calendar.last-event`
+- `google-auth.status`
+- `google-auth.connected-account`
+- `google-auth.message`
+- `google-auth.resolution-warning`
+- `google-auth.connect`
+- `google-auth.disconnect`
+- `google-calendar.status`
+- `google-calendar.message`
+- `google-calendar.refresh`
+- `google-calendar.picker`
+- `google-calendar.create`
+- `google-calendar.delete`
+- `google-calendar.last-event`
+- `google-calendar.live-smoke-status`
 - `calendar-picker.account.<id>`
 - `calendar-picker.calendar.<id>`
 - `calendar-picker.include-toggle.<id>`
+- `settings.sync.poll-interval`
+- `settings.advanced.google-oauth.use-custom`
+- `settings.advanced.google-oauth.client-id`
+- `settings.advanced.google-oauth.server-client-id`
 - `sync-status.last-run`
 - `sync-status.pending-count`
 - `sync-status.failed-count`
@@ -73,3 +102,11 @@ Planned stable harness commands include:
 
 - `triggerManualSync`
 - `exportMirrorLedger`
+
+## Platform notes
+
+- polling interval controls are exposed on macOS only
+- iPhone and iPad builds still emit the same harness snapshots, but background sync cadence is not a user-configurable setting there
+- the Google Sign-In callback URL is handled through the app lifecycle, but harness smoke launches stay scenario-backed and do not initiate interactive auth
+- Apple / iCloud calendar access uses EventKit permission on the current device; harness `--ui-test-mode 1` launches must stay side-effect free and should not trigger permission prompts automatically
+- the live macOS Google smoke path reads `CALENDAR_BUSY_SYNC_LIVE_E2E=1` and `CALENDAR_BUSY_SYNC_E2E_CALENDAR_NAME=<name>` from the launch environment so the app can auto-select a writable calendar and run the managed event create/delete verification

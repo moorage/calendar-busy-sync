@@ -6,3 +6,7 @@ npm-debug.log
 coverage
 client_secret.apps.googleusercontent.com.json
 tmp/
+distribution.cer
+CertificateSigningRequest.certSigningRequest
+AuthKey.p8
+client.apps.googleusercontent.com.plist

@@ -2,7 +2,7 @@
 
 Universal Apple-platform calendar busy-sync app for macOS, iPhone, and iPad.
 
-The repository is being bootstrapped from control-plane docs and harness scripts into a native calendar-sync shell. The durable workflow lives in the files below:
+The repository now contains a real universal SwiftUI app shell plus the Apple harness scripts and docs that drive local Codex work. The durable workflow lives in the files below:
 
 - `AGENTS.md`
 - `ARCHITECTURE.md`
@@ -16,6 +16,10 @@ The repository is being bootstrapped from control-plane docs and harness scripts
 
 The app lets one person connect multiple calendar accounts, choose exactly which calendars in each account participate, and mirror any event that is not `free` / `available` into all other selected calendars as busy hold blocks. The goal is to prevent double-booking across multiple jobs, gigs, and companies without exposing full event details between accounts.
 
+The main shell centers settings and audit history. Polling cadence is configurable on macOS only, defaults to every 2 minutes, and the settings surface now covers both live Google accounts and Apple / iCloud calendars available through EventKit. The Advanced area includes both audit-log retention and an override that lets a user bring their own Google OAuth app instead of relying on the product default.
+
+The current implementation includes live Google Sign-In wiring for the default OAuth app declared in `.env` via `GOOGLE_CLIENT_PLIST_PATH`, live writable-calendar loading from Google, selected-calendar persistence, and managed busy-slot create/delete verification from the settings shell. It also includes a live Apple / iCloud calendar path backed by EventKit: the user can grant calendar access, select a writable Apple calendar on the device, and run the same managed create/delete verification loop there. Advanced custom OAuth mode is guarded: the user can supply their own native Google client ID only when it reuses the callback URL scheme baked into this build.
+
 ## Quickstart
 
 Prerequisites:
@@ -23,12 +27,18 @@ Prerequisites:
 - full Xcode installed
 - `xcodebuild`, `swift`, and `python3` available in Terminal
 - iPhone and iPad simulators installed if you want simulator smoke coverage
+- `.env` contains `GOOGLE_CLIENT_PLIST_PATH` pointing at a valid Google iOS/macOS OAuth plist for this bundle ID
 
 Bootstrap and inspect the environment:
 
 ```bash
 ./scripts/bootstrap-apple
 ```
+
+The bootstrap and build/test wrappers automatically sync the Google client plist from `.env` into:
+
+- `Calendar Busy Sync/Info.plist`
+- `Calendar Busy Sync/Calendar Busy Sync/DefaultGoogleOAuth.plist`
 
 Build the app:
 
@@ -43,6 +53,7 @@ Run narrow validation:
 ./scripts/test-ui-macos --smoke
 ./scripts/test-ui-ios --device iphone --smoke
 ./scripts/test-ui-ios --device ipad --smoke
+./scripts/test-google-live-macos
 ```
 
 Run the fast Codex loop:
@@ -73,4 +84,6 @@ Capture a deterministic checkpoint:
 
 - the sync engine should mirror only occupancy, not sensitive event details, unless the relevant product spec explicitly changes
 - provider-specific SDK code belongs behind adapter boundaries; shared sync logic stays platform- and provider-neutral
+- Google Sign-In plus writable-calendar loading and managed create/delete verification are live, and Apple / iCloud calendar access now uses EventKit with the same destination-calendar verification loop; the full multi-account mirroring engine is still future provider work
+- the macOS live Google smoke script will fail clearly when local Apple signing/account state prevents the OS/browser auth surface from opening
 - `artifacts/` is runtime-only and ignored by git

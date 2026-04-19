@@ -23,6 +23,10 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXBuildFile section */
+		CB0000000000000000000411 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = CB0000000000000000001002 /* GoogleSignIn */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		CB0000000000000000000201 /* Calendar Busy Sync.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Calendar Busy Sync.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		CB0000000000000000000202 /* Calendar Busy SyncTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Calendar Busy SyncTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -52,6 +56,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CB0000000000000000000411 /* GoogleSignIn in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -112,6 +117,7 @@
 			);
 			name = "Calendar Busy Sync";
 			packageProductDependencies = (
+				CB0000000000000000001002 /* GoogleSignIn */,
 			);
 			productName = "Calendar Busy Sync";
 			productReference = CB0000000000000000000201 /* Calendar Busy Sync.app */;
@@ -199,6 +205,9 @@
 			productRefGroup = CB0000000000000000000003 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
+			packageReferences = (
+				CB0000000000000000001001 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
+			);
 			targets = (
 				CB0000000000000000000101 /* Calendar Busy Sync */,
 				CB0000000000000000000102 /* Calendar Busy SyncTests */,
@@ -389,15 +398,17 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_ENTITLEMENTS = Calendar_Busy_Sync.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = GG34PA8F4A;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_KEY_CFBundleDisplayName = "Calendar Busy Sync";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				"INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace[sdk=iphonesimulator*]" = YES;
+				INFOPLIST_FILE = Info.plist;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -429,15 +440,17 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_ENTITLEMENTS = Calendar_Busy_Sync.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = GG34PA8F4A;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_KEY_CFBundleDisplayName = "Calendar Busy Sync";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				"INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace[sdk=iphonesimulator*]" = YES;
+				INFOPLIST_FILE = Info.plist;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -603,6 +616,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		CB0000000000000000001001 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google/GoogleSignIn-iOS";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 9.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		CB0000000000000000001002 /* GoogleSignIn */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CB0000000000000000001001 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignIn;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = CB0000000000000000000001 /* Project object */;
 }

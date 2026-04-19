@@ -2,7 +2,7 @@
 
 ## Snapshot
 
-- Status: `planned`
+- Status: `in progress`
 - Platforms: `macOS`, `iPhone`, `iPad`
 - Primary outcome: prevent double-booking across separately managed calendars without exposing sensitive event details
 
@@ -18,6 +18,34 @@ People with multiple jobs, gigs, or companies often keep separate calendars per 
 - mirrored busy holds should contain only the minimum information required to block time unless a later product decision expands this
 - free/available events do not create mirrored holds
 
+## Settings surfaces
+
+- the main app shell should prioritize settings and an audit trail over a dense operational dashboard
+- primary settings include connected Google accounts, Apple / iCloud calendar access on the current device, selected source and destination calendars, and the default shared Google OAuth configuration
+- polling cadence is user-configurable on macOS only, with a default of every 2 minutes
+- iPhone and iPad do not expose a user-configurable polling interval because background execution is not reliable enough to promise a strict schedule
+- advanced settings include audit trail event log retention and the option to use a custom Google OAuth app instead of the product default
+- advanced custom OAuth mode should allow the user to supply their own Google client identifiers so they can authorize against their own Google Cloud project
+- custom native Google client IDs are only valid when the build already includes the matching reversed-client-ID callback scheme; otherwise the UI must block the flow and explain that a rebuild is required
+
+## Current implementation slice
+
+- the app can restore a previously connected Google account on launch
+- the settings surface can connect or disconnect Google through the current default OAuth app
+- the harness syncs the default Google plist from `.env` into source-controlled app files before build/test runs
+- the app can load writable calendars from the connected Google account and persist the selected destination calendar
+- the settings surface can create and delete a managed private busy-slot event in the selected Google calendar to verify write access
+- the app can request Apple calendar access through EventKit, load writable Apple / iCloud calendars from the current device, persist the selected destination calendar, and create/delete a managed verification busy slot there
+- the macOS live smoke path can auto-select a calendar by name and attempt the create/delete verification loop, but the final interactive Google auth handoff still depends on local Apple signing/account state
+
+## Defaults
+
+- macOS polling interval: every 2 minutes
+- macOS audit trail retention: unlimited
+- iPhone and iPad audit trail retention: last 1000 events
+- Google OAuth mode: shared default app unless the user opts into custom credentials
+- Apple / iCloud Calendar mode: off until the user connects it from settings
+
 ## Non-goals for the first slice
 
 - full bi-directional event-detail sync
@@ -31,8 +59,9 @@ People with multiple jobs, gigs, or companies often keep separate calendars per 
 - a free/available event does not create any mirrored busy slot
 - disconnecting an account removes its calendars from future sync planning
 - the configuration UI makes the selected source and destination calendars legible before sync runs
+- Google auth state is visible in the settings shell with explicit connect/disconnect controls and clear custom-client validation
 
 ## Open decisions
 
 - whether mirrored holds should preserve source duration edge cases such as all-day events or time-zone transitions exactly or through normalized local time blocks
-- whether the first release should support only Google Calendar or also include local Apple calendars
+- whether the first mirroring rollout should allow one selected Apple destination calendar per device or multiple Apple calendars at once

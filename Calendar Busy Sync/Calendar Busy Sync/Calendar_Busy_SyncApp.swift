@@ -17,6 +17,9 @@ struct Calendar_Busy_SyncApp: App {
                 .task {
                     await model.prepareIfNeeded()
                 }
+                .onOpenURL { url in
+                    model.handleIncomingURL(url)
+                }
         }
     }
 }
