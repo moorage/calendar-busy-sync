@@ -1,0 +1,19 @@
+model = "gpt-5.4"
+model_reasoning_effort = "high"
+
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+personality = "pragmatic"
+web_search = "live"
+
+project_root_markers = [".git", "AGENTS.md"]
+
+[mcp_servers.openaiDeveloperDocs]
+url = "https://developers.openai.com/mcp"
+
+[features]
+request_rule = true
+runtime_metrics = true
+unified_exec = true
+multi_agent = true
+apps = true

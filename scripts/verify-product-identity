@@ -1,0 +1,56 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+source "${ROOT_DIR}/scripts/lib/product-identity.sh"
+
+patterns=(
+  'Quick Markdown Viewer'
+  'Free Markdown Viewer'
+  'Swift Markdown Viewer'
+  'Swift-Markdown-Viewer'
+  'Swift_Markdown_Viewer'
+  'SWIFTMD'
+  'GET /health'
+  'dashboard smoke surface'
+  'npm run verify'
+  'Twilio webhook'
+)
+
+scan_paths=(
+  "${ROOT_DIR}/README.md"
+  "${ROOT_DIR}/AGENTS.md"
+  "${ROOT_DIR}/ARCHITECTURE.md"
+  "${ROOT_DIR}/.codex"
+  "${ROOT_DIR}/docs/PLANS.md"
+  "${ROOT_DIR}/docs/SECURITY.md"
+  "${ROOT_DIR}/docs/RELIABILITY.md"
+  "${ROOT_DIR}/docs/QUALITY_SCORE.md"
+  "${ROOT_DIR}/docs/harness.md"
+  "${ROOT_DIR}/docs/debug-contracts.md"
+  "${ROOT_DIR}/docs/product-specs"
+  "${ROOT_DIR}/scripts/bootstrap-apple"
+  "${ROOT_DIR}/scripts/build"
+  "${ROOT_DIR}/scripts/test-unit"
+  "${ROOT_DIR}/scripts/test-integration"
+  "${ROOT_DIR}/scripts/test-ui-macos"
+  "${ROOT_DIR}/scripts/test-ui-ios"
+  "${ROOT_DIR}/scripts/capture-checkpoint"
+  "${ROOT_DIR}/scripts/agent-loop"
+  "${ROOT_DIR}/scripts/lib"
+)
+
+exit_code=0
+for pattern in "${patterns[@]}"; do
+  if rg -n --hidden -S "${pattern}" "${scan_paths[@]}"; then
+    exit_code=1
+  fi
+done
+
+if [[ ${exit_code} -ne 0 ]]; then
+  echo "product identity verification failed" >&2
+  exit 1
+fi
+
+echo "product identity verification passed"

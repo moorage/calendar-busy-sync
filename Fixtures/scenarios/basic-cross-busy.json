@@ -1,0 +1,74 @@
+{
+  "scenarioName": "basic-cross-busy",
+  "accounts": [
+    {
+      "id": "acct-google-main",
+      "provider": "google",
+      "displayName": "Primary Consulting",
+      "selectedCalendars": [
+        {
+          "id": "cal-acme-primary",
+          "name": "Acme Primary",
+          "role": "source-and-destination"
+        },
+        {
+          "id": "cal-acme-travel",
+          "name": "Acme Travel",
+          "role": "destination"
+        }
+      ]
+    },
+    {
+      "id": "acct-google-studio",
+      "provider": "google",
+      "displayName": "Studio Work",
+      "selectedCalendars": [
+        {
+          "id": "cal-studio-bookings",
+          "name": "Studio Bookings",
+          "role": "source-and-destination"
+        },
+        {
+          "id": "cal-studio-holds",
+          "name": "Studio Holds",
+          "role": "destination"
+        }
+      ]
+    }
+  ],
+  "sourceEvents": [
+    {
+      "calendarId": "cal-acme-primary",
+      "eventId": "evt-1",
+      "title": "Private client work",
+      "availability": "busy",
+      "start": "2026-04-21T10:00:00-07:00",
+      "end": "2026-04-21T12:00:00-07:00"
+    },
+    {
+      "calendarId": "cal-studio-bookings",
+      "eventId": "evt-2",
+      "title": "Tentative hold",
+      "availability": "free",
+      "start": "2026-04-21T13:00:00-07:00",
+      "end": "2026-04-21T14:00:00-07:00"
+    }
+  ],
+  "expectedMirrorPreview": [
+    {
+      "sourceCalendar": "Acme Primary",
+      "targetCalendar": "Acme Travel",
+      "availability": "busy"
+    },
+    {
+      "sourceCalendar": "Acme Primary",
+      "targetCalendar": "Studio Bookings",
+      "availability": "busy"
+    },
+    {
+      "sourceCalendar": "Acme Primary",
+      "targetCalendar": "Studio Holds",
+      "availability": "busy"
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+# Running implementation notes
+
+- active ExecPlans:
+  - none
+- recent completed ExecPlans:
+  - `docs/exec-plans/completed/2026-04-18-initial-apple-app-and-smoke-path.md`
+  - `docs/exec-plans/completed/2026-04-18-apple-codex-harness-bootstrap.md`
+- current milestone:
+  - the repo now has a real universal SwiftUI app project wired into the imported Apple Codex harness, with deterministic scenario-backed smoke captures for macOS, iPhone, and iPad
+- commands run:
+  - `./scripts/bootstrap-apple`
+  - `./scripts/verify-product-identity`
+  - `./scripts/build --platform all`
+  - `./scripts/test-unit`
+  - `./scripts/test-integration`
+  - `./scripts/test-ui-macos --smoke`
+  - `./scripts/test-ui-ios --device both --smoke`
+  - `python3 scripts/check_execplan.py docs/exec-plans/completed/2026-04-18-initial-apple-app-and-smoke-path.md`
+  - `python3 scripts/knowledge/check_docs.py`
+  - `python3 scripts/knowledge/generate_repo_map.py`
+  - `python3 scripts/knowledge/update_quality_score.py`
+- evidence gathered:
+  - `Calendar Busy Sync/Calendar Busy Sync.xcodeproj` now builds a universal app target plus matching unit-test and UI-test targets
+  - the app accepts harness launch arguments, loads `Fixtures/scenarios/basic-cross-busy.json`, computes cross-calendar busy mirrors, and emits `state.json`, `perf.json`, and `window.png`
+  - the smoke scripts now pass end-to-end on macOS, iPhone simulator, and iPad simulator
+- open risks or blockers:
+  - the current app surface is still scenario-backed only; provider auth, account selection flows, and real calendar writes remain future feature work

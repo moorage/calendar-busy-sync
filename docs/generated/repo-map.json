@@ -1,0 +1,593 @@
+{
+  "root": "calendar-busy-sync",
+  "tree": [
+    {
+      "type": "dir",
+      "name": ".agents",
+      "children": [
+        {
+          "type": "file",
+          "name": "DOCUMENTATION.md"
+        },
+        {
+          "type": "file",
+          "name": "IMPLEMENT.md"
+        },
+        {
+          "type": "file",
+          "name": "PLANS.md"
+        },
+        {
+          "type": "dir",
+          "name": "skills",
+          "children": [
+            {
+              "type": "dir",
+              "name": "create-exec-plan",
+              "children": [
+                {
+                  "type": "file",
+                  "name": "SKILL.md"
+                }
+              ]
+            },
+            {
+              "type": "dir",
+              "name": "execplan-decompose",
+              "children": [
+                {
+                  "type": "file",
+                  "name": "SKILL.md"
+                }
+              ]
+            },
+            {
+              "type": "dir",
+              "name": "expert-roundtable",
+              "children": [
+                {
+                  "type": "file",
+                  "name": "SKILL.md"
+                }
+              ]
+            },
+            {
+              "type": "dir",
+              "name": "feature-critic",
+              "children": [
+                {
+                  "type": "file",
+                  "name": "SKILL.md"
+                }
+              ]
+            },
+            {
+              "type": "dir",
+              "name": "high-quality-code-comments",
+              "children": [
+                {
+                  "type": "file",
+                  "name": "AGENTS-snippet.md"
+                },
+                {
+                  "type": "file",
+                  "name": "SKILL.md"
+                }
+              ]
+            },
+            {
+              "type": "dir",
+              "name": "record-feature-screencast",
+              "children": [
+                {
+                  "type": "file",
+                  "name": "SKILL.md"
+                }
+              ]
+            },
+            {
+              "type": "dir",
+              "name": "review-change-for-doc-drift",
+              "children": [
+                {
+                  "type": "file",
+                  "name": "SKILL.md"
+                }
+              ]
+            },
+            {
+              "type": "dir",
+              "name": "update-knowledge-base",
+              "children": [
+                {
+                  "type": "file",
+                  "name": "SKILL.md"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "dir",
+      "name": ".codex",
+      "children": [
+        {
+          "type": "file",
+          "name": "config.toml"
+        },
+        {
+          "type": "file",
+          "name": "local-environment.yaml"
+        }
+      ]
+    },
+    {
+      "type": "file",
+      "name": ".dockerignore"
+    },
+    {
+      "type": "file",
+      "name": ".env"
+    },
+    {
+      "type": "dir",
+      "name": ".githooks",
+      "children": [
+        {
+          "type": "file",
+          "name": "pre-commit"
+        }
+      ]
+    },
+    {
+      "type": "file",
+      "name": ".gitignore"
+    },
+    {
+      "type": "file",
+      "name": ".node-version"
+    },
+    {
+      "type": "file",
+      "name": ".nvmrc"
+    },
+    {
+      "type": "file",
+      "name": "AGENTS.md"
+    },
+    {
+      "type": "file",
+      "name": "ARCHITECTURE.md"
+    },
+    {
+      "type": "file",
+      "name": "AuthKey.p8"
+    },
+    {
+      "type": "dir",
+      "name": "Calendar Busy Sync",
+      "children": [
+        {
+          "type": "dir",
+          "name": "Calendar Busy Sync",
+          "children": [
+            {
+              "type": "dir",
+              "name": "App",
+              "children": [
+                {
+                  "type": "dir",
+                  "name": "Shared",
+                  "children": [
+                    {
+                      "type": "file",
+                      "name": "AppModel.swift"
+                    },
+                    {
+                      "type": "file",
+                      "name": "ScenarioLoader.swift"
+                    },
+                    {
+                      "type": "file",
+                      "name": "ScenarioModels.swift"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "dir",
+              "name": "Assets.xcassets",
+              "children": [
+                {
+                  "type": "dir",
+                  "name": "AccentColor.colorset",
+                  "children": [
+                    {
+                      "type": "file",
+                      "name": "Contents.json"
+                    }
+                  ]
+                },
+                {
+                  "type": "file",
+                  "name": "Contents.json"
+                }
+              ]
+            },
+            {
+              "type": "file",
+              "name": "Calendar_Busy_SyncApp.swift"
+            },
+            {
+              "type": "file",
+              "name": "ContentView.swift"
+            },
+            {
+              "type": "dir",
+              "name": "Harness",
+              "children": [
+                {
+                  "type": "file",
+                  "name": "AccessibilityIDs.swift"
+                },
+                {
+                  "type": "file",
+                  "name": "HarnessArtifactWriter.swift"
+                },
+                {
+                  "type": "file",
+                  "name": "HarnessLaunchOptions.swift"
+                },
+                {
+                  "type": "file",
+                  "name": "HarnessSnapshots.swift"
+                }
+              ]
+            },
+            {
+              "type": "file",
+              "name": "PrivacyInfo.xcprivacy"
+            }
+          ]
+        },
+        {
+          "type": "dir",
+          "name": "Calendar Busy Sync.xcodeproj",
+          "children": [
+            {
+              "type": "file",
+              "name": "project.pbxproj"
+            },
+            {
+              "type": "dir",
+              "name": "project.xcworkspace",
+              "children": [
+                {
+                  "type": "dir",
+                  "name": "xcshareddata",
+                  "children": [
+                    {
+                      "type": "dir",
+                      "name": "swiftpm",
+                      "children": [
+                        {
+                          "type": "dir",
+                          "name": "configuration",
+                          "children": []
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "dir",
+          "name": "Calendar Busy SyncTests",
+          "children": [
+            {
+              "type": "file",
+              "name": "Calendar_Busy_SyncTests.swift"
+            }
+          ]
+        },
+        {
+          "type": "dir",
+          "name": "Calendar Busy SyncUITests",
+          "children": [
+            {
+              "type": "file",
+              "name": "Calendar_Busy_SyncUITests.swift"
+            },
+            {
+              "type": "file",
+              "name": "Calendar_Busy_SyncUITestsLaunchTests.swift"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "file",
+      "name": "CertificateSigningRequest.certSigningRequest"
+    },
+    {
+      "type": "dir",
+      "name": "Fixtures",
+      "children": [
+        {
+          "type": "dir",
+          "name": "scenarios",
+          "children": [
+            {
+              "type": "file",
+              "name": "basic-cross-busy.json"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "file",
+      "name": "README.md"
+    },
+    {
+      "type": "file",
+      "name": "default.profraw"
+    },
+    {
+      "type": "file",
+      "name": "distribution.cer"
+    },
+    {
+      "type": "dir",
+      "name": "docs",
+      "children": [
+        {
+          "type": "file",
+          "name": "PLANS.md"
+        },
+        {
+          "type": "file",
+          "name": "QUALITY_SCORE.md"
+        },
+        {
+          "type": "file",
+          "name": "RELIABILITY.md"
+        },
+        {
+          "type": "file",
+          "name": "SECURITY.md"
+        },
+        {
+          "type": "file",
+          "name": "debug-contracts.md"
+        },
+        {
+          "type": "dir",
+          "name": "exec-plans",
+          "children": [
+            {
+              "type": "dir",
+              "name": "active",
+              "children": []
+            },
+            {
+              "type": "dir",
+              "name": "completed",
+              "children": [
+                {
+                  "type": "file",
+                  "name": "2026-04-18-apple-codex-harness-bootstrap.md"
+                },
+                {
+                  "type": "file",
+                  "name": "2026-04-18-initial-apple-app-and-smoke-path.md"
+                },
+                {
+                  "type": "file",
+                  "name": "README.md"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "dir",
+          "name": "generated",
+          "children": [
+            {
+              "type": "file",
+              "name": "repo-map.json"
+            }
+          ]
+        },
+        {
+          "type": "file",
+          "name": "harness.md"
+        },
+        {
+          "type": "dir",
+          "name": "ideas",
+          "children": [
+            {
+              "type": "file",
+              "name": "README.md"
+            },
+            {
+              "type": "dir",
+              "name": "backlog",
+              "children": [
+                {
+                  "type": "file",
+                  "name": "busy-slot-mirroring-core.md"
+                }
+              ]
+            },
+            {
+              "type": "file",
+              "name": "index.md"
+            },
+            {
+              "type": "dir",
+              "name": "templates",
+              "children": [
+                {
+                  "type": "file",
+                  "name": "idea-template.md"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "dir",
+          "name": "product-specs",
+          "children": [
+            {
+              "type": "file",
+              "name": "calendar-sync.md"
+            },
+            {
+              "type": "file",
+              "name": "index.md"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "dir",
+      "name": "scripts",
+      "children": [
+        {
+          "type": "file",
+          "name": "agent-loop"
+        },
+        {
+          "type": "file",
+          "name": "bootstrap-apple"
+        },
+        {
+          "type": "file",
+          "name": "capture-checkpoint"
+        },
+        {
+          "type": "file",
+          "name": "check_execplan.py"
+        },
+        {
+          "type": "file",
+          "name": "check_ideation.py"
+        },
+        {
+          "type": "dir",
+          "name": "ci",
+          "children": [
+            {
+              "type": "file",
+              "name": "record_screencast.mjs"
+            },
+            {
+              "type": "file",
+              "name": "record_screencast.sh"
+            },
+            {
+              "type": "file",
+              "name": "run_with_screencast.mjs"
+            }
+          ]
+        },
+        {
+          "type": "dir",
+          "name": "git-hooks",
+          "children": [
+            {
+              "type": "file",
+              "name": "pre-commit.mjs"
+            }
+          ]
+        },
+        {
+          "type": "file",
+          "name": "install-git-hooks.mjs"
+        },
+        {
+          "type": "dir",
+          "name": "knowledge",
+          "children": [
+            {
+              "type": "file",
+              "name": "check_docs.py"
+            },
+            {
+              "type": "file",
+              "name": "generate_repo_map.py"
+            },
+            {
+              "type": "file",
+              "name": "suggest_doc_updates.py"
+            },
+            {
+              "type": "file",
+              "name": "update_quality_score.py"
+            },
+            {
+              "type": "file",
+              "name": "verify_references.py"
+            }
+          ]
+        },
+        {
+          "type": "dir",
+          "name": "lib",
+          "children": [
+            {
+              "type": "file",
+              "name": "product-identity.sh"
+            },
+            {
+              "type": "file",
+              "name": "xcode-env.sh"
+            }
+          ]
+        },
+        {
+          "type": "dir",
+          "name": "smoke",
+          "children": [
+            {
+              "type": "file",
+              "name": "not-implemented.mjs"
+            }
+          ]
+        },
+        {
+          "type": "file",
+          "name": "test-integration"
+        },
+        {
+          "type": "file",
+          "name": "test-ui-ios"
+        },
+        {
+          "type": "file",
+          "name": "test-ui-macos"
+        },
+        {
+          "type": "file",
+          "name": "test-unit"
+        },
+        {
+          "type": "file",
+          "name": "verify-product-identity"
+        }
+      ]
+    }
+  ]
+}
