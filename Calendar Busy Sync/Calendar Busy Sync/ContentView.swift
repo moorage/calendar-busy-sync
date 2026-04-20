@@ -2,631 +2,638 @@ import SwiftUI
 
 struct ContentView: View {
     @ObservedObject var model: AppModel
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         NavigationStack {
             Group {
                 if let state = model.state {
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 20) {
-                            syncSettingsSection
-                            appleConnectionSection
-                            appleCalendarsSection
+                        VStack(alignment: .leading, spacing: 22) {
                             googleAccountsSection
+                            appleCalendarSection
                             advancedSection
-                            auditTrailSection
-                            accountsSection
-                            previewSection(state: state)
-                            statusSection(state: state)
+
+                            if !state.mirrorPreview.isEmpty {
+                                previewSection(state: state)
+                            }
                         }
-                        .padding(24)
+                        .padding(.horizontal, 24)
+                        .padding(.top, 20)
+                        .padding(.bottom, 28)
                     }
                 } else if let errorMessage = model.lastErrorMessage {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Unable to load scenario")
+                        Label("Unable to Load Scenario", systemImage: "exclamationmark.triangle.fill")
                             .font(.title2.weight(.semibold))
+                            .foregroundStyle(.red)
                         Text(errorMessage)
                             .foregroundStyle(.secondary)
                     }
                     .padding(24)
                 } else {
-                    ProgressView("Loading sync scenario…")
+                    ProgressView("Loading Calendar Busy Sync…")
                         .padding(24)
                 }
             }
             .navigationTitle("Calendar Busy Sync")
         }
-    }
-
-    private var syncSettingsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Settings")
-                .font(.headline)
-
-            #if os(macOS)
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Poll Google Calendar for new busy events")
-                    .font(.subheadline.weight(.semibold))
-                Stepper(value: $model.pollIntervalMinutes, in: 1...60) {
-                    Text("Every \(model.pollIntervalMinutes) minutes")
-                }
-                .accessibilityIdentifier(AccessibilityIDs.syncPollIntervalStepper)
-
-                Text("Polling cadence is configurable on macOS only.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            #else
-            Text("Polling cadence is not user-configurable on iPhone or iPad. Background sync follows iOS scheduling constraints.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            #endif
-
-            Text("Every selected calendar participates in full-mesh mirroring: a busy event on any selected calendar creates busy holds on all the others.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            HStack(spacing: 12) {
-                Button("Sync Now") {
-                    Task {
-                        await model.syncNow()
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(!model.canSyncNow)
-                .accessibilityIdentifier(AccessibilityIDs.syncNowButton)
-
-                Text(model.syncStatusLabel)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if model.state != nil {
+                statusLine
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-
-    private var appleConnectionSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Apple / iCloud Calendar")
-                .font(.headline)
-
-            Text(model.appleConnectionStatusLabel)
-                .font(.subheadline.weight(.semibold))
-                .accessibilityIdentifier(AccessibilityIDs.appleCalendarConnectionStatusLabel)
-
-            Text(model.appleConnectionDetail)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            if let message = model.appleCalendarMessage {
-                Text(message)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier(AccessibilityIDs.appleCalendarMessageLabel)
-            }
-
-            HStack(spacing: 12) {
-                Button(model.appleConnectButtonTitle) {
-                    Task {
-                        await model.connectAppleCalendar()
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(model.isAppleCalendarOperationInFlight)
-                .accessibilityIdentifier(AccessibilityIDs.appleCalendarConnectButton)
-
-                if model.isAppleCalendarEnabled {
-                    Button("Disconnect Apple Calendar") {
-                        model.disconnectAppleCalendar()
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(model.isAppleCalendarOperationInFlight)
-                    .accessibilityIdentifier(AccessibilityIDs.appleCalendarDisconnectButton)
-                }
-
-                if model.canOpenAppleCalendarSettings {
-                    Button("Open Calendar Settings") {
-                        Task {
-                            await model.openAppleCalendarSettings()
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .accessibilityIdentifier(AccessibilityIDs.appleCalendarOpenSettingsButton)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private var googleAccountsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Google Accounts")
-                .font(.headline)
-
-            HStack(alignment: .firstTextBaseline) {
-                Text(model.googleConnectionStatusLabel)
-                    .font(.subheadline.weight(.semibold))
-                    .accessibilityIdentifier(AccessibilityIDs.googleAuthStatusLabel)
-
-                Spacer()
-
-                Text(model.googleOAuthConfiguration.modeSummary)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-            }
-
-            Text(model.googleConnectionDetail)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            if let resolutionMessage = model.googleOAuthResolutionMessage {
-                Text(resolutionMessage)
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .accessibilityIdentifier(AccessibilityIDs.googleAuthResolutionWarning)
-            }
-
-            if let authMessage = model.googleAuthMessage {
-                Text(authMessage)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier(AccessibilityIDs.googleAuthMessageLabel)
-            }
-
-            HStack(spacing: 12) {
-                Button(model.googleConnectButtonTitle) {
+        settingsSection {
+            sectionHeader(
+                title: "Google Accounts",
+                icon: { providerBadge(assetName: "GoogleBadge") }
+            ) {
+                Button {
                     Task {
                         await model.connectGoogleAccount()
                     }
+                } label: {
+                    Label("Add Google Account", systemImage: "plus")
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.bordered)
                 .disabled(!model.canStartGoogleSignIn)
                 .accessibilityIdentifier(AccessibilityIDs.googleAuthConnectButton)
-                if let status = model.liveGoogleSmokeStatusLabel {
-                    Text(status)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier(AccessibilityIDs.googleCalendarLiveSmokeStatusLabel)
-                }
             }
 
-            if !model.googleAccountCards.isEmpty {
-                HStack(spacing: 10) {
-                    googleOverviewChip(title: "Connected", value: "\(model.googleAccountCards.count)")
-                    googleOverviewChip(title: "Ready", value: "\(model.googleReadyAccountCount)")
-                    googleOverviewChip(title: "Needs setup", value: "\(model.googleNeedsAttentionCount)")
-                }
+            if let resolutionMessage = model.googleOAuthResolutionMessage {
+                sectionDivider
+                infoMessageRow(
+                    resolutionMessage,
+                    timestamp: nil,
+                    tint: .orange,
+                    accessibilityID: AccessibilityIDs.googleAuthResolutionWarning
+                )
             }
 
-            Text(model.googleCalendarStatusLabel)
-                .font(.subheadline.weight(.semibold))
-                .accessibilityIdentifier(AccessibilityIDs.googleCalendarStatusLabel)
+            if let authMessage = model.googleAuthMessage {
+                sectionDivider
+                infoMessageRow(
+                    authMessage,
+                    timestamp: model.googleAuthMessageTimestampLabel,
+                    accessibilityID: AccessibilityIDs.googleAuthMessageLabel
+                )
+            }
 
-            Text(model.googleCalendarDetail)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            if let smokeSummary = model.liveGoogleSmokeSummary {
-                Text(smokeSummary)
+            if let status = model.liveGoogleSmokeStatusLabel, let summary = model.liveGoogleSmokeSummary {
+                sectionDivider
+                sectionRow {
+                    HStack(spacing: 10) {
+                        Image(systemName: model.currentActivityIconName)
+                            .foregroundStyle(.secondary)
+                        Text(status)
+                            .fontWeight(.medium)
+                            .accessibilityIdentifier(AccessibilityIDs.googleCalendarLiveSmokeStatusLabel)
+                        Text(summary)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Spacer()
+                    }
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                }
             }
 
             if model.googleAccountCards.isEmpty {
-                Text("Add a Google account to choose a writable destination calendar and verify event writes.")
+                sectionDivider
+                sectionRow {
+                    HStack(spacing: 10) {
+                        Image(systemName: "person.crop.circle.badge.plus")
+                            .foregroundStyle(.secondary)
+                        Text("Add an account, then choose a calendar.")
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                }
             } else {
                 ForEach(model.googleAccountCards) { card in
-                    googleAccountCard(card)
+                    sectionDivider
+                    googleAccountRow(card)
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private var appleCalendarSection: some View {
+        settingsSection {
+            sectionHeader(
+                title: "Apple / iCloud Calendar",
+                icon: { providerBadge(assetName: "ICloudBadge") }
+            )
+
+            if model.isAppleCalendarEnabled {
+                sectionRow {
+                    appleCalendarSelectionRow
+                }
+
+                sectionDivider
+                sectionRow {
+                    HStack(spacing: 10) {
+                        if model.canOpenAppleCalendarSettings {
+                            Button {
+                                Task {
+                                    await model.openAppleCalendarSettings()
+                                }
+                            } label: {
+                                Label("Open Settings", systemImage: "gearshape")
+                            }
+                            .buttonStyle(.bordered)
+                            .accessibilityIdentifier(AccessibilityIDs.appleCalendarOpenSettingsButton)
+                        }
+
+                        Spacer()
+
+                        Button(role: .destructive) {
+                            model.disconnectAppleCalendar()
+                        } label: {
+                            Label("Disconnect", systemImage: "trash")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(model.isAppleCalendarOperationInFlight)
+                        .accessibilityIdentifier(AccessibilityIDs.appleCalendarDisconnectButton)
+                    }
+                    .font(.caption)
+                }
+            } else {
+                sectionRow {
+                    HStack(spacing: 10) {
+                        Button {
+                            Task {
+                                await model.connectAppleCalendar()
+                            }
+                        } label: {
+                            Label("Connect Apple Calendar", systemImage: "calendar.badge.plus")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(model.isAppleCalendarOperationInFlight)
+                        .accessibilityIdentifier(AccessibilityIDs.appleCalendarConnectButton)
+
+                        if model.canOpenAppleCalendarSettings {
+                            Button {
+                                Task {
+                                    await model.openAppleCalendarSettings()
+                                }
+                            } label: {
+                                Label("Open Settings", systemImage: "gearshape")
+                            }
+                            .buttonStyle(.bordered)
+                            .accessibilityIdentifier(AccessibilityIDs.appleCalendarOpenSettingsButton)
+                        }
+
+                        Spacer()
+                    }
+                    .font(.caption)
+                }
+            }
+
+            if let message = model.appleCalendarMessage {
+                sectionDivider
+                infoMessageRow(
+                    message,
+                    timestamp: model.appleCalendarMessageTimestampLabel,
+                    accessibilityID: AccessibilityIDs.appleCalendarMessageLabel
+                )
+            }
+        }
     }
 
     private var advancedSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Advanced")
-                .font(.headline)
-
-            Toggle("Use your own Google OAuth app", isOn: $model.usesCustomGoogleOAuthApp)
-                .accessibilityIdentifier(AccessibilityIDs.googleOAuthUseCustomToggle)
-
-            Text("The app uses shared Google OAuth credentials by default. Advanced users can override them with their own client IDs.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            if model.usesCustomGoogleOAuthApp {
-                VStack(alignment: .leading, spacing: 10) {
-                    TextField("Google iOS/macOS client ID", text: $model.customGoogleOAuthClientID)
-                        .textFieldStyle(.roundedBorder)
-                        .accessibilityIdentifier(AccessibilityIDs.googleOAuthClientIDField)
-
-                    TextField("Google server client ID (optional)", text: $model.customGoogleOAuthServerClientID)
-                        .textFieldStyle(.roundedBorder)
-                        .accessibilityIdentifier(AccessibilityIDs.googleOAuthServerClientIDField)
-
-                    Text("Custom native client IDs must reuse the callback scheme baked into this app build. A different reversed client ID requires a rebuild.")
-                        .font(.caption)
+        settingsSection {
+            sectionHeader(
+                title: "Advanced",
+                icon: {
+                    Image(systemName: "slider.horizontal.3")
                         .foregroundStyle(.secondary)
                 }
+            )
+
+            sectionRow {
+                HStack(spacing: 12) {
+                    Label("Use your own Google OAuth app", systemImage: "lock.open.display")
+                    Spacer()
+                    Toggle("", isOn: $model.usesCustomGoogleOAuthApp)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .accessibilityIdentifier(AccessibilityIDs.googleOAuthUseCustomToggle)
+                }
+                .font(.caption)
             }
 
-            Picker("Audit trail event log length", selection: $model.auditTrailLogLength) {
-                ForEach(AuditTrailLogLength.allCases) { option in
-                    Text(option.displayLabel).tag(option)
+            if model.usesCustomGoogleOAuthApp {
+                sectionDivider
+                sectionRow {
+                    VStack(alignment: .leading, spacing: 10) {
+                        TextField("Google iOS/macOS client ID", text: $model.customGoogleOAuthClientID)
+                            .textFieldStyle(.roundedBorder)
+                            .accessibilityIdentifier(AccessibilityIDs.googleOAuthClientIDField)
+
+                        TextField("Google server client ID (optional)", text: $model.customGoogleOAuthServerClientID)
+                            .textFieldStyle(.roundedBorder)
+                            .accessibilityIdentifier(AccessibilityIDs.googleOAuthServerClientIDField)
+                    }
                 }
             }
+
+            #if os(macOS)
+            sectionDivider
+            sectionRow {
+                adaptiveTrailingRow(label: {
+                    Label("Polling", systemImage: "timer")
+                        .foregroundStyle(.secondary)
+                }, trailing: {
+                    Stepper(value: $model.pollIntervalMinutes, in: 1...60) {
+                        Text("Every \(model.pollIntervalMinutes) minutes")
+                    }
+                    .accessibilityIdentifier(AccessibilityIDs.syncPollIntervalStepper)
+                })
+                .font(.caption)
+            }
+            #endif
+
+            sectionDivider
+            sectionRow {
+                adaptiveTrailingRow(label: {
+                    Label("Log Retention", systemImage: "clock.arrow.circlepath")
+                        .foregroundStyle(.secondary)
+                }, trailing: {
+                    Picker("Audit trail event log length", selection: $model.auditTrailLogLength) {
+                        ForEach(AuditTrailLogLength.allCases) { option in
+                            Text(option.displayLabel).tag(option)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                })
+                .font(.caption)
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
-    private var appleCalendarsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Apple / iCloud Calendars")
-                .font(.headline)
-
-            Text(model.appleCalendarStatusLabel)
-                .font(.subheadline.weight(.semibold))
-                .accessibilityIdentifier(AccessibilityIDs.appleCalendarStatusLabel)
-
-            Text(model.appleCalendarDetail)
+    private func googleAccountRow(_ card: GoogleAccountCardModel) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+                adaptiveTrailingRow(label: {
+                    accountIdentityRow(
+                        title: card.account.displayName,
+                        subtitle: card.account.email
+                    )
+                    .accessibilityIdentifier(AccessibilityIDs.googleAccountCard(card.id))
+                }, trailing: {
+                    HStack(spacing: 8) {
+                        Button(role: .destructive) {
+                            model.removeGoogleAccount(card.id)
+                        } label: {
+                            Label("Remove", systemImage: "trash")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(model.isGoogleAuthInFlight)
+                        .accessibilityIdentifier(AccessibilityIDs.googleAuthDisconnectButton(card.id))
+                    }
+                })
                 .font(.caption)
-                .foregroundStyle(.secondary)
 
-            if model.isAppleCalendarEnabled {
-                HStack(spacing: 12) {
-                    Button("Refresh Calendars") {
+            if card.calendars.isEmpty {
+                adaptiveTrailingRow(label: {
+                    HStack(spacing: 8) {
+                        Label("Calendar", systemImage: "calendar")
+                            .foregroundStyle(.secondary)
+                        Text("No calendars loaded")
+                            .accessibilityIdentifier(AccessibilityIDs.googleCalendarStatusLabel)
+                    }
+                }, trailing: {
+                    Button {
+                        Task {
+                            await model.refreshGoogleCalendars(for: card.id)
+                        }
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!card.canRefreshCalendars)
+                    .accessibilityIdentifier(AccessibilityIDs.googleCalendarRefreshButton(card.id))
+                })
+                .font(.caption)
+            } else {
+                adaptiveTrailingRow(label: {
+                    HStack(spacing: 8) {
+                        Label("Calendar", systemImage: "calendar")
+                            .foregroundStyle(.secondary)
+                        Picker(
+                            "",
+                            selection: Binding(
+                                get: { model.selectedGoogleCalendarID(for: card.id) },
+                                set: { model.setSelectedGoogleCalendarID($0, for: card.id) }
+                            )
+                        ) {
+                            ForEach(card.calendars) { calendar in
+                                Text(calendar.displayName).tag(calendar.id)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .accessibilityIdentifier(AccessibilityIDs.googleCalendarPicker(card.id))
+                    }
+                }, trailing: {
+                    Button {
+                        Task {
+                            await model.refreshGoogleCalendars(for: card.id)
+                        }
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!card.canRefreshCalendars)
+                    .accessibilityIdentifier(AccessibilityIDs.googleCalendarRefreshButton(card.id))
+                })
+                .font(.caption)
+            }
+
+            if let message = card.message {
+                infoMessageRow(
+                    message,
+                    timestamp: card.messageTimestampLabel,
+                    accessibilityID: AccessibilityIDs.googleCalendarMessageLabel(card.id)
+                )
+            }
+        }
+    }
+
+    private var appleCalendarSelectionRow: some View {
+        Group {
+            if model.appleCalendars.isEmpty {
+                adaptiveTrailingRow(label: {
+                    HStack(spacing: 8) {
+                        Label("Calendar", systemImage: "calendar")
+                            .foregroundStyle(.secondary)
+                        Text("No calendars loaded")
+                            .accessibilityIdentifier(AccessibilityIDs.appleCalendarStatusLabel)
+                    }
+                }, trailing: {
+                    Button {
                         Task {
                             await model.refreshAppleCalendars()
                         }
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
                     }
                     .buttonStyle(.bordered)
                     .disabled(!model.canRefreshAppleCalendars)
                     .accessibilityIdentifier(AccessibilityIDs.appleCalendarRefreshButton)
-
-                    Button("Create Test Busy Slot") {
-                        Task {
-                            await model.createManagedAppleEvent()
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!model.canCreateManagedAppleEvent)
-                    .accessibilityIdentifier(AccessibilityIDs.appleCalendarCreateButton)
-
-                    Button("Delete Test Busy Slot") {
-                        Task {
-                            await model.deleteManagedAppleEvent()
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!model.canDeleteManagedAppleEvent)
-                    .accessibilityIdentifier(AccessibilityIDs.appleCalendarDeleteButton)
-                }
-
-                if model.appleCalendars.isEmpty {
-                    Text("No writable Apple calendars are loaded yet.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Picker(
-                        "Participating calendar",
-                        selection: Binding(
-                            get: { model.selectedAppleCalendarID },
-                            set: { model.selectedAppleCalendarID = $0 }
-                        )
-                    ) {
-                        ForEach(model.appleCalendars) { calendar in
-                            Text(calendar.displayName).tag(calendar.id)
-                        }
-                    }
-                    .accessibilityIdentifier(AccessibilityIDs.appleCalendarPicker)
-                }
-
-                if let lastManagedEvent = model.lastManagedAppleEvent {
-                    Text("\(lastManagedEvent.summary) • \(lastManagedEvent.windowDescription)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier(AccessibilityIDs.appleCalendarLastEventLabel)
-                }
-            } else {
-                Text("Connect Apple Calendar to choose a writable Apple or iCloud calendar and verify event writes.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-
-    private func googleAccountCard(_ card: GoogleAccountCardModel) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 8) {
-                        Text(card.account.displayName)
-                            .font(.subheadline.weight(.semibold))
-
-                        if card.isActive {
-                            googleBadge("Primary")
-                        }
-
-                        if card.account.usesCustomOAuthApp {
-                            googleBadge("Custom OAuth")
-                        }
-                    }
-                    .accessibilityIdentifier(AccessibilityIDs.googleAccountCard(card.id))
-
-                    Text(card.metadataLine)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                VStack(alignment: .trailing, spacing: 6) {
-                    Text(card.statusLabel)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-
-                    if !card.isActive {
-                        Button("Make Primary") {
-                            model.setActiveGoogleAccount(card.id)
-                        }
-                        .buttonStyle(.borderless)
-                        .font(.caption.weight(.medium))
-                        .accessibilityIdentifier(AccessibilityIDs.googleAccountPrimaryButton(card.id))
-                    }
-                }
-            }
-
-            Text(card.detail)
-                .font(.subheadline)
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Participating calendar")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-
-                Text("This calendar both receives mirrored busy holds from the others and acts as a source for them.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                if card.calendars.isEmpty {
-                    Text("No writable Google calendars are loaded yet for this account.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Picker(
-                        "Participating calendar",
-                        selection: Binding(
-                            get: { model.selectedGoogleCalendarID(for: card.id) },
-                            set: { model.setSelectedGoogleCalendarID($0, for: card.id) }
-                        )
-                    ) {
-                        ForEach(card.calendars) { calendar in
-                            Text(calendar.displayName).tag(calendar.id)
-                        }
-                    }
-                    .accessibilityIdentifier(AccessibilityIDs.googleCalendarPicker(card.id))
-                }
-            }
-
-            if let message = card.message {
-                Text(message)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier(AccessibilityIDs.googleCalendarMessageLabel(card.id))
-            }
-
-            if let lastManagedEvent = card.lastManagedEvent {
-                Text("\(lastManagedEvent.summary) • \(lastManagedEvent.windowDescription)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier(AccessibilityIDs.googleCalendarLastEventLabel(card.id))
-            }
-
-            HStack(spacing: 12) {
-                Button("Refresh Calendars") {
-                    Task {
-                        await model.refreshGoogleCalendars(for: card.id)
-                    }
-                }
-                .buttonStyle(.bordered)
-                .disabled(!card.canRefreshCalendars)
-                .accessibilityIdentifier(AccessibilityIDs.googleCalendarRefreshButton(card.id))
-
-                Button("Create Test Busy Slot") {
-                    Task {
-                        await model.createManagedBusyEvent(for: card.id)
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(!card.canCreateManagedBusyEvent)
-                .accessibilityIdentifier(AccessibilityIDs.googleCalendarCreateButton(card.id))
-
-                Button("Delete Test Busy Slot") {
-                    Task {
-                        await model.deleteManagedBusyEvent(for: card.id)
-                    }
-                }
-                .buttonStyle(.bordered)
-                .disabled(!card.canDeleteManagedBusyEvent)
-                .accessibilityIdentifier(AccessibilityIDs.googleCalendarDeleteButton(card.id))
-
-                Spacer()
-
-                Button("Remove Account") {
-                    model.removeGoogleAccount(card.id)
-                }
-                .buttonStyle(.bordered)
-                .disabled(model.isGoogleAuthInFlight)
-                .accessibilityIdentifier(AccessibilityIDs.googleAuthDisconnectButton(card.id))
-            }
-        }
-        .padding(14)
-        .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-
-    private func googleOverviewChip(title: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
+                })
                 .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.subheadline.weight(.semibold))
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-
-    private func googleBadge(_ title: String) -> some View {
-        Text(title)
-            .font(.caption.weight(.semibold))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Color.accentColor.opacity(0.12), in: Capsule())
-    }
-
-    private var auditTrailSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Audit Trail")
-                .font(.headline)
-
-            ForEach(model.auditTrailEntries) { entry in
-                HStack(alignment: .top, spacing: 12) {
-                    Text(entry.timestampLabel)
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .frame(width: 88, alignment: .leading)
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(entry.title)
-                            .font(.subheadline.weight(.semibold))
-                        Text(entry.detail)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Spacer()
-
-                    Text(entry.status.capitalized)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                }
-                .padding(12)
-                .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier(AccessibilityIDs.auditTrailList)
-    }
-
-    private var accountsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Connected Accounts")
-                .font(.headline)
-
-            if model.connectedAccountsForDisplay.isEmpty {
-                Text("No connected accounts are listed yet.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             } else {
-                ForEach(model.connectedAccountsForDisplay) { account in
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(alignment: .firstTextBaseline) {
-                            Text(account.displayName)
-                                .font(.subheadline.weight(.semibold))
-                                .accessibilityIdentifier(AccessibilityIDs.accountRow(account.id))
-
-                            Spacer()
-
-                            Text(account.providerLabel)
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(.secondary)
-                        }
-
-                        if let detail = account.detail {
-                            Text(detail)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        if account.selectedCalendars.isEmpty {
-                            Text("No calendar selected yet")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            ForEach(account.selectedCalendars) { calendar in
-                                HStack {
-                                    Text(calendar.name)
-                                    Spacer()
-                                    Text(calendar.role.badgeLabel)
-                                        .foregroundStyle(.secondary)
-                                }
-                                .font(.caption)
-                                .accessibilityIdentifier(AccessibilityIDs.calendarRow(calendar.id))
+                adaptiveTrailingRow(label: {
+                    HStack(spacing: 8) {
+                        Label("Calendar", systemImage: "calendar")
+                            .foregroundStyle(.secondary)
+                        Picker(
+                            "",
+                            selection: Binding(
+                                get: { model.selectedAppleCalendarID },
+                                set: { model.selectedAppleCalendarID = $0 }
+                            )
+                        ) {
+                            ForEach(model.appleCalendars) { calendar in
+                                Text(calendar.displayName).tag(calendar.id)
                             }
                         }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .accessibilityIdentifier(AccessibilityIDs.appleCalendarPicker)
                     }
-                    .padding(12)
-                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                }
+                }, trailing: {
+                    Button {
+                        Task {
+                            await model.refreshAppleCalendars()
+                        }
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!model.canRefreshAppleCalendars)
+                    .accessibilityIdentifier(AccessibilityIDs.appleCalendarRefreshButton)
+                })
+                .font(.caption)
             }
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier(AccessibilityIDs.accountsList)
     }
 
     private func previewSection(state: ScenarioState) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Mirror Preview")
-                .font(.headline)
-
-            ForEach(state.mirrorPreview) { entry in
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("\(entry.sourceCalendar) -> \(entry.targetCalendar)")
-                        .font(.subheadline.weight(.medium))
-                    Text(entry.availability.capitalized)
-                        .font(.caption)
+        settingsSection {
+            sectionHeader(
+                title: "Mirror Preview",
+                icon: {
+                    Image(systemName: "rectangle.3.group.bubble.left")
                         .foregroundStyle(.secondary)
-                        .accessibilityIdentifier(AccessibilityIDs.mirrorPreviewBusyLabel)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(12)
-                .background(Color.accentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier(AccessibilityIDs.mirrorPreviewRow(entry.id))
+            )
+
+            ForEach(Array(state.mirrorPreview.enumerated()), id: \.element.id) { index, entry in
+                if index > 0 {
+                    sectionDivider
+                }
+
+                sectionRow {
+                    HStack(spacing: 10) {
+                        Image(systemName: "arrow.left.arrow.right")
+                            .foregroundStyle(.secondary)
+                        Text("\(entry.sourceCalendar) -> \(entry.targetCalendar)")
+                        Spacer()
+                        Text(entry.availability.capitalized)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier(AccessibilityIDs.mirrorPreviewBusyLabel)
+                    }
+                    .font(.caption)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier(AccessibilityIDs.mirrorPreviewRow(entry.id))
+                }
             }
         }
-        .accessibilityElement(children: .contain)
         .accessibilityIdentifier(AccessibilityIDs.mirrorPreviewList)
     }
 
-    private func statusSection(state: ScenarioState) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Sync Status")
-                .font(.headline)
-            Text(model.syncLastRunLabel)
-                .accessibilityIdentifier(AccessibilityIDs.syncStatusLastRun)
-            Text(model.syncPendingCountLabel)
-                .accessibilityIdentifier(AccessibilityIDs.syncStatusPendingCount)
-            Text(model.syncFailureCountLabel)
-                .accessibilityIdentifier(AccessibilityIDs.syncStatusFailedCount)
-            Text(model.syncStatusDetail)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+    private var statusLine: some View {
+        HStack(spacing: 14) {
+            Label(model.currentActivitySummary, systemImage: model.currentActivityIconName)
+                .font(.caption.weight(.medium))
+                .lineLimit(1)
                 .accessibilityIdentifier(AccessibilityIDs.syncStatusDetail)
+
+            Spacer(minLength: 8)
+
+            Label(model.pendingActivityLabel, systemImage: "clock.badge.exclamationmark")
+                .font(.caption)
+                .accessibilityIdentifier(AccessibilityIDs.syncStatusPendingCount)
+
+            Label(
+                model.failureCountLabel,
+                systemImage: model.failureCount == 0 ? "checkmark.circle" : "exclamationmark.triangle.fill"
+            )
+            .font(.caption)
+            .foregroundColor(model.failureCount == 0 ? .secondary : .red)
+            .accessibilityIdentifier(AccessibilityIDs.syncStatusFailedCount)
+
+            Button {
+                openWindow(id: AppSceneIDs.auditTrail)
+            } label: {
+                Label("Logs", systemImage: "clock.arrow.circlepath")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .accessibilityIdentifier(AccessibilityIDs.auditTrailOpenButton)
+
+            Button {
+                Task {
+                    await model.syncNow()
+                }
+            } label: {
+                Label("Sync Now", systemImage: "arrow.clockwise")
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .disabled(!model.canSyncNow)
+            .accessibilityIdentifier(AccessibilityIDs.syncNowButton)
         }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 10)
+        .background(.thinMaterial)
+        .overlay(alignment: .top) {
+            Divider()
+        }
+    }
+
+    private func settingsSection<Content: View>(
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            content()
+        }
+        .padding(16)
+        .background(sectionBackgroundColor, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(sectionStrokeColor, lineWidth: 1)
+        }
+    }
+
+    private func sectionHeader<Icon: View, Actions: View>(
+        title: String,
+        @ViewBuilder icon: () -> Icon,
+        @ViewBuilder actions: () -> Actions = { EmptyView() }
+    ) -> some View {
+        HStack(spacing: 10) {
+            icon()
+            Text(title)
+                .font(.headline)
+            Spacer()
+            actions()
+        }
+        .padding(.bottom, 8)
+    }
+
+    private var sectionDivider: some View {
+        Divider()
+    }
+
+    private func sectionRow<Content: View>(
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        content()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 10)
+    }
+
+    private func adaptiveTrailingRow<LabelContent: View, TrailingContent: View>(
+        @ViewBuilder label: () -> LabelContent,
+        @ViewBuilder trailing: () -> TrailingContent
+    ) -> some View {
+        ViewThatFits {
+            HStack(spacing: 12) {
+                label()
+                Spacer(minLength: 10)
+                trailing()
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                label()
+                trailing()
+            }
+        }
+    }
+
+    private func accountIdentityRow(
+        title: String,
+        subtitle: String
+    ) -> some View {
+        HStack(spacing: 8) {
+            Text(title)
+                .fontWeight(.medium)
+            Text(subtitle)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+    }
+
+    private func infoMessageRow(
+        _ message: String,
+        timestamp: String?,
+        tint: Color = .secondary,
+        accessibilityID: String
+    ) -> some View {
+        sectionRow {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "info.circle")
+                    .foregroundStyle(tint)
+                Text(message)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                if let timestamp {
+                    Text(timestamp)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+            }
+            .font(.caption)
+            .padding(.leading, 22)
+            .accessibilityIdentifier(accessibilityID)
+        }
+    }
+
+    private func providerBadge(assetName: String, size: CGFloat = 18) -> some View {
+        RoundedRectangle(cornerRadius: size * 0.38, style: .continuous)
+            .fill(Color.white)
+            .frame(width: size + 14, height: size + 14)
+            .overlay {
+                Image(assetName)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .padding(5)
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: size * 0.38, style: .continuous)
+                    .strokeBorder(Color.black.opacity(0.08), lineWidth: 1)
+            }
+            .shadow(color: Color.black.opacity(0.06), radius: 1, y: 1)
+    }
+
+    private var sectionBackgroundColor: Color {
+        #if os(macOS)
+        Color(nsColor: .controlBackgroundColor)
+        #else
+        Color(uiColor: .secondarySystemGroupedBackground)
+        #endif
+    }
+
+    private var sectionStrokeColor: Color {
+        #if os(macOS)
+        Color(nsColor: .separatorColor).opacity(0.35)
+        #else
+        Color(uiColor: .separator).opacity(0.35)
+        #endif
     }
 }

@@ -36,6 +36,7 @@ The app is responsible for:
 - writing `perf.json`
 - writing `window.png`
 - honoring `--ui-test-mode 1` so harness launches avoid live-provider side effects such as interactive Google auth or Apple calendar permission prompts
+- on macOS, keeping the Settings window visible during `--ui-test-mode 1` even though normal utility launches suppress that initial window in favor of the menu bar item
 - honoring `--harness-command-dir <path>` for file-based smoke commands once write reconciliation exists
 
 The scripts are responsible for:
@@ -49,7 +50,7 @@ The scripts are responsible for:
 
 ## Current scope
 
-This harness currently covers local bootstrap, build, unit-test, integration-test, checkpoint capture, Google client-plist sync for the default auth configuration, the live Apple / iCloud EventKit settings slice, and a macOS live Google smoke runner that drives the app through accessibility identifiers.
+This harness currently covers local bootstrap, build, unit-test, integration-test, checkpoint capture, Google client-plist sync for the default auth configuration, the live Apple / iCloud EventKit settings slice, the macOS menu bar utility shell, and a macOS live Google smoke runner that drives the app through accessibility identifiers.
 
 The live macOS smoke runner builds a signed macOS debug app, clears the app-owned Google roster, sets `CALENDAR_BUSY_SYNC_E2E_ACCOUNT_EMAIL` plus `CALENDAR_BUSY_SYNC_E2E_CALENDAR_NAME` from `.env`, and uses `AXPress` accessibility actions to drive the real Google auth handoff before the managed event create/delete round-trip.
 

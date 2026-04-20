@@ -21,11 +21,13 @@ Supported debug launch arguments:
 
 Stable identifiers should include:
 
-- `accounts.list`
 - `audit-trail.list`
-- `accounts.add`
-- `accounts.disconnect.<id>`
-- `apple-calendar.connection-status`
+- `audit-trail.open`
+- `menu-bar.open-settings`
+- `menu-bar.open-logs`
+- `menu-bar.launch-at-login`
+- `menu-bar.sync-now`
+- `menu-bar.quit`
 - `apple-calendar.status`
 - `apple-calendar.message`
 - `apple-calendar.connect`
@@ -33,11 +35,6 @@ Stable identifiers should include:
 - `apple-calendar.open-settings`
 - `apple-calendar.refresh`
 - `apple-calendar.picker`
-- `apple-calendar.create`
-- `apple-calendar.delete`
-- `apple-calendar.last-event`
-- `google-auth.status`
-- `google-auth.connected-account`
 - `google-auth.message`
 - `google-auth.resolution-warning`
 - `google-auth.connect`
@@ -48,26 +45,17 @@ Stable identifiers should include:
 - `google-calendar.message.<id>`
 - `google-calendar.refresh.<id>`
 - `google-calendar.picker.<id>`
-- `google-calendar.create.<id>`
-- `google-calendar.delete.<id>`
-- `google-calendar.last-event.<id>`
 - `google-calendar.live-smoke-status`
-- `calendar-picker.account.<id>`
-- `calendar-picker.calendar.<id>`
-- `calendar-picker.include-toggle.<id>`
 - `settings.sync.poll-interval`
 - `settings.advanced.google-oauth.use-custom`
 - `settings.advanced.google-oauth.client-id`
 - `settings.advanced.google-oauth.server-client-id`
-- `sync-status.last-run`
 - `sync-status.pending-count`
 - `sync-status.failed-count`
 - `sync-status.detail`
 - `sync-status.sync-now`
 - `mirror-preview.list`
 - `mirror-preview.row.<id>`
-- `mirror-preview.source-calendar`
-- `mirror-preview.target-calendar`
 - `mirror-preview.busy-label`
 
 ## State snapshot
@@ -114,7 +102,10 @@ Planned stable harness commands include:
 - the Google Sign-In callback URL is handled through the app lifecycle, but harness smoke launches stay scenario-backed and do not initiate interactive auth
 - unsigned harness launches must block interactive macOS Google sign-in with explicit signed-build guidance, because the OAuth session relies on keychain persistence
 - Apple / iCloud calendar access uses EventKit permission on the current device; harness `--ui-test-mode 1` launches must stay side-effect free and should not trigger permission prompts automatically
-- the live macOS Google smoke path reads `CALENDAR_BUSY_SYNC_LIVE_E2E=1`, `CALENDAR_BUSY_SYNC_E2E_ACCOUNT_EMAIL=<email>`, and `CALENDAR_BUSY_SYNC_E2E_CALENDAR_NAME=<name>` from the launch environment so the app can constrain Google auth to the expected Workspace domain, auto-select the intended writable calendar, and run the managed event create/delete verification
+- normal macOS utility launches suppress the initial Settings window and rely on the menu bar item; harness `--ui-test-mode 1` is the explicit exception that keeps the Settings window visible for smoke automation
+- the live macOS Google smoke path reads `CALENDAR_BUSY_SYNC_LIVE_E2E=1`, `CALENDAR_BUSY_SYNC_E2E_ACCOUNT_EMAIL=<email>`, and `CALENDAR_BUSY_SYNC_E2E_CALENDAR_NAME=<name>` from the launch environment so the app can constrain Google auth to the expected Workspace domain, auto-select the intended writable calendar, and run the internal managed event verification loop
 - multi-account Google UI is roster-based: harness and UI automation should treat Google controls as account-scoped using the `<id>` suffix rather than assuming a single global picker or disconnect button
 - changing a selected participant calendar can trigger immediate cleanup and reconciliation, so harness-driven assertions should allow the sync status text to change without waiting for the macOS poll timer
 - `scripts/lib/ax-query.swift` must support both value reads and `AXPress` actions so the live macOS Google smoke runner does not rely on brittle screen-coordinate clicks
+- provider info rows now render as indented timestamped footnotes, so automation should anchor on the stable control IDs instead of matching those human-readable timestamps
+- the macOS menu bar icon should shift to its “window open” state whenever the Settings window is visible, even though harness smoke continues to assert only the window-level controls

@@ -45,15 +45,26 @@ final class AppModel: ObservableObject {
     )
     @Published private(set) var appleCalendarAuthorizationState: AppleCalendarAuthorizationState
     @Published private(set) var isAppleCalendarEnabled: Bool
-    @Published private(set) var appleCalendarMessage: String?
+    @Published private(set) var appleCalendarMessage: String? {
+        didSet {
+            appleCalendarMessageUpdatedAt = appleCalendarMessage == nil ? nil : Date()
+        }
+    }
+    @Published private(set) var appleCalendarMessageUpdatedAt: Date?
     @Published private(set) var appleCalendars: [AppleCalendarSummary] = []
     @Published private(set) var lastManagedAppleEvent: AppleManagedEventRecord?
     @Published private(set) var isAppleCalendarOperationInFlight = false
     @Published private(set) var googleStoredAccounts: [StoredGoogleAccount] = []
-    @Published private(set) var googleAuthMessage: String?
+    @Published private(set) var googleAuthMessage: String? {
+        didSet {
+            googleAuthMessageUpdatedAt = googleAuthMessage == nil ? nil : Date()
+        }
+    }
+    @Published private(set) var googleAuthMessageUpdatedAt: Date?
     @Published private(set) var isGoogleAuthInFlight = false
     @Published private(set) var googleCalendarsByAccountID: [String: [GoogleCalendarSummary]] = [:]
     @Published private(set) var googleMessagesByAccountID: [String: String] = [:]
+    @Published private(set) var googleMessageUpdatedAtByAccountID: [String: Date] = [:]
     @Published private(set) var lastManagedGoogleEventsByAccountID: [String: GoogleManagedEventRecord] = [:]
     @Published private(set) var googleOperationAccountIDs: Set<String> = []
     @Published private(set) var activeGoogleAccountID: String?
@@ -232,6 +243,110 @@ final class AppModel: ObservableObject {
         return "Last run created \(lastBusyMirrorSyncSummary.createdCount), updated \(lastBusyMirrorSyncSummary.updatedCount), deleted \(lastBusyMirrorSyncSummary.deletedCount), failed \(lastBusyMirrorSyncSummary.failedCount)."
     }
 
+    var selectedCalendarSummary: String {
+        let count = selectedParticipantCount
+        switch count {
+        case 0:
+            return "No calendars selected"
+        case 1:
+            return "1 calendar selected"
+        default:
+            return "\(count) calendars selected"
+        }
+    }
+
+    var setupSummary: String {
+        let count = pendingActivityCount
+        return count == 0 ? "All required setup is complete." : "\(count) setup item(s) still need attention."
+    }
+
+    var currentActivitySummary: String {
+        if isSyncInFlight {
+            return "Syncing selected calendars"
+        }
+
+        if isGoogleAuthInFlight {
+            return googleStoredAccounts.isEmpty ? "Connecting Google account" : "Adding Google account"
+        }
+
+        if !googleOperationAccountIDs.isEmpty {
+            let count = googleOperationAccountIDs.count
+            return count == 1 ? "Updating 1 Google account" : "Updating \(count) Google accounts"
+        }
+
+        if isAppleCalendarOperationInFlight {
+            return "Updating Apple calendars"
+        }
+
+        switch liveGoogleSmokeStatus {
+        case .awaitingAuthentication:
+            return "Waiting for Google sign-in"
+        case let .running(message), let .passed(message), let .failed(message):
+            return message
+        case .idle:
+            break
+        }
+
+        if let syncMessage {
+            return syncMessage
+        }
+
+        if selectedParticipantCount == 0 {
+            return "Choose calendars to sync"
+        }
+
+        if selectedParticipantCount == 1 {
+            return "Add one more calendar to start mirroring"
+        }
+
+        if let lastBusyMirrorSyncSummary, lastBusyMirrorSyncSummary.failedCount > 0 {
+            return "Last sync completed with failures"
+        }
+
+        return "Busy mirroring is up to date"
+    }
+
+    var currentActivityIconName: String {
+        if isSyncInFlight {
+            return "arrow.triangle.2.circlepath.circle.fill"
+        }
+
+        if isGoogleAuthInFlight {
+            return "person.crop.circle.badge.plus"
+        }
+
+        if !googleOperationAccountIDs.isEmpty {
+            return "arrow.clockwise.circle"
+        }
+
+        if isAppleCalendarOperationInFlight {
+            return "calendar.badge.clock"
+        }
+
+        switch liveGoogleSmokeStatus {
+        case .awaitingAuthentication:
+            return "person.crop.circle.badge.exclamationmark"
+        case .running:
+            return "arrow.triangle.2.circlepath.circle"
+        case .passed:
+            return "checkmark.circle.fill"
+        case .failed:
+            return "exclamationmark.triangle.fill"
+        case .idle:
+            break
+        }
+
+        if let lastBusyMirrorSyncSummary, lastBusyMirrorSyncSummary.failedCount > 0 {
+            return "exclamationmark.triangle.fill"
+        }
+
+        if selectedParticipantCount < 2 {
+            return "calendar.badge.exclamationmark"
+        }
+
+        return "checkmark.circle.fill"
+    }
+
     var syncLastRunLabel: String {
         guard let lastBusyMirrorSyncSummary else {
             return "Never"
@@ -246,6 +361,46 @@ final class AppModel: ObservableObject {
 
     var syncFailureCountLabel: String {
         "Failed writes: \(lastBusyMirrorSyncSummary?.failedCount ?? 0)"
+    }
+
+    var pendingActivityCount: Int {
+        var count = 0
+
+        if googleStoredAccounts.isEmpty {
+            count += 1
+        } else {
+            count += googleNeedsAttentionCount
+        }
+
+        if usesCustomGoogleOAuthApp, googleOAuthResolutionMessage != nil {
+            count += 1
+        }
+
+        if isAppleCalendarEnabled {
+            if appleCalendarAuthorizationState != .granted || selectedAppleCalendar == nil {
+                count += 1
+            }
+        }
+
+        if selectedParticipantCount < 2 {
+            count += 1
+        }
+
+        return count
+    }
+
+    var pendingActivityLabel: String {
+        let count = pendingActivityCount
+        return count == 1 ? "1 pending item" : "\(count) pending items"
+    }
+
+    var failureCount: Int {
+        lastBusyMirrorSyncSummary?.failedCount ?? 0
+    }
+
+    var failureCountLabel: String {
+        let count = failureCount
+        return count == 1 ? "1 failure" : "\(count) failures"
     }
 
     var canSyncNow: Bool {
@@ -272,6 +427,14 @@ final class AppModel: ObservableObject {
 
     var appleConnectButtonTitle: String {
         isAppleCalendarEnabled ? "Reconnect Apple Calendar" : "Connect Apple Calendar"
+    }
+
+    var googleAuthMessageTimestampLabel: String? {
+        Self.messageTimestampLabel(for: googleAuthMessageUpdatedAt)
+    }
+
+    var appleCalendarMessageTimestampLabel: String? {
+        Self.messageTimestampLabel(for: appleCalendarMessageUpdatedAt)
     }
 
     var canOpenAppleCalendarSettings: Bool {
@@ -400,21 +563,19 @@ final class AppModel: ObservableObject {
     }
 
     var googleAccountCards: [GoogleAccountCardModel] {
-        let activeAccountID = activeResolvedGoogleAccountID
-
-        return googleStoredAccounts.sorted { lhs, rhs in
-            if lhs.id == activeAccountID { return true }
-            if rhs.id == activeAccountID { return false }
-            return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
+        googleStoredAccounts.sorted {
+            $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
         }.map { storedAccount in
             GoogleAccountCardModel(
                 account: storedAccount.connectedAccount,
                 calendars: googleCalendarsByAccountID[storedAccount.id] ?? [],
                 selectedCalendarID: googleSelectedCalendarIDs[storedAccount.id] ?? "",
                 message: googleMessagesByAccountID[storedAccount.id],
+                messageTimestampLabel: Self.messageTimestampLabel(
+                    for: googleMessageUpdatedAtByAccountID[storedAccount.id]
+                ),
                 lastManagedEvent: lastManagedGoogleEventsByAccountID[storedAccount.id],
-                isOperationInFlight: googleOperationAccountIDs.contains(storedAccount.id),
-                isActive: storedAccount.id == activeAccountID
+                isOperationInFlight: googleOperationAccountIDs.contains(storedAccount.id)
             )
         }
     }
@@ -468,7 +629,10 @@ final class AppModel: ObservableObject {
     }
 
     var canStartGoogleSignIn: Bool {
-        !isGoogleAuthInFlight && googleOAuthResolutionMessage == nil && googleSignInEnvironment.allowsInteractiveSignIn
+        !isGoogleAuthInFlight
+            && googleSignInEnvironment.allowsInteractiveSignIn
+            && defaultGoogleOAuthConfiguration != nil
+            && (!usesCustomGoogleOAuthApp || googleOAuthResolutionMessage == nil)
     }
 
     var googleConnectButtonTitle: String {
@@ -1335,6 +1499,7 @@ final class AppModel: ObservableObject {
         googleSelectedCalendarIDs = [:]
         lastManagedGoogleEventsByAccountID = [:]
         googleMessagesByAccountID = [:]
+        googleMessageUpdatedAtByAccountID = [:]
         googleOperationAccountIDs = []
         activeGoogleAccountID = nil
         hasAttemptedLiveGoogleSmoke = false
@@ -1368,6 +1533,11 @@ final class AppModel: ObservableObject {
 
     private func setGoogleMessage(_ message: String?, for accountID: String) {
         googleMessagesByAccountID[accountID] = message
+        googleMessageUpdatedAtByAccountID[accountID] = message == nil ? nil : Date()
+    }
+
+    func googleMessageTimestampLabel(for accountID: String) -> String? {
+        Self.messageTimestampLabel(for: googleMessageUpdatedAtByAccountID[accountID])
     }
 
     func selectedGoogleCalendarID(for accountID: String) -> String {
@@ -1390,12 +1560,6 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func setActiveGoogleAccount(_ accountID: String) {
-        guard googleStoredAccounts.contains(where: { $0.id == accountID }) else { return }
-        activeGoogleAccountID = accountID
-        persistSettings()
-    }
-
     private func updateGoogleStoredAccounts(_ accounts: [StoredGoogleAccount]) {
         googleStoredAccounts = accounts
 
@@ -1403,6 +1567,7 @@ final class AppModel: ObservableObject {
         googleCalendarsByAccountID = googleCalendarsByAccountID.filter { accountIDs.contains($0.key) }
         googleSelectedCalendarIDs = googleSelectedCalendarIDs.filter { accountIDs.contains($0.key) }
         googleMessagesByAccountID = googleMessagesByAccountID.filter { accountIDs.contains($0.key) }
+        googleMessageUpdatedAtByAccountID = googleMessageUpdatedAtByAccountID.filter { accountIDs.contains($0.key) }
         lastManagedGoogleEventsByAccountID = lastManagedGoogleEventsByAccountID.filter { accountIDs.contains($0.key) }
         googleOperationAccountIDs = googleOperationAccountIDs.filter { accountIDs.contains($0) }
         if let activeGoogleAccountID, !accountIDs.contains(activeGoogleAccountID) {
@@ -1884,6 +2049,38 @@ final class AppModel: ObservableObject {
         formatter.dateFormat = "MMM d, HH:mm:ss"
         return formatter
     }()
+
+    private static let olderMessageTimestampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .none
+        return formatter
+    }()
+
+    private static func messageTimestampLabel(for date: Date?, now: Date = Date()) -> String? {
+        guard let date else {
+            return nil
+        }
+
+        let calendar = Calendar.current
+        let age = now.timeIntervalSince(date)
+
+        if age < 60 {
+            return "less than a minute ago"
+        }
+
+        if calendar.isDate(date, inSameDayAs: now) {
+            let formatter = RelativeDateTimeFormatter()
+            formatter.unitsStyle = .full
+            return formatter.localizedString(for: date, relativeTo: now)
+        }
+
+        if calendar.isDateInYesterday(date) {
+            return "Yesterday"
+        }
+
+        return olderMessageTimestampFormatter.string(from: date)
+    }
 }
 
 private struct SyncParticipantsBundle {

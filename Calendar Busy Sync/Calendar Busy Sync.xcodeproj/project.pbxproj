@@ -25,6 +25,7 @@
 
 /* Begin PBXBuildFile section */
 		CB0000000000000000000411 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = CB0000000000000000001002 /* GoogleSignIn */; };
+		CB0000000000000000000412 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = CB0000000000000000001002 /* GoogleSignIn */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -64,6 +65,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CB0000000000000000000412 /* GoogleSignIn in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -141,6 +143,7 @@
 			);
 			name = "Calendar Busy SyncTests";
 			packageProductDependencies = (
+				CB0000000000000000001002 /* GoogleSignIn */,
 			);
 			productName = "Calendar Busy SyncTests";
 			productReference = CB0000000000000000000202 /* Calendar Busy SyncTests.xctest */;
@@ -478,14 +481,14 @@
 			};
 			name = Release;
 		};
-		CB0000000000000000000905 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
-				GENERATE_INFOPLIST_FILE = YES;
+			CB0000000000000000000905 /* Debug */ = {
+				isa = XCBuildConfiguration;
+				buildSettings = {
+					BUNDLE_LOADER = "$(TEST_HOST)";
+					CODE_SIGN_STYLE = Automatic;
+					CURRENT_PROJECT_VERSION = 1;
+					DEVELOPMENT_TEAM = "";
+					GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				MARKETING_VERSION = 0.1;
@@ -494,23 +497,23 @@
 				SDKROOT = auto;
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Calendar Busy Sync.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Calendar Busy Sync";
+					SWIFT_APPROACHABLE_CONCURRENCY = YES;
+					SWIFT_EMIT_LOC_STRINGS = NO;
+					SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+					SWIFT_VERSION = 5.0;
+					TARGETED_DEVICE_FAMILY = "1,2";
+					TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Calendar Busy Sync.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Calendar Busy Sync";
+				};
+				name = Debug;
 			};
-			name = Debug;
-		};
-		CB0000000000000000000906 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
-				GENERATE_INFOPLIST_FILE = YES;
+			CB0000000000000000000906 /* Release */ = {
+				isa = XCBuildConfiguration;
+				buildSettings = {
+					BUNDLE_LOADER = "$(TEST_HOST)";
+					CODE_SIGN_STYLE = Automatic;
+					CURRENT_PROJECT_VERSION = 1;
+					DEVELOPMENT_TEAM = "";
+					GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				MARKETING_VERSION = 0.1;
@@ -519,15 +522,15 @@
 				SDKROOT = auto;
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Calendar Busy Sync.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Calendar Busy Sync";
+					SWIFT_APPROACHABLE_CONCURRENCY = YES;
+					SWIFT_EMIT_LOC_STRINGS = NO;
+					SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+					SWIFT_VERSION = 5.0;
+					TARGETED_DEVICE_FAMILY = "1,2";
+					TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Calendar Busy Sync.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Calendar Busy Sync";
+				};
+				name = Release;
 			};
-			name = Release;
-		};
 		CB0000000000000000000907 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {

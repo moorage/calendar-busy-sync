@@ -165,7 +165,7 @@ final class AppleCalendarService: AppleCalendarProviding {
             guard !ManagedAppleMirrorNotes.isManagedMirror(event.notes) else {
                 return nil
             }
-            guard event.blocksTime else {
+            guard event.isEligibleSourceEvent else {
                 return nil
             }
 
@@ -453,6 +453,15 @@ private extension EKEvent {
         default:
             return true
         }
+    }
+
+    var isEligibleSourceEvent: Bool {
+        AppleMirrorEligibility.shouldMirror(
+            blocksTime: blocksTime,
+            organizerIsCurrentUser: organizer?.isCurrentUser == true,
+            hasAttendees: hasAttendees,
+            currentUserParticipantStatus: attendees?.first(where: \.isCurrentUser)?.participantStatus
+        )
     }
 }
 

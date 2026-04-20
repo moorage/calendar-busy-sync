@@ -7,7 +7,7 @@ Implement the first real sync engine for Calendar Busy Sync so the app does what
 This workstream changes the sync rule to the actual desired behavior:
 
 - every selected calendar is both a source and a destination
-- any event that is not `free` / `available` on one selected calendar must produce opaque busy holds on every other selected calendar
+- any accepted busy commitment on one selected calendar must produce opaque busy holds on every other selected calendar
 - if the source event moves, mirrored busy holds must move with it
 - if the source event is deleted, cancelled, or no longer blocks time, mirrored busy holds must be deleted
 
@@ -26,23 +26,31 @@ This plan is promoted from `docs/ideas/backlog/busy-slot-mirroring-core.md` beca
 - [x] 2026-04-20T01:41Z add provider-neutral sync models plus provider adapter extensions for listing source events and reconciling managed mirror events
 - [x] 2026-04-20T02:03Z implement app-level participant gathering, desired-write planning, mirror reconciliation, and macOS timer-driven sync
 - [x] 2026-04-20T02:12Z update the settings shell, audit/status surfaces, selection-change cleanup, tests, and docs, then run validation
+- [x] 2026-04-20T07:50Z clamp mirror writes to present-and-future time only while keeping the bounded reconciliation lookback needed for stale-mirror cleanup and in-progress source events
+- [x] 2026-04-20T08:10Z tighten source eligibility so invited events mirror only after the current user RSVP is accepted, while self-owned and no-attendee busy events continue to mirror
 
 ## Surprises & Discoveries
 
 - 2026-04-20: the current live app already has enough provider surface to select one writable calendar per Google account plus one Apple / iCloud calendar, so the first sync engine can treat those selected calendars as the initial participant set without adding another calendar-selection workflow first.
 - 2026-04-20: the simplest durable reconciliation approach is to store mirror metadata on the mirrored events themselves and rescan a bounded sync window, which avoids inventing a fragile local-only mirror mapping store.
 - 2026-04-20: deselecting a participant calendar requires explicit cleanup of app-managed mirror events in the old destination calendar; otherwise those stale holds fall out of the selected participant set before the normal reconciliation pass can delete them.
+- 2026-04-20: "future-only" mirroring still needs a bounded lookback in the reconciliation scan; otherwise in-progress events that started before now and stale old mirror events would be missed.
+- 2026-04-20: "busy" alone is not enough for invited events; the sync rule has to combine availability with attendee response so tentative, declined, and pending invites do not leak soft holds into other calendars.
 
 ## Decision Log
 
 - 2026-04-20: every selected calendar is both source and destination; there is no separate per-calendar source toggle in the first sync engine.
 - 2026-04-20: the first reconciliation engine will embed source identifiers in provider-owned mirror metadata and derive desired state from current source events on each sync run.
 - 2026-04-20: the first rollout will use a bounded sync window for reconciliation rather than an unbounded historical sync; the exact horizon will be documented in code and product docs.
+- 2026-04-20: the reconciliation scan may look back briefly, but desired mirror writes themselves must start no earlier than `now`; past occupancy should never be written into another calendar.
+- 2026-04-20: invited events only qualify as source events when the current user RSVP is accepted; tentative, declined, and no-response invites are excluded even if the provider marks them busy.
 - 2026-04-20: verification create/delete buttons remain because they still prove provider write access independently of the automatic mirroring loop.
 
 ## Outcomes & Retrospective
 
 - the app now automatically mirrors busy occupancy across all selected calendars in a bounded reconciliation window
+- the app now writes mirrored busy occupancy only for present-and-future time, clipping ongoing source events at `now`
+- the app now excludes tentative, declined, and no-response invites from source scanning while still mirroring self-owned busy events and busy events with no attendees
 - moving or deleting a source event causes mirrored holds to update or disappear on the next sync pass
 - the settings shell now shows sync health and last-run state instead of only static configuration
 - changing or disconnecting a participant calendar performs best-effort cleanup of stale app-managed mirror events in the deselected calendar before reconciling the new participant set
@@ -154,6 +162,7 @@ Acceptance means:
 - the selected Google and Apple calendars are treated as one participant set
 - a busy source event on any participant calendar produces mirrored busy holds on every other participant calendar
 - free or available events never produce mirror writes
+- invited events with RSVP `Maybe`, `No`, or no response never produce mirror writes
 - managed mirror events are excluded from source scanning so the app does not recurse on its own writes
 - if a source event time window changes, the corresponding mirrored busy holds update on the next sync pass
 - if a source event is deleted, cancelled, or becomes free, the mirrored busy holds delete on the next sync pass

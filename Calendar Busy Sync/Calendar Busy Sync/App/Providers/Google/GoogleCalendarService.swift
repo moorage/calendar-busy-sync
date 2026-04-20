@@ -122,7 +122,7 @@ struct GoogleCalendarService {
             guard !item.isManagedBusyMirror else {
                 return nil
             }
-            guard item.blocksTime else {
+            guard item.isEligibleSourceEvent else {
                 return nil
             }
 
@@ -476,10 +476,20 @@ private struct GoogleCalendarEventItem: Decodable {
     let transparency: String?
     let start: GoogleEventDatePayload
     let end: GoogleEventDatePayload
+    let attendees: [GoogleEventAttendeePayload]?
+    let organizer: GoogleEventActorPayload?
     let extendedProperties: EventExtendedPropertiesPayload?
 
     var blocksTime: Bool {
         transparency?.lowercased() != "transparent"
+    }
+
+    var isEligibleSourceEvent: Bool {
+        GoogleMirrorEligibility.shouldMirror(
+            blocksTime: blocksTime,
+            organizerIsCurrentUser: organizer?.isCurrentUser == true,
+            attendees: attendees?.map(\.mirrorAttendee)
+        )
     }
 
     var isManagedBusyMirror: Bool {
@@ -501,6 +511,31 @@ private struct GoogleCalendarEventItem: Decodable {
             isAllDay: start.date != nil
         )
     }
+}
+
+private struct GoogleEventAttendeePayload: Decodable {
+    enum CodingKeys: String, CodingKey {
+        case isCurrentUser = "self"
+        case responseStatus
+    }
+
+    let isCurrentUser: Bool?
+    let responseStatus: String?
+
+    var mirrorAttendee: GoogleMirrorAttendee {
+        GoogleMirrorAttendee(
+            isCurrentUser: isCurrentUser ?? false,
+            responseStatus: responseStatus
+        )
+    }
+}
+
+private struct GoogleEventActorPayload: Decodable {
+    enum CodingKeys: String, CodingKey {
+        case isCurrentUser = "self"
+    }
+
+    let isCurrentUser: Bool?
 }
 
 private struct GoogleEventDatePayload: Decodable {

@@ -3,12 +3,20 @@ import Foundation
 enum BusyMirrorSyncPlanner {
     static func desiredMirrors(
         participants: [BusyMirrorParticipant],
-        sourceEvents: [BusyMirrorSourceEvent]
+        sourceEvents: [BusyMirrorSourceEvent],
+        now: Date = Date()
     ) -> [DesiredBusyMirrorEvent] {
         let participantsByID = Dictionary(uniqueKeysWithValues: participants.map { ($0.id, $0) })
+        var desiredMirrors: [DesiredBusyMirrorEvent] = []
 
-        return sourceEvents.flatMap { sourceEvent in
-            participants.compactMap { targetParticipant in
+        for sourceEvent in sourceEvents {
+            guard sourceEvent.endDate > now else {
+                continue
+            }
+
+            let effectiveStartDate = max(sourceEvent.startDate, now)
+
+            let sourceEventMirrors: [DesiredBusyMirrorEvent] = participants.compactMap { targetParticipant -> DesiredBusyMirrorEvent? in
                 guard targetParticipant.id != sourceEvent.participantID else {
                     return nil
                 }
@@ -25,12 +33,16 @@ enum BusyMirrorSyncPlanner {
                         targetParticipantID: targetParticipant.id
                     ),
                     targetParticipant: targetParticipant,
-                    startDate: sourceEvent.startDate,
+                    startDate: effectiveStartDate,
                     endDate: sourceEvent.endDate,
                     isAllDay: sourceEvent.isAllDay
                 )
             }
-        }.sorted { lhs, rhs in
+
+            desiredMirrors.append(contentsOf: sourceEventMirrors)
+        }
+
+        return desiredMirrors.sorted { lhs, rhs in
             if lhs.targetParticipant.displayName != rhs.targetParticipant.displayName {
                 return lhs.targetParticipant.displayName.localizedCaseInsensitiveCompare(rhs.targetParticipant.displayName) == .orderedAscending
             }

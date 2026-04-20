@@ -5,9 +5,9 @@ struct GoogleAccountCardModel: Identifiable, Equatable {
     let calendars: [GoogleCalendarSummary]
     let selectedCalendarID: String
     let message: String?
+    let messageTimestampLabel: String?
     let lastManagedEvent: GoogleManagedEventRecord?
     let isOperationInFlight: Bool
-    let isActive: Bool
 
     var id: String {
         account.id

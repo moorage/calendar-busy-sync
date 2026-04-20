@@ -1,6 +1,11 @@
 import XCTest
 @testable import Calendar_Busy_Sync
 
+#if os(macOS)
+import EventKit
+import ServiceManagement
+#endif
+
 final class Calendar_Busy_SyncTests: XCTestCase {
     func testPlatformDefaultsUseMacUnlimitedAuditTrailAndTwoMinutePolling() {
         XCTAssertEqual(AppSettingsDefaults.pollIntervalMinutes, 2)
@@ -246,6 +251,135 @@ final class Calendar_Busy_SyncTests: XCTestCase {
         XCTAssertEqual(configuration.serverClientID, "server-client.apps.googleusercontent.com")
     }
 
+    @MainActor
+    func testMacUtilityShellModelUsesFilledMenuBarIconWhenSettingsWindowIsOpen() {
+        let shellModel = MacUtilityShellModel(
+            launchAtLoginService: MockLaunchAtLoginService(status: .notRegistered)
+        )
+        retainForHostedXCTest(shellModel)
+
+        XCTAssertEqual(shellModel.menuBarIconName, "calendar.circle")
+
+        shellModel.setWindowOpen(true, for: AppSceneIDs.settings)
+
+        XCTAssertEqual(shellModel.menuBarIconName, "calendar.circle.fill")
+        XCTAssertEqual(shellModel.settingsMenuTitle, "Bring Settings Forward")
+    }
+
+    @MainActor
+    func testMacUtilityShellModelUpdatesLaunchAtLoginStateFromService() {
+        let service = MockLaunchAtLoginService(status: .notRegistered)
+        let shellModel = MacUtilityShellModel(launchAtLoginService: service)
+        retainForHostedXCTest(shellModel)
+
+        XCTAssertFalse(shellModel.launchAtLoginEnabled)
+
+        shellModel.setLaunchAtLoginEnabled(true)
+
+        XCTAssertTrue(shellModel.launchAtLoginEnabled)
+        XCTAssertNil(shellModel.launchAtLoginStatusMessage)
+    }
+
+    @MainActor
+    func testMacUtilityShellModelOnlySuppressesInitialWindowOnceOutsideUITests() {
+        let shellModel = MacUtilityShellModel(
+            launchAtLoginService: MockLaunchAtLoginService(status: .notRegistered)
+        )
+        retainForHostedXCTest(shellModel)
+
+        XCTAssertTrue(shellModel.shouldSuppressInitialSettingsWindow(uiTestMode: false))
+        XCTAssertFalse(shellModel.shouldSuppressInitialSettingsWindow(uiTestMode: false))
+        XCTAssertFalse(shellModel.shouldSuppressInitialSettingsWindow(uiTestMode: true))
+    }
+
+    @MainActor
+    func testStatusLineShowsPendingSetupWhenNoCalendarsAreReady() async {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+
+        let model = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: false,
+                platformTarget: .macos,
+                deviceClass: .mac
+            ),
+            userDefaults: defaults,
+            googleAccountStore: MockGoogleAccountStore(),
+            liveGoogleDebugConfiguration: LiveGoogleDebugConfiguration(
+                isEnabled: false,
+                preferredAccountEmail: nil,
+                preferredCalendarName: nil
+            )
+        )
+
+        await model.prepareIfNeeded()
+
+        XCTAssertEqual(model.selectedCalendarSummary, "No calendars selected")
+        XCTAssertEqual(model.pendingActivityLabel, "2 pending items")
+        XCTAssertEqual(model.currentActivitySummary, "Choose calendars to sync")
+        XCTAssertEqual(model.failureCountLabel, "0 failures")
+    }
+
+    @MainActor
+    func testStatusLineShowsPendingSetupWhenStoredGoogleAccountsNeedCalendarRefresh() async {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        defaults.set(["alpha": "alpha-calendar", "beta": "beta-calendar"], forKey: "settings.googleCalendar.selectedCalendarIDs")
+
+        let model = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: false,
+                platformTarget: .macos,
+                deviceClass: .mac
+            ),
+            userDefaults: defaults,
+            googleAccountStore: MockGoogleAccountStore(accounts: [
+                StoredGoogleAccount(
+                    id: "alpha",
+                    email: "alpha@example.com",
+                    displayName: "Alpha",
+                    grantedScopes: ["calendar.events"],
+                    usesCustomOAuthApp: false,
+                    archivedUserData: Data("alpha".utf8)
+                ),
+                StoredGoogleAccount(
+                    id: "beta",
+                    email: "beta@example.com",
+                    displayName: "Beta",
+                    grantedScopes: ["calendar.events"],
+                    usesCustomOAuthApp: false,
+                    archivedUserData: Data("beta".utf8)
+                ),
+            ]),
+            liveGoogleDebugConfiguration: LiveGoogleDebugConfiguration(
+                isEnabled: false,
+                preferredAccountEmail: nil,
+                preferredCalendarName: nil
+            )
+        )
+
+        await model.prepareIfNeeded()
+
+        XCTAssertEqual(model.selectedCalendarSummary, "No calendars selected")
+        XCTAssertEqual(model.pendingActivityLabel, "3 pending items")
+        XCTAssertEqual(model.currentActivitySummary, "Choose calendars to sync")
+        XCTAssertEqual(model.failureCountLabel, "0 failures")
+    }
+
     func testGoogleCalendarSelectionResolverPrefersPersistedCalendarThenNamedCalendarThenPrimary() {
         let primary = GoogleCalendarSummary(
             id: "primary",
@@ -290,6 +424,7 @@ final class Calendar_Busy_SyncTests: XCTestCase {
         )
     }
 
+    @MainActor
     func testGoogleCalendarSummaryDecodesPrimaryWritableCalendar() throws {
         let data = """
         {
@@ -393,6 +528,127 @@ final class Calendar_Busy_SyncTests: XCTestCase {
         )
     }
 
+    func testGoogleMirrorEligibilityRequiresBusyAndAcceptedWhenAttendeeResponseExists() {
+        XCTAssertTrue(
+            GoogleMirrorEligibility.shouldMirror(
+                blocksTime: true,
+                organizerIsCurrentUser: false,
+                attendees: nil
+            )
+        )
+        XCTAssertTrue(
+            GoogleMirrorEligibility.shouldMirror(
+                blocksTime: true,
+                organizerIsCurrentUser: true,
+                attendees: [
+                    GoogleMirrorAttendee(isCurrentUser: true, responseStatus: "tentative")
+                ]
+            )
+        )
+        XCTAssertTrue(
+            GoogleMirrorEligibility.shouldMirror(
+                blocksTime: true,
+                organizerIsCurrentUser: false,
+                attendees: [
+                    GoogleMirrorAttendee(isCurrentUser: true, responseStatus: "accepted")
+                ]
+            )
+        )
+        XCTAssertFalse(
+            GoogleMirrorEligibility.shouldMirror(
+                blocksTime: true,
+                organizerIsCurrentUser: false,
+                attendees: [
+                    GoogleMirrorAttendee(isCurrentUser: true, responseStatus: "tentative")
+                ]
+            )
+        )
+        XCTAssertFalse(
+            GoogleMirrorEligibility.shouldMirror(
+                blocksTime: true,
+                organizerIsCurrentUser: false,
+                attendees: [
+                    GoogleMirrorAttendee(isCurrentUser: true, responseStatus: "declined")
+                ]
+            )
+        )
+        XCTAssertFalse(
+            GoogleMirrorEligibility.shouldMirror(
+                blocksTime: true,
+                organizerIsCurrentUser: false,
+                attendees: [
+                    GoogleMirrorAttendee(isCurrentUser: true, responseStatus: "needsAction")
+                ]
+            )
+        )
+        XCTAssertFalse(
+            GoogleMirrorEligibility.shouldMirror(
+                blocksTime: false,
+                organizerIsCurrentUser: true,
+                attendees: nil
+            )
+        )
+    }
+
+    func testAppleMirrorEligibilityRequiresBusyAndAcceptedWhenParticipantResponseExists() {
+        XCTAssertTrue(
+            AppleMirrorEligibility.shouldMirror(
+                blocksTime: true,
+                organizerIsCurrentUser: false,
+                hasAttendees: false,
+                currentUserParticipantStatus: nil
+            )
+        )
+        XCTAssertTrue(
+            AppleMirrorEligibility.shouldMirror(
+                blocksTime: true,
+                organizerIsCurrentUser: true,
+                hasAttendees: true,
+                currentUserParticipantStatus: .tentative
+            )
+        )
+        XCTAssertTrue(
+            AppleMirrorEligibility.shouldMirror(
+                blocksTime: true,
+                organizerIsCurrentUser: false,
+                hasAttendees: true,
+                currentUserParticipantStatus: .accepted
+            )
+        )
+        XCTAssertFalse(
+            AppleMirrorEligibility.shouldMirror(
+                blocksTime: true,
+                organizerIsCurrentUser: false,
+                hasAttendees: true,
+                currentUserParticipantStatus: .tentative
+            )
+        )
+        XCTAssertFalse(
+            AppleMirrorEligibility.shouldMirror(
+                blocksTime: true,
+                organizerIsCurrentUser: false,
+                hasAttendees: true,
+                currentUserParticipantStatus: .declined
+            )
+        )
+        XCTAssertFalse(
+            AppleMirrorEligibility.shouldMirror(
+                blocksTime: true,
+                organizerIsCurrentUser: false,
+                hasAttendees: true,
+                currentUserParticipantStatus: .pending
+            )
+        )
+        XCTAssertFalse(
+            AppleMirrorEligibility.shouldMirror(
+                blocksTime: false,
+                organizerIsCurrentUser: true,
+                hasAttendees: false,
+                currentUserParticipantStatus: nil
+            )
+        )
+    }
+
     func testConnectedAccountListBuilderIncludesLiveAccounts() {
         let scenarioAccounts = [
             ConnectedAccountScenario(
@@ -431,9 +687,9 @@ final class Calendar_Busy_SyncTests: XCTestCase {
             calendars: [googleCalendar],
             selectedCalendarID: googleCalendar.id,
             message: nil,
+            messageTimestampLabel: nil,
             lastManagedEvent: nil,
-            isOperationInFlight: false,
-            isActive: true
+            isOperationInFlight: false
         )
 
         let accounts = ConnectedAccountListBuilder.build(
@@ -488,6 +744,48 @@ final class Calendar_Busy_SyncTests: XCTestCase {
         XCTAssertEqual(try store.loadAccounts(), [])
     }
 
+    func testBusyMirrorPlannerOnlyMirrorsPresentAndFutureTime() {
+        let now = Date(timeIntervalSince1970: 1_713_600_000)
+        let sourceParticipant = BusyMirrorParticipant(
+            provider: .google,
+            accountID: "source-account",
+            calendarID: "source-calendar",
+            displayName: "Source"
+        )
+        let targetParticipant = BusyMirrorParticipant(
+            provider: .apple,
+            accountID: nil,
+            calendarID: "target-calendar",
+            displayName: "Target"
+        )
+
+        let ongoingSourceEvent = BusyMirrorSourceEvent(
+            key: BusyMirrorSourceKey(provider: .google, calendarID: "source-calendar", eventID: "evt-ongoing"),
+            participantID: sourceParticipant.id,
+            startDate: now.addingTimeInterval(-30 * 60),
+            endDate: now.addingTimeInterval(30 * 60),
+            isAllDay: false
+        )
+        let pastSourceEvent = BusyMirrorSourceEvent(
+            key: BusyMirrorSourceKey(provider: .google, calendarID: "source-calendar", eventID: "evt-past"),
+            participantID: sourceParticipant.id,
+            startDate: now.addingTimeInterval(-2 * 60 * 60),
+            endDate: now.addingTimeInterval(-60 * 60),
+            isAllDay: false
+        )
+
+        let desiredMirrors = BusyMirrorSyncPlanner.desiredMirrors(
+            participants: [sourceParticipant, targetParticipant],
+            sourceEvents: [ongoingSourceEvent, pastSourceEvent],
+            now: now
+        )
+
+        XCTAssertEqual(desiredMirrors.count, 1)
+        XCTAssertEqual(desiredMirrors[0].startDate, now)
+        XCTAssertEqual(desiredMirrors[0].endDate, ongoingSourceEvent.endDate)
+        XCTAssertEqual(desiredMirrors[0].identity.sourceKey.eventID, "evt-ongoing")
+    }
+
     func testBusyMirrorSyncPlannerBuildsFullMeshMirrorsAcrossParticipants() {
         let alpha = testParticipant(provider: .apple, calendarID: "alpha", displayName: "Alpha")
         let beta = testParticipant(provider: .google, accountID: "acct-beta", calendarID: "beta", displayName: "Beta")
@@ -512,7 +810,8 @@ final class Calendar_Busy_SyncTests: XCTestCase {
                     endDate: end.addingTimeInterval(3600),
                     isAllDay: false
                 ),
-            ]
+            ],
+            now: testDate(hour: 0)
         )
 
         XCTAssertEqual(desiredMirrors.count, 4)
@@ -951,6 +1250,30 @@ final class Calendar_Busy_SyncTests: XCTestCase {
             .deletingLastPathComponent()
     }
 }
+
+#if os(macOS)
+private var hostedXCTestRetainedObjects: [AnyObject] = []
+
+@MainActor
+private func retainForHostedXCTest(_ object: AnyObject) {
+    hostedXCTestRetainedObjects.append(object)
+}
+#endif
+
+#if os(macOS)
+@MainActor
+private final class MockLaunchAtLoginService: MacLaunchAtLoginControlling {
+    var status: SMAppService.Status
+
+    init(status: SMAppService.Status) {
+        self.status = status
+    }
+
+    func setEnabled(_ enabled: Bool) throws {
+        status = enabled ? .enabled : .notRegistered
+    }
+}
+#endif
 
 @MainActor
 private final class MockAppleCalendarService: AppleCalendarProviding {

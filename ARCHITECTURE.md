@@ -21,7 +21,8 @@ The live codebase is still early, but the Xcode project, harness shell, multi-ac
 Purpose:
 
 - host the app on macOS, iPhone, and iPad
-- expose shared navigation, account configuration, advanced OAuth settings, audit-trail surfaces, and sync-status surfaces through platform-specific host adapters
+- expose shared navigation, account configuration, advanced OAuth settings, a dedicated audit-trail scene, and compact sync-status surfaces through platform-specific host adapters
+- on macOS, present the product as a menu bar utility with launch-at-login control, on-demand windows, and no persistent Dock icon
 
 Expected primary code area:
 
@@ -48,7 +49,7 @@ Stable concepts:
 
 Purpose:
 
-- normalize provider-specific event data into one internal busy/free model
+- normalize provider-specific event data into one internal busy-plus-commitment model
 - treat every selected calendar as both source and destination
 - prevent recursive mirrors and duplicate holds
 - reconcile a bounded sync window by comparing desired mirrors to provider-owned mirror metadata
@@ -112,12 +113,13 @@ Primary code areas:
 - AppKit usage stays behind `#if os(macOS)` adapters
 - UIKit usage stays behind `#if os(iOS)` adapters
 - macOS-only polling controls stay behind platform-specific UI because iOS does not guarantee a fixed background schedule
+- macOS menu bar lifecycle, window-visibility tracking, and launch-at-login logic stay behind `Calendar Busy Sync/Calendar Busy Sync/App/Platform/macOS/`
 - provider SDK or HTTP payload handling stays inside provider adapters
 - shell scripts call shared helpers in `scripts/lib/`
 - Google client plist sync happens in `scripts/sync-google-client-config.py` before build/test commands
 - accessibility-driven live smoke helpers live in `scripts/lib/ax-query.swift` and are used by the macOS Google E2E script
 - docs verification and repo-map generation use only standard Python 3 library modules
-- automatic reconciliation uses a bounded window of the previous 24 hours through the next 60 days so repeated sync passes remain idempotent without scanning unbounded history
+- automatic reconciliation uses a bounded scan window with limited lookback plus the next 60 days so repeated sync passes remain idempotent without scanning unbounded history, while desired mirror writes themselves are clipped to present-and-future time only
 
 ## Cross-cutting concerns
 
@@ -141,6 +143,7 @@ Critical commands should fail clearly when:
 - the Google client plist declared in `.env` is missing or malformed
 - the app attempts to mirror to an unselected calendar
 - deselecting or disconnecting a participant calendar leaves stale mirror events behind
+- the macOS menu bar utility fails to reopen its Settings or Logs windows once the Dock icon is suppressed
 
 ### Privacy and trust boundaries
 

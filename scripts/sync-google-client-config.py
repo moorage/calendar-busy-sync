@@ -80,6 +80,7 @@ def write_info_plist(client_config: dict[str, str]) -> None:
         "CFBundlePackageType": "$(PRODUCT_BUNDLE_PACKAGE_TYPE)",
         "CFBundleShortVersionString": "$(MARKETING_VERSION)",
         "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
+        "LSUIElement": True,
         "CFBundleURLTypes": [
             {
                 "CFBundleTypeRole": "Editor",

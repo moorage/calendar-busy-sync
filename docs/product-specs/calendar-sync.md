@@ -14,32 +14,41 @@ People with multiple jobs, gigs, or companies often keep separate calendars per 
 
 - the app lets a user connect multiple calendar accounts
 - when connecting an account, the user chooses exactly which calendars in that account participate in busy mirroring
-- any source event that is not marked `free` / `available` becomes a mirrored busy hold on every other selected calendar
+- any source event that both blocks time and represents an accepted commitment becomes a mirrored busy hold on every other selected calendar
+- self-owned busy events and busy events with no attendees count as accepted commitments
+- invited events mirror only when the current user has responded `Yes`
 - mirrored busy holds should contain only the minimum information required to block time unless a later product decision expands this
 - free/available events do not create mirrored holds
+- tentative, declined, and no-response invited events do not create mirrored holds
 - moving, deleting, cancelling, or changing a source event to free/available must update or remove the mirrored holds on the next reconciliation pass
 
 ## Settings surfaces
 
-- the main app shell should prioritize settings and an audit trail over a dense operational dashboard
+- the main app shell should prioritize account management over a dense operational dashboard and keep low-frequency controls compact
+- on macOS, the primary shell should live in the menu bar, not as a persistent Dock app
+- audit trail should live in a separate window or dedicated surface instead of occupying the primary settings flow
 - primary settings include connected Google accounts, Apple / iCloud calendar access on the current device, selected participating calendars, and the default shared Google OAuth configuration
+- the persistent footer should expose current activity, pending work, failure count, a `Logs` launcher, and a `Sync Now` action
+- the macOS menu bar item should expose `Open Settings`, `Open Logs`, `Sync Now`, and `Launch at Login`, and should visibly indicate when the Settings window is already open
 - polling cadence is user-configurable on macOS only, with a default of every 2 minutes
 - iPhone and iPad do not expose a user-configurable polling interval because background execution is not reliable enough to promise a strict schedule
-- advanced settings include audit trail event log retention and the option to use a custom Google OAuth app instead of the product default
+- advanced settings include audit trail event log retention, macOS polling cadence, and the option to use a custom Google OAuth app instead of the product default
 - advanced custom OAuth mode should allow the user to supply their own Google client identifiers so they can authorize against their own Google Cloud project
 - custom native Google client IDs are only valid when the build already includes the matching reversed-client-ID callback scheme; otherwise the UI must block the flow and explain that a rebuild is required
 
 ## Current implementation slice
 
 - the app can restore multiple previously connected Google accounts on launch from a secure store
-- the settings surface can add another Google account, remove one account without disturbing the rest of the roster, and mark one account as the primary live-verification context
+- the settings surface can add another Google account and remove one account without disturbing the rest of the roster
 - the harness syncs the default Google plist from `.env` into source-controlled app files before build/test runs
 - the app can load writable calendars from each connected Google account and persist one selected participating calendar per account
 - the app can request Apple calendar access through EventKit, load writable Apple / iCloud calendars from the current device, and persist the selected participating calendar
-- the app now reconciles the selected calendars as one participant set: busy source events become opaque `Busy` holds on all the others, and moved/deleted/free source events update or delete the mirrored holds on the next pass
+- the app now reconciles the selected calendars as one participant set: accepted busy source events become opaque `Busy` holds on all the others, and moved/deleted/free/non-accepted source events update or delete the mirrored holds on the next pass
+- mirrored busy writes are future-only: past time is never written, and an ongoing source event is mirrored only from "now" through its end
 - deselecting or disconnecting a participant calendar triggers cleanup of app-managed mirror events that were written into that calendar
-- the settings surface still exposes create/delete verification actions so provider write access can be checked independently of the automatic sync loop
+- provider write-verification helpers may remain available for harness/debug automation, but they should not occupy the primary user-facing settings shell
 - the macOS live smoke path now uses the `.env` test account plus calendar name to constrain Google auth, auto-select the target writable calendar, and complete the managed create/delete verification loop on a signed local build
+- the macOS build now runs as an agent-style utility with `LSUIElement`, a `MenuBarExtra`, a launch-at-login wrapper over `SMAppService.mainApp`, and explicit window-visibility tracking so the menu bar icon can reflect whether Settings is already open
 
 ## Defaults
 
@@ -60,6 +69,7 @@ People with multiple jobs, gigs, or companies often keep separate calendars per 
 
 - a two-account test scenario can show one busy event on account A appearing as a busy hold on selected calendars in account B
 - a free/available event does not create any mirrored busy slot
+- an invited event with RSVP `Maybe`, `No`, or no response does not create any mirrored busy slot
 - disconnecting an account removes its calendars from future sync planning
 - changing a selected participating calendar immediately cleans old mirror events from the deselected calendar and reconciles the newly selected participant set
 - the configuration UI makes the selected participating calendars legible before sync runs
