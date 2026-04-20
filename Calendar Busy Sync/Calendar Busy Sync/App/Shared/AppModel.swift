@@ -74,24 +74,44 @@ final class AppModel: ObservableObject {
     @Published private(set) var syncMessage: String?
     @Published var pollIntervalMinutes: Int {
         didSet {
+            guard !isApplyingSharedConfiguration else { return }
             persistSettings()
             restartSyncLoopIfNeeded()
         }
     }
     @Published var auditTrailLogLength: AuditTrailLogLength {
-        didSet { persistSettings() }
+        didSet {
+            guard !isApplyingSharedConfiguration else { return }
+            persistSettings()
+        }
     }
     @Published var usesCustomGoogleOAuthApp: Bool {
-        didSet { persistSettingsAndRefreshGoogleConfiguration() }
+        didSet {
+            guard !isApplyingSharedConfiguration else { return }
+            persistSettingsAndRefreshGoogleConfiguration()
+        }
+    }
+    @Published var isSharedConfigurationEnabled: Bool {
+        didSet {
+            guard !isApplyingSharedConfiguration else { return }
+            handleSharedConfigurationEnabledChange(from: oldValue, to: isSharedConfigurationEnabled)
+        }
     }
     @Published var customGoogleOAuthClientID: String {
-        didSet { persistSettingsAndRefreshGoogleConfiguration() }
+        didSet {
+            guard !isApplyingSharedConfiguration else { return }
+            persistSettingsAndRefreshGoogleConfiguration()
+        }
     }
     @Published var customGoogleOAuthServerClientID: String {
-        didSet { persistSettingsAndRefreshGoogleConfiguration() }
+        didSet {
+            guard !isApplyingSharedConfiguration else { return }
+            persistSettingsAndRefreshGoogleConfiguration()
+        }
     }
     @Published var selectedAppleCalendarID: String {
         didSet {
+            guard !isApplyingSharedConfiguration else { return }
             persistSettings()
 
             guard hasPrepared, selectedAppleCalendarID != oldValue else { return }
@@ -113,6 +133,7 @@ final class AppModel: ObservableObject {
     private let fileManager: FileManager
     private let launchDate: Date
     private let userDefaults: UserDefaults
+    private let sharedConfigurationStore: any SharedAppConfigurationStoring
     private let appleCalendarService: any AppleCalendarProviding
     private let appleCalendarSettingsOpener: any AppleCalendarSettingsOpening
     private let googleCalendarService: GoogleCalendarService
@@ -122,12 +143,18 @@ final class AppModel: ObservableObject {
     private var hasPrepared = false
     private var hasAttemptedLiveGoogleSmoke = false
     private var syncLoopTask: Task<Void, Never>?
+    private var isApplyingSharedConfiguration = false
+    private var lastSettingsMutationAt: Date
+    private var persistedAppleCalendarReference: SharedAppleCalendarReference?
 
     private enum SettingKey {
         static let pollIntervalMinutes = "settings.pollIntervalMinutes"
         static let auditTrailLogLength = "settings.auditTrailLogLength"
+        static let lastModifiedAt = "settings.lastModifiedAt"
+        static let isSharedConfigurationEnabled = "settings.sharedConfiguration.enabled"
         static let usesAppleCalendar = "settings.appleCalendar.enabled"
         static let selectedAppleCalendarID = "settings.appleCalendar.selectedCalendarID"
+        static let selectedAppleCalendarReference = "settings.appleCalendar.selectedCalendarReference"
         static let usesCustomGoogleOAuthApp = "settings.googleOAuth.usesCustomApp"
         static let customGoogleOAuthClientID = "settings.googleOAuth.clientID"
         static let customGoogleOAuthServerClientID = "settings.googleOAuth.serverClientID"
@@ -141,6 +168,7 @@ final class AppModel: ObservableObject {
         launchDate: Date = Date(),
         userDefaults: UserDefaults = .standard,
         processInfo: ProcessInfo = .processInfo,
+        sharedConfigurationStore: (any SharedAppConfigurationStoring)? = nil,
         appleCalendarService: (any AppleCalendarProviding)? = nil,
         appleCalendarSettingsOpener: (any AppleCalendarSettingsOpening)? = nil,
         googleCalendarService: GoogleCalendarService? = nil,
@@ -153,6 +181,7 @@ final class AppModel: ObservableObject {
         self.fileManager = fileManager
         self.launchDate = launchDate
         self.userDefaults = userDefaults
+        self.sharedConfigurationStore = sharedConfigurationStore ?? ICloudSharedAppConfigurationStore()
         let resolvedAppleCalendarService = appleCalendarService ?? AppleCalendarService()
         self.appleCalendarService = resolvedAppleCalendarService
         self.appleCalendarSettingsOpener = appleCalendarSettingsOpener ?? AppleCalendarSettingsOpener()
@@ -162,9 +191,12 @@ final class AppModel: ObservableObject {
         self.liveGoogleDebugConfiguration = liveGoogleDebugConfiguration ?? LiveGoogleDebugConfiguration.from(processInfo: processInfo)
         self.pollIntervalMinutes = Self.loadPollInterval(from: userDefaults)
         self.auditTrailLogLength = Self.loadAuditTrailLogLength(from: userDefaults, platform: launchOptions.platformTarget)
+        self.lastSettingsMutationAt = Self.loadSettingsMutationDate(from: userDefaults)
         self.isAppleCalendarEnabled = userDefaults.object(forKey: SettingKey.usesAppleCalendar) as? Bool ?? false
         self.selectedAppleCalendarID = userDefaults.string(forKey: SettingKey.selectedAppleCalendarID) ?? ""
+        self.persistedAppleCalendarReference = Self.loadAppleCalendarReference(from: userDefaults)
         self.appleCalendarAuthorizationState = resolvedAppleCalendarService.authorizationState()
+        self.isSharedConfigurationEnabled = userDefaults.object(forKey: SettingKey.isSharedConfigurationEnabled) as? Bool ?? true
         self.usesCustomGoogleOAuthApp = userDefaults.object(forKey: SettingKey.usesCustomGoogleOAuthApp) as? Bool ?? false
         self.customGoogleOAuthClientID = userDefaults.string(forKey: SettingKey.customGoogleOAuthClientID) ?? ""
         self.customGoogleOAuthServerClientID = userDefaults.string(forKey: SettingKey.customGoogleOAuthServerClientID) ?? ""
@@ -173,6 +205,9 @@ final class AppModel: ObservableObject {
         if self.liveGoogleDebugConfiguration.isEnabled {
             self.liveGoogleSmokeStatus = .awaitingAuthentication
         }
+
+        startObservingSharedConfiguration()
+        reconcileSharedConfigurationAtLaunch()
     }
 
     deinit {
@@ -439,6 +474,18 @@ final class AppModel: ObservableObject {
 
     var canOpenAppleCalendarSettings: Bool {
         launchOptions.platformTarget == .macos
+    }
+
+    var sharedConfigurationStatusMessage: String {
+        if !isSharedConfigurationEnabled {
+            return "Shared settings are off on this device. Calendar choices and advanced preferences stay local here."
+        }
+
+        if sharedConfigurationStore.isAvailable {
+            return "Shared settings sync through iCloud when available. Google sign-in and Apple permissions stay on each device."
+        }
+
+        return "Shared settings are enabled, but iCloud is unavailable right now. This device will keep local settings until iCloud returns."
     }
 
     var selectedAppleCalendar: AppleCalendarSummary? {
@@ -771,8 +818,10 @@ final class AppModel: ObservableObject {
             let previousCalendarID = selectedAppleCalendarID
             selectedAppleCalendarID = AppleCalendarSelectionResolver.resolvedCalendarID(
                 availableCalendars: calendars,
-                persistedCalendarID: selectedAppleCalendarID
+                persistedCalendarID: selectedAppleCalendarID,
+                sharedReference: persistedAppleCalendarReference
             )
+            persistedAppleCalendarReference = selectedAppleCalendar.map(SharedAppleCalendarReference.init(calendar:))
             if let selectedAppleCalendar {
                 appleCalendarMessage = "Loaded \(calendars.count) writable Apple calendars. Selected \(selectedAppleCalendar.displayName)."
             } else {
@@ -999,6 +1048,7 @@ final class AppModel: ObservableObject {
                 using: googleOAuthResolution
             )
             let accounts = try googleAccountStore.removeAccount(id: accountID)
+            googleSelectedCalendarIDs[accountID] = nil
             updateGoogleStoredAccounts(accounts)
             if activeGoogleAccountID == accountID {
                 activeGoogleAccountID = accounts.first?.id
@@ -1397,15 +1447,15 @@ final class AppModel: ObservableObject {
     }
 
     private func persistSettings() {
-        userDefaults.set(max(1, min(60, pollIntervalMinutes)), forKey: SettingKey.pollIntervalMinutes)
-        userDefaults.set(auditTrailLogLength.rawValue, forKey: SettingKey.auditTrailLogLength)
-        userDefaults.set(isAppleCalendarEnabled, forKey: SettingKey.usesAppleCalendar)
-        userDefaults.set(selectedAppleCalendarID, forKey: SettingKey.selectedAppleCalendarID)
-        userDefaults.set(usesCustomGoogleOAuthApp, forKey: SettingKey.usesCustomGoogleOAuthApp)
-        userDefaults.set(customGoogleOAuthClientID, forKey: SettingKey.customGoogleOAuthClientID)
-        userDefaults.set(customGoogleOAuthServerClientID, forKey: SettingKey.customGoogleOAuthServerClientID)
-        userDefaults.set(googleSelectedCalendarIDs, forKey: SettingKey.selectedGoogleCalendarIDs)
-        userDefaults.set(activeGoogleAccountID, forKey: SettingKey.activeGoogleAccountID)
+        guard !isApplyingSharedConfiguration else { return }
+
+        let updatedAt = Date()
+        lastSettingsMutationAt = updatedAt
+        writeSettingsToUserDefaults(updatedAt: updatedAt)
+        guard isSharedConfigurationEnabled else {
+            return
+        }
+        sharedConfigurationStore.saveConfiguration(currentSharedConfiguration(updatedAt: updatedAt))
     }
 
     private func persistSettingsAndRefreshGoogleConfiguration() {
@@ -1426,6 +1476,181 @@ final class AppModel: ObservableObject {
             googleOAuthResolution = .invalid(
                 message: "The bundled Google OAuth configuration is missing. Run the harness sync step so `DefaultGoogleOAuth.plist` is copied into the app target."
             )
+        }
+    }
+
+    private func startObservingSharedConfiguration() {
+        sharedConfigurationStore.startObserving { [weak self] configuration in
+            self?.applySharedConfigurationIfNewer(configuration)
+        }
+    }
+
+    private func reconcileSharedConfigurationAtLaunch() {
+        guard isSharedConfigurationEnabled else {
+            return
+        }
+
+        guard sharedConfigurationStore.isAvailable else {
+            return
+        }
+
+        guard let sharedConfiguration = sharedConfigurationStore.loadConfiguration() else {
+            sharedConfigurationStore.saveConfiguration(currentSharedConfiguration(updatedAt: lastSettingsMutationAt))
+            return
+        }
+
+        if sharedConfiguration.updatedAt > lastSettingsMutationAt {
+            applySharedConfigurationIfNewer(sharedConfiguration)
+            return
+        }
+
+        if sharedConfiguration.updatedAt < lastSettingsMutationAt {
+            sharedConfigurationStore.saveConfiguration(currentSharedConfiguration(updatedAt: lastSettingsMutationAt))
+        }
+    }
+
+    private func applySharedConfigurationIfNewer(_ configuration: SharedAppConfiguration) {
+        guard isSharedConfigurationEnabled else {
+            return
+        }
+
+        guard configuration.updatedAt > lastSettingsMutationAt else {
+            return
+        }
+
+        let previousAppleCalendarEnabled = isAppleCalendarEnabled
+        let previousAppleCalendarID = selectedAppleCalendarID
+        let previousGoogleSelectedCalendarIDs = googleSelectedCalendarIDs
+
+        isApplyingSharedConfiguration = true
+        pollIntervalMinutes = max(1, min(60, configuration.pollIntervalMinutes))
+        auditTrailLogLength = configuration.auditTrailLogLength
+        isAppleCalendarEnabled = configuration.isAppleCalendarEnabled
+        persistedAppleCalendarReference = configuration.selectedAppleCalendarReference
+        usesCustomGoogleOAuthApp = configuration.usesCustomGoogleOAuthApp
+        customGoogleOAuthClientID = configuration.customGoogleOAuthClientID
+        customGoogleOAuthServerClientID = configuration.customGoogleOAuthServerClientID
+        googleSelectedCalendarIDs = configuration.googleSelectedCalendarIDs
+        activeGoogleAccountID = configuration.activeGoogleAccountID
+        selectedAppleCalendarID = isAppleCalendarEnabled
+            ? AppleCalendarSelectionResolver.resolvedCalendarID(
+                availableCalendars: appleCalendars,
+                persistedCalendarID: selectedAppleCalendarID,
+                sharedReference: persistedAppleCalendarReference
+            )
+            : ""
+        isApplyingSharedConfiguration = false
+
+        lastSettingsMutationAt = configuration.updatedAt
+        writeSettingsToUserDefaults(updatedAt: configuration.updatedAt)
+        refreshGoogleConfiguration()
+        restartSyncLoopIfNeeded()
+
+        guard hasPrepared else {
+            return
+        }
+
+        Task { @MainActor [weak self] in
+            await self?.applySharedConfigurationSideEffects(
+                previousAppleCalendarEnabled: previousAppleCalendarEnabled,
+                previousAppleCalendarID: previousAppleCalendarID,
+                previousGoogleSelectedCalendarIDs: previousGoogleSelectedCalendarIDs
+            )
+        }
+    }
+
+    private func applySharedConfigurationSideEffects(
+        previousAppleCalendarEnabled: Bool,
+        previousAppleCalendarID: String,
+        previousGoogleSelectedCalendarIDs: [String: String]
+    ) async {
+        var shouldSync = false
+
+        if isAppleCalendarEnabled {
+            await restoreAppleCalendarAccessIfNeeded()
+
+            let resolvedAppleCalendarID = selectedAppleCalendarID
+            if previousAppleCalendarEnabled, previousAppleCalendarID != resolvedAppleCalendarID {
+                if !previousAppleCalendarID.isEmpty {
+                    await cleanupDeselectedAppleCalendar(calendarID: previousAppleCalendarID)
+                }
+                lastManagedAppleEvent = nil
+                shouldSync = true
+            } else if !previousAppleCalendarEnabled && !resolvedAppleCalendarID.isEmpty {
+                shouldSync = true
+            }
+        } else if previousAppleCalendarEnabled {
+            if !previousAppleCalendarID.isEmpty {
+                await cleanupDeselectedAppleCalendar(calendarID: previousAppleCalendarID)
+            }
+            lastManagedAppleEvent = nil
+            shouldSync = true
+        }
+
+        let accountIDs = Set(previousGoogleSelectedCalendarIDs.keys).union(googleSelectedCalendarIDs.keys)
+        for accountID in accountIDs {
+            let previousCalendarID = previousGoogleSelectedCalendarIDs[accountID] ?? ""
+            let nextCalendarID = googleSelectedCalendarIDs[accountID] ?? ""
+            guard previousCalendarID != nextCalendarID else {
+                continue
+            }
+
+            if !previousCalendarID.isEmpty {
+                await cleanupDeselectedGoogleCalendar(
+                    accountID: accountID,
+                    calendarID: previousCalendarID
+                )
+            }
+
+            lastManagedGoogleEventsByAccountID[accountID] = nil
+            shouldSync = true
+        }
+
+        if shouldSync {
+            await syncAfterParticipantConfigurationChange()
+        }
+    }
+
+    private func currentSharedConfiguration(updatedAt: Date) -> SharedAppConfiguration {
+        SharedAppConfiguration(
+            updatedAt: updatedAt,
+            pollIntervalMinutes: max(1, min(60, pollIntervalMinutes)),
+            auditTrailLogLengthRawValue: auditTrailLogLength.rawValue,
+            isAppleCalendarEnabled: isAppleCalendarEnabled,
+            selectedAppleCalendarReference: currentAppleCalendarReference,
+            usesCustomGoogleOAuthApp: usesCustomGoogleOAuthApp,
+            customGoogleOAuthClientID: customGoogleOAuthClientID,
+            customGoogleOAuthServerClientID: customGoogleOAuthServerClientID,
+            googleSelectedCalendarIDs: googleSelectedCalendarIDs,
+            activeGoogleAccountID: activeGoogleAccountID
+        )
+    }
+
+    private var currentAppleCalendarReference: SharedAppleCalendarReference? {
+        if let selectedAppleCalendar {
+            return SharedAppleCalendarReference(calendar: selectedAppleCalendar)
+        }
+
+        return selectedAppleCalendarID.isEmpty ? nil : persistedAppleCalendarReference
+    }
+
+    private func writeSettingsToUserDefaults(updatedAt: Date) {
+        userDefaults.set(max(1, min(60, pollIntervalMinutes)), forKey: SettingKey.pollIntervalMinutes)
+        userDefaults.set(auditTrailLogLength.rawValue, forKey: SettingKey.auditTrailLogLength)
+        userDefaults.set(isSharedConfigurationEnabled, forKey: SettingKey.isSharedConfigurationEnabled)
+        userDefaults.set(isAppleCalendarEnabled, forKey: SettingKey.usesAppleCalendar)
+        userDefaults.set(selectedAppleCalendarID, forKey: SettingKey.selectedAppleCalendarID)
+        userDefaults.set(usesCustomGoogleOAuthApp, forKey: SettingKey.usesCustomGoogleOAuthApp)
+        userDefaults.set(customGoogleOAuthClientID, forKey: SettingKey.customGoogleOAuthClientID)
+        userDefaults.set(customGoogleOAuthServerClientID, forKey: SettingKey.customGoogleOAuthServerClientID)
+        userDefaults.set(googleSelectedCalendarIDs, forKey: SettingKey.selectedGoogleCalendarIDs)
+        userDefaults.set(activeGoogleAccountID, forKey: SettingKey.activeGoogleAccountID)
+        userDefaults.set(updatedAt, forKey: SettingKey.lastModifiedAt)
+
+        if let referenceData = Self.encodeAppleCalendarReference(currentAppleCalendarReference) {
+            userDefaults.set(referenceData, forKey: SettingKey.selectedAppleCalendarReference)
+        } else {
+            userDefaults.removeObject(forKey: SettingKey.selectedAppleCalendarReference)
         }
     }
 
@@ -1470,8 +1695,10 @@ final class AppModel: ObservableObject {
             appleCalendars = calendars
             selectedAppleCalendarID = AppleCalendarSelectionResolver.resolvedCalendarID(
                 availableCalendars: calendars,
-                persistedCalendarID: selectedAppleCalendarID
+                persistedCalendarID: selectedAppleCalendarID,
+                sharedReference: persistedAppleCalendarReference
             )
+            persistedAppleCalendarReference = selectedAppleCalendar.map(SharedAppleCalendarReference.init(calendar:))
             if let selectedAppleCalendar {
                 appleCalendarMessage = "Restored Apple Calendar access with \(selectedAppleCalendar.displayName) selected."
             } else {
@@ -1487,6 +1714,7 @@ final class AppModel: ObservableObject {
     private func clearAppleCalendarState() {
         appleCalendars = []
         selectedAppleCalendarID = ""
+        persistedAppleCalendarReference = nil
         lastManagedAppleEvent = nil
     }
 
@@ -1504,6 +1732,20 @@ final class AppModel: ObservableObject {
         activeGoogleAccountID = nil
         hasAttemptedLiveGoogleSmoke = false
         liveGoogleSmokeStatus = liveGoogleDebugConfiguration.isEnabled ? .awaitingAuthentication : .idle
+    }
+
+    private func handleSharedConfigurationEnabledChange(from oldValue: Bool, to newValue: Bool) {
+        guard oldValue != newValue else {
+            return
+        }
+
+        persistSettings()
+
+        guard newValue else {
+            return
+        }
+
+        reconcileSharedConfigurationAtLaunch()
     }
 
     private var activeResolvedGoogleAccountID: String? {
@@ -1565,7 +1807,6 @@ final class AppModel: ObservableObject {
 
         let accountIDs = Set(accounts.map(\.id))
         googleCalendarsByAccountID = googleCalendarsByAccountID.filter { accountIDs.contains($0.key) }
-        googleSelectedCalendarIDs = googleSelectedCalendarIDs.filter { accountIDs.contains($0.key) }
         googleMessagesByAccountID = googleMessagesByAccountID.filter { accountIDs.contains($0.key) }
         googleMessageUpdatedAtByAccountID = googleMessageUpdatedAtByAccountID.filter { accountIDs.contains($0.key) }
         lastManagedGoogleEventsByAccountID = lastManagedGoogleEventsByAccountID.filter { accountIDs.contains($0.key) }
@@ -2041,6 +2282,26 @@ final class AppModel: ObservableObject {
                 partialResult[element.key] = value
             }
         }
+    }
+
+    private static func loadSettingsMutationDate(from userDefaults: UserDefaults) -> Date {
+        userDefaults.object(forKey: SettingKey.lastModifiedAt) as? Date ?? .distantPast
+    }
+
+    private static func loadAppleCalendarReference(from userDefaults: UserDefaults) -> SharedAppleCalendarReference? {
+        guard let data = userDefaults.data(forKey: SettingKey.selectedAppleCalendarReference) else {
+            return nil
+        }
+
+        return try? JSONDecoder().decode(SharedAppleCalendarReference.self, from: data)
+    }
+
+    private static func encodeAppleCalendarReference(_ reference: SharedAppleCalendarReference?) -> Data? {
+        guard let reference else {
+            return nil
+        }
+
+        return try? JSONEncoder().encode(reference)
     }
 
     private static let syncTimestampFormatter: DateFormatter = {

@@ -41,12 +41,12 @@ Stable identifiers should include:
 - `google-auth.disconnect.<id>`
 - `google-calendar.status`
 - `google-account.card.<id>`
-- `google-account.primary.<id>`
 - `google-calendar.message.<id>`
 - `google-calendar.refresh.<id>`
 - `google-calendar.picker.<id>`
 - `google-calendar.live-smoke-status`
 - `settings.sync.poll-interval`
+- `settings.advanced.shared-configuration.enabled`
 - `settings.advanced.google-oauth.use-custom`
 - `settings.advanced.google-oauth.client-id`
 - `settings.advanced.google-oauth.server-client-id`

@@ -76,6 +76,15 @@ struct AppleCalendarSummary: Equatable, Identifiable {
 
         return displayName.compare(normalizedName, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
     }
+
+    func matches(reference: SharedAppleCalendarReference) -> Bool {
+        guard sourceKind == reference.sourceKind else {
+            return false
+        }
+
+        return title.compare(reference.title, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+            && sourceTitle.compare(reference.sourceTitle, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+    }
 }
 
 struct AppleManagedEventRecord: Equatable, Identifiable {
@@ -93,10 +102,18 @@ struct AppleManagedEventRecord: Equatable, Identifiable {
 enum AppleCalendarSelectionResolver {
     static func resolvedCalendarID(
         availableCalendars: [AppleCalendarSummary],
-        persistedCalendarID: String
+        persistedCalendarID: String,
+        sharedReference: SharedAppleCalendarReference? = nil
     ) -> String {
         if availableCalendars.contains(where: { $0.id == persistedCalendarID }) {
             return persistedCalendarID
+        }
+
+        if
+            let sharedReference,
+            let matchedCalendar = availableCalendars.first(where: { $0.matches(reference: sharedReference) })
+        {
+            return matchedCalendar.id
         }
 
         if let iCloudCalendar = availableCalendars.first(where: \.isLikelyICloud) {

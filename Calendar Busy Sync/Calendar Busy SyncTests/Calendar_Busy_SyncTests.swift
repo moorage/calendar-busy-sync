@@ -51,6 +51,203 @@ final class Calendar_Busy_SyncTests: XCTestCase {
         XCTAssertNil(try store.sourceKey(for: "mirror-token"))
     }
 
+    func testAppleCalendarSelectionResolverMatchesPortableReferenceWhenIdentifierDiffers() {
+        let workCalendar = AppleCalendarSummary(
+            id: "device-local-id",
+            title: "Busy Mirror",
+            sourceTitle: "iCloud",
+            sourceKind: .iCloud
+        )
+        let otherCalendar = AppleCalendarSummary(
+            id: "other-id",
+            title: "Personal",
+            sourceTitle: "iCloud",
+            sourceKind: .iCloud
+        )
+
+        let resolvedID = AppleCalendarSelectionResolver.resolvedCalendarID(
+            availableCalendars: [otherCalendar, workCalendar],
+            persistedCalendarID: "missing-on-this-device",
+            sharedReference: SharedAppleCalendarReference(calendar: workCalendar)
+        )
+
+        XCTAssertEqual(resolvedID, workCalendar.id)
+    }
+
+    @MainActor
+    func testAppModelPrefersNewerSharedConfigurationAtLaunch() async {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        defaults.set(2, forKey: "settings.pollIntervalMinutes")
+        defaults.set(Date(timeIntervalSince1970: 10), forKey: "settings.lastModifiedAt")
+
+        let sharedStore = MockSharedAppConfigurationStore(
+            isAvailable: true,
+            initialConfiguration: SharedAppConfiguration(
+                updatedAt: Date(timeIntervalSince1970: 20),
+                pollIntervalMinutes: 7,
+                auditTrailLogLengthRawValue: AuditTrailLogLength.last5000.rawValue,
+                isAppleCalendarEnabled: false,
+                selectedAppleCalendarReference: nil,
+                usesCustomGoogleOAuthApp: true,
+                customGoogleOAuthClientID: "shared-client-id",
+                customGoogleOAuthServerClientID: "shared-server-id",
+                googleSelectedCalendarIDs: ["google-account": "shared-calendar"],
+                activeGoogleAccountID: "google-account"
+            )
+        )
+
+        let model = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: false,
+                platformTarget: .ios,
+                deviceClass: .iphone
+            ),
+            userDefaults: defaults,
+            sharedConfigurationStore: sharedStore,
+            googleAccountStore: MockGoogleAccountStore()
+        )
+
+        XCTAssertEqual(model.pollIntervalMinutes, 7)
+        XCTAssertEqual(model.auditTrailLogLength, .last5000)
+        XCTAssertTrue(model.usesCustomGoogleOAuthApp)
+        XCTAssertEqual(model.customGoogleOAuthClientID, "shared-client-id")
+        XCTAssertEqual(model.selectedGoogleCalendarID(for: "google-account"), "shared-calendar")
+    }
+
+    @MainActor
+    func testAppModelAppliesObservedSharedConfigurationChanges() async {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+
+        let sharedStore = MockSharedAppConfigurationStore(isAvailable: true)
+        let model = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: false,
+                platformTarget: .ios,
+                deviceClass: .iphone
+            ),
+            userDefaults: defaults,
+            sharedConfigurationStore: sharedStore,
+            googleAccountStore: MockGoogleAccountStore()
+        )
+
+        await model.prepareIfNeeded()
+
+        await sharedStore.emit(
+            SharedAppConfiguration(
+                updatedAt: Date(timeIntervalSince1970: 40),
+                pollIntervalMinutes: 11,
+                auditTrailLogLengthRawValue: AuditTrailLogLength.last10000.rawValue,
+                isAppleCalendarEnabled: false,
+                selectedAppleCalendarReference: nil,
+                usesCustomGoogleOAuthApp: true,
+                customGoogleOAuthClientID: "remote-client-id",
+                customGoogleOAuthServerClientID: "remote-server-id",
+                googleSelectedCalendarIDs: ["shared-account": "shared-calendar-id"],
+                activeGoogleAccountID: "shared-account"
+            )
+        )
+
+        XCTAssertEqual(model.pollIntervalMinutes, 11)
+        XCTAssertEqual(model.auditTrailLogLength, .last10000)
+        XCTAssertEqual(model.customGoogleOAuthServerClientID, "remote-server-id")
+        XCTAssertEqual(model.selectedGoogleCalendarID(for: "shared-account"), "shared-calendar-id")
+    }
+
+    @MainActor
+    func testAppModelIgnoresObservedSharedConfigurationWhenDisabledLocally() async {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        defaults.set(false, forKey: "settings.sharedConfiguration.enabled")
+
+        let sharedStore = MockSharedAppConfigurationStore(isAvailable: true)
+        let model = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: false,
+                platformTarget: .ios,
+                deviceClass: .iphone
+            ),
+            userDefaults: defaults,
+            sharedConfigurationStore: sharedStore,
+            googleAccountStore: MockGoogleAccountStore()
+        )
+
+        await model.prepareIfNeeded()
+
+        await sharedStore.emit(
+            SharedAppConfiguration(
+                updatedAt: Date(timeIntervalSince1970: 40),
+                pollIntervalMinutes: 17,
+                auditTrailLogLengthRawValue: AuditTrailLogLength.last10000.rawValue,
+                isAppleCalendarEnabled: false,
+                selectedAppleCalendarReference: nil,
+                usesCustomGoogleOAuthApp: true,
+                customGoogleOAuthClientID: "remote-client-id",
+                customGoogleOAuthServerClientID: "remote-server-id",
+                googleSelectedCalendarIDs: ["shared-account": "shared-calendar-id"],
+                activeGoogleAccountID: "shared-account"
+            )
+        )
+
+        XCTAssertFalse(model.isSharedConfigurationEnabled)
+        XCTAssertEqual(model.pollIntervalMinutes, AppSettingsDefaults.pollIntervalMinutes)
+        XCTAssertFalse(model.usesCustomGoogleOAuthApp)
+        XCTAssertEqual(model.selectedGoogleCalendarID(for: "shared-account"), "")
+    }
+
+    @MainActor
+    func testAppModelDoesNotPublishLocalSettingsWhenSharedConfigurationDisabled() async {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        defaults.set(false, forKey: "settings.sharedConfiguration.enabled")
+
+        let sharedStore = MockSharedAppConfigurationStore(isAvailable: true)
+        let model = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: false,
+                platformTarget: .ios,
+                deviceClass: .iphone
+            ),
+            userDefaults: defaults,
+            sharedConfigurationStore: sharedStore,
+            googleAccountStore: MockGoogleAccountStore()
+        )
+
+        model.pollIntervalMinutes = 9
+
+        XCTAssertEqual(sharedStore.saveCallCount, 0)
+        XCTAssertNil(sharedStore.loadConfiguration())
+    }
+
     func testLaunchOptionsParseScenarioArguments() {
         let stateURL = URL(fileURLWithPath: "/tmp/state.json")
         let perfURL = URL(fileURLWithPath: "/tmp/perf.json")
@@ -1429,6 +1626,40 @@ private final class MockGoogleAccountStore: GoogleAccountStoring {
     func removeAccount(id: String) throws -> [StoredGoogleAccount] {
         accounts.removeAll(where: { $0.id == id })
         return accounts
+    }
+}
+
+private final class MockSharedAppConfigurationStore: SharedAppConfigurationStoring {
+    let isAvailable: Bool
+    private var configuration: SharedAppConfiguration?
+    private var onChange: (@MainActor (SharedAppConfiguration) -> Void)?
+    private(set) var saveCallCount = 0
+
+    init(
+        isAvailable: Bool,
+        initialConfiguration: SharedAppConfiguration? = nil
+    ) {
+        self.isAvailable = isAvailable
+        self.configuration = initialConfiguration
+    }
+
+    func loadConfiguration() -> SharedAppConfiguration? {
+        configuration
+    }
+
+    func saveConfiguration(_ configuration: SharedAppConfiguration) {
+        saveCallCount += 1
+        self.configuration = configuration
+    }
+
+    func startObserving(_ onChange: @escaping @MainActor (SharedAppConfiguration) -> Void) {
+        self.onChange = onChange
+    }
+
+    @MainActor
+    func emit(_ configuration: SharedAppConfiguration) {
+        self.configuration = configuration
+        onChange?(configuration)
     }
 }
 

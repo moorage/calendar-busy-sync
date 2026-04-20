@@ -10,7 +10,7 @@ This repository contains a universal Apple-platform calendar busy-sync app with 
 2. calendar selection and routing
 3. event normalization and sync planning
 4. mirrored busy-slot writing and reconciliation
-5. platform shells and harness tooling
+5. platform shells, shared configuration, and harness tooling
 
 The live codebase is still early, but the Xcode project, harness shell, multi-account Google auth slice, Apple / iCloud EventKit slice, and first real mirror-reconciliation engine are checked in.
 
@@ -42,6 +42,8 @@ Stable concepts:
 - `DefaultGoogleOAuthConfiguration`
 - `ResolvedGoogleOAuthConfiguration`
 - `GoogleConnectedAccount`
+- `SharedAppConfiguration`
+- `SharedAppleCalendarReference`
 - `HarnessLaunchOptions`
 - `HarnessStateSnapshot`
 
@@ -118,10 +120,12 @@ Primary code areas:
 - provider SDK or HTTP payload handling stays inside provider adapters
 - shell scripts call shared helpers in `scripts/lib/`
 - Google client plist sync happens in `scripts/sync-google-client-config.py` before build/test commands
+- cross-device settings sync lives in `Calendar Busy Sync/Calendar Busy Sync/App/Shared/SharedAppConfiguration.swift` and uses `NSUbiquitousKeyValueStore` only for non-secret preferences
 - accessibility-driven live smoke helpers live in `scripts/lib/ax-query.swift` and are used by the macOS Google E2E script
 - docs verification and repo-map generation use only standard Python 3 library modules
 - automatic reconciliation uses a bounded scan window with limited lookback plus the next 60 days so repeated sync passes remain idempotent without scanning unbounded history, while desired mirror writes themselves are clipped to present-and-future time only
 - Apple / iCloud mirror identity recovery now uses a hybrid boundary: an on-event `calendarbusysync://mirror/<token>` URL marker plus app-local token persistence, with migration of older note-heavy mirror events and cleanup of orphaned markers
+- shared configuration is privacy-scoped: only non-secret settings roam through iCloud, while Google keychain payloads, archived Google user state, Apple permission state, and mirror token maps remain local; the per-device opt-out switch itself is stored only in local `UserDefaults`
 
 ## Cross-cutting concerns
 

@@ -25,6 +25,7 @@ enum AccessibilityIDs {
     static let googleAuthConnectButton = "google-auth.connect"
     static let googleCalendarStatusLabel = "google-calendar.status"
     static let googleCalendarLiveSmokeStatusLabel = "google-calendar.live-smoke-status"
+    static let sharedConfigurationToggle = "settings.advanced.shared-configuration.enabled"
     static let googleOAuthUseCustomToggle = "settings.advanced.google-oauth.use-custom"
     static let googleOAuthClientIDField = "settings.advanced.google-oauth.client-id"
     static let googleOAuthServerClientIDField = "settings.advanced.google-oauth.server-client-id"

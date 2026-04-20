@@ -52,12 +52,12 @@ final class AppleCalendarService: AppleCalendarProviding {
 
     init(
         eventStore: EKEventStore = EKEventStore(),
-        mirrorIdentityStore: AppleMirrorIdentityStoring = AppleMirrorIdentityStore(),
+        mirrorIdentityStore: AppleMirrorIdentityStoring? = nil,
         now: @escaping () -> Date = Date.init,
         timeZone: @escaping () -> TimeZone = { .current }
     ) {
         self.eventStore = eventStore
-        self.mirrorIdentityStore = mirrorIdentityStore
+        self.mirrorIdentityStore = mirrorIdentityStore ?? AppleMirrorIdentityStore()
         self.now = now
         self.timeZone = timeZone
     }
@@ -411,7 +411,7 @@ final class AppleCalendarService: AppleCalendarProviding {
         }
 
         switch status {
-        case .authorized:
+        case .authorized, .fullAccess, .writeOnly:
             return .granted
         case .denied:
             return .denied

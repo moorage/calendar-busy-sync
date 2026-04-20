@@ -22,6 +22,7 @@ People with multiple jobs, gigs, or companies often keep separate calendars per 
 - tentative, declined, and no-response invited events do not create mirrored holds
 - moving, deleting, cancelling, or changing a source event to free/available must update or remove the mirrored holds on the next reconciliation pass
 - Apple / iCloud mirrors should not expose raw source identifiers in visible notes; their recoverable identity should stay opaque to the user while still letting the app update or delete them later
+- non-secret configuration should sync across the app's macOS and iOS/iPadOS installs through iCloud when the same Apple ID is signed in, while provider auth tokens and device permission state remain local
 
 ## Settings surfaces
 
@@ -33,7 +34,7 @@ People with multiple jobs, gigs, or companies often keep separate calendars per 
 - the macOS menu bar item should expose `Open Settings`, `Open Logs`, `Sync Now`, and `Launch at Login`, and should visibly indicate when the Settings window is already open
 - polling cadence is user-configurable on macOS only, with a default of every 2 minutes
 - iPhone and iPad do not expose a user-configurable polling interval because background execution is not reliable enough to promise a strict schedule
-- advanced settings include audit trail event log retention, macOS polling cadence, and the option to use a custom Google OAuth app instead of the product default
+- advanced settings include audit trail event log retention, macOS polling cadence, the option to disable shared iCloud settings on the current device, and the option to use a custom Google OAuth app instead of the product default
 - advanced custom OAuth mode should allow the user to supply their own Google client identifiers so they can authorize against their own Google Cloud project
 - custom native Google client IDs are only valid when the build already includes the matching reversed-client-ID callback scheme; otherwise the UI must block the flow and explain that a rebuild is required
 
@@ -44,6 +45,8 @@ People with multiple jobs, gigs, or companies often keep separate calendars per 
 - the harness syncs the default Google plist from `.env` into source-controlled app files before build/test runs
 - the app can load writable calendars from each connected Google account and persist one selected participating calendar per account
 - the app can request Apple calendar access through EventKit, load writable Apple / iCloud calendars from the current device, and persist the selected participating calendar
+- the app can share non-secret configuration through iCloud key-value storage, including selected calendars and advanced preferences, while keeping Google account payloads and Apple permission state device-local
+- each device can disable shared iCloud configuration locally without changing the shared-setting behavior of the user's other devices
 - the app now reconciles the selected calendars as one participant set: accepted busy source events become opaque `Busy` holds on all the others, and moved/deleted/free/non-accepted source events update or delete the mirrored holds on the next pass
 - Apple / iCloud mirrors now keep only a short note sentence visible to the user and move their recoverable identity into a URL marker plus app-local token mapping, with automatic migration of older note-heavy mirrors
 - mirrored busy writes are future-only: past time is never written, and an ongoing source event is mirrored only from "now" through its end

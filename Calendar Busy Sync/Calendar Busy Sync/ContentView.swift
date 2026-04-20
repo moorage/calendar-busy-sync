@@ -214,6 +214,27 @@ struct ContentView: View {
                 }
             )
 
+            sectionDivider
+            sectionRow {
+                HStack(spacing: 12) {
+                    Label("Share settings through iCloud", systemImage: "icloud")
+                    Spacer()
+                    Toggle("", isOn: $model.isSharedConfigurationEnabled)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .accessibilityIdentifier(AccessibilityIDs.sharedConfigurationToggle)
+                }
+                .font(.caption)
+            }
+
+            sectionDivider
+            infoMessageRow(
+                model.sharedConfigurationStatusMessage,
+                timestamp: nil,
+                accessibilityID: "settings.advanced.shared-configuration-note"
+            )
+
+            sectionDivider
             sectionRow {
                 HStack(spacing: 12) {
                     Label("Use your own Google OAuth app", systemImage: "lock.open.display")
