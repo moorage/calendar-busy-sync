@@ -61,6 +61,25 @@ struct ContentView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             #endif
+
+            Text("Every selected calendar participates in full-mesh mirroring: a busy event on any selected calendar creates busy holds on all the others.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 12) {
+                Button("Sync Now") {
+                    Task {
+                        await model.syncNow()
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!model.canSyncNow)
+                .accessibilityIdentifier(AccessibilityIDs.syncNowButton)
+
+                Text(model.syncStatusLabel)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
@@ -108,7 +127,9 @@ struct ContentView: View {
 
                 if model.canOpenAppleCalendarSettings {
                     Button("Open Calendar Settings") {
-                        model.openAppleCalendarSettings()
+                        Task {
+                            await model.openAppleCalendarSettings()
+                        }
                     }
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier(AccessibilityIDs.appleCalendarOpenSettingsButton)
@@ -297,7 +318,7 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
                 } else {
                     Picker(
-                        "Write busy slots to",
+                        "Participating calendar",
                         selection: Binding(
                             get: { model.selectedAppleCalendarID },
                             set: { model.selectedAppleCalendarID = $0 }
@@ -372,8 +393,12 @@ struct ContentView: View {
                 .font(.subheadline)
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Destination calendar")
+                Text("Participating calendar")
                     .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                Text("This calendar both receives mirrored busy holds from the others and acts as a source for them.")
+                    .font(.caption)
                     .foregroundStyle(.secondary)
 
                 if card.calendars.isEmpty {
@@ -382,7 +407,7 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
                 } else {
                     Picker(
-                        "Write busy slots to",
+                        "Participating calendar",
                         selection: Binding(
                             get: { model.selectedGoogleCalendarID(for: card.id) },
                             set: { model.setSelectedGoogleCalendarID($0, for: card.id) }
@@ -592,12 +617,16 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Sync Status")
                 .font(.headline)
-            Text("Ready")
+            Text(model.syncLastRunLabel)
                 .accessibilityIdentifier(AccessibilityIDs.syncStatusLastRun)
-            Text("Pending writes: \(state.pendingWriteCount)")
+            Text(model.syncPendingCountLabel)
                 .accessibilityIdentifier(AccessibilityIDs.syncStatusPendingCount)
-            Text("Failed writes: \(state.failedWriteCount)")
+            Text(model.syncFailureCountLabel)
                 .accessibilityIdentifier(AccessibilityIDs.syncStatusFailedCount)
+            Text(model.syncStatusDetail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier(AccessibilityIDs.syncStatusDetail)
         }
     }
 }

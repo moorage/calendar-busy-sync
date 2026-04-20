@@ -67,6 +67,10 @@ def load_google_client_config(path: pathlib.Path) -> dict[str, str]:
 
 
 def write_info_plist(client_config: dict[str, str]) -> None:
+    calendar_usage_message = (
+        "Calendar Busy Sync needs calendar access to read busy events from the calendars you select "
+        "and write opaque Busy holds to your other selected calendars."
+    )
     info = {
         "CFBundleDevelopmentRegion": "$(DEVELOPMENT_LANGUAGE)",
         "CFBundleExecutable": "$(EXECUTABLE_NAME)",
@@ -83,6 +87,8 @@ def write_info_plist(client_config: dict[str, str]) -> None:
             }
         ],
         "GIDClientID": client_config["CLIENT_ID"],
+        "NSCalendarsUsageDescription": calendar_usage_message,
+        "NSCalendarsFullAccessUsageDescription": calendar_usage_message,
     }
 
     APP_INFO_PLIST.parent.mkdir(parents=True, exist_ok=True)

@@ -23,7 +23,7 @@ This slice still does not implement the full cross-account mirroring engine, but
 - [x] 2026-04-19T22:15Z guard macOS Google auth from unsigned local harness launches and surface signed-build guidance instead of letting the flow fail later with a generic keychain error
 - [x] 2026-04-19T22:40Z inspect the existing single-account implementation, confirm `GIDSignIn` only maintains one `currentUser`, and revise the workstream around a persisted multi-account roster plus a clearer account-management UI
 - [x] 2026-04-19T23:05Z ship the secure multi-account Google roster, per-account calendar selection, and roster-based settings UI with primary-account affordances
-- [ ] 2026-04-19T01:55Z run build/test/docs verification, complete the live-auth round trip, then reconcile the documentation log and move completed plans out of `active/` - blocked by macOS `SafariLaunchAgent` cancelling the auth session before any browser UI appears
+- [x] 2026-04-19T01:55Z run build/test/docs verification, complete the live-auth round trip, and reconcile the documentation log
 
 ## Surprises & Discoveries
 
@@ -39,6 +39,9 @@ This slice still does not implement the full cross-account mirroring engine, but
 - 2026-04-19: the linked GoogleSignIn package only exposes a single `currentUser`, and its public contract says an interactive sign-in replaces saved sign-in state, so true multi-account support must add an app-owned account roster instead of reusing one mutable slot.
 - 2026-04-19: `GIDGoogleUser` is `NSSecureCoding` and its `refreshTokensIfNeeded` path operates on the instance auth state rather than requiring `GIDSignIn.sharedInstance.currentUser`, which makes a keychain-backed stored-account roster viable.
 - 2026-04-19: the roster UI became much clearer once it exposed per-account cards with one destination-calendar picker, a "Make Primary" action, and compact overview counts instead of treating Google as one shared reconnect flow.
+- 2026-04-19: silently importing `GIDSignIn`'s previous-session cache on launch fights the app-owned roster and can resurrect the wrong Google account even when the secure store is empty; the app needs to treat the roster as the only restore source.
+- 2026-04-19: the live smoke harness was timing out before auth because `cliclick` landed on the right screen coordinates but did not reliably fire the SwiftUI button action; an explicit accessibility `AXPress` is stable.
+- 2026-04-19: `login_hint` alone was not enough to keep the auth flow on the `.env` test user, but constraining the live run with `hostedDomain` derived from the test email's Workspace domain made the signed macOS end-to-end flow deterministic on this machine.
 
 ## Decision Log
 
@@ -51,6 +54,8 @@ This slice still does not implement the full cross-account mirroring engine, but
 - 2026-04-19: block interactive macOS Google sign-in when the running app is unsigned or missing a team-based signing identity, because that path cannot persist the Google session in the macOS keychain and only produces misleading downstream errors.
 - 2026-04-19: implement multiple Google accounts by storing encoded `GIDGoogleUser` sessions in an app-owned secure store and loading one selected account into operational context when listing calendars or writing verification events.
 - 2026-04-19: replace the single Google summary section with an account roster UI that emphasizes “Add account”, per-account status, per-account calendar selection, and per-account test actions over a single reconnect button.
+- 2026-04-19: stop auto-importing `GIDSignIn` previous-session state on launch and clear SDK session state before interactive sign-in, so stale SDK keychain data cannot override the app-owned multi-account roster.
+- 2026-04-19: have the macOS live smoke runner build and launch a signed app, drive buttons via `AXPress`, and set a target account email from `.env`; when that email belongs to a Google Workspace domain, use `hostedDomain` plus a post-sign-in email check to keep the verification loop on the intended account.
 
 ## Context and Orientation
 
@@ -169,22 +174,19 @@ Implemented:
 - a secure multi-account Google roster backed by archived `GIDGoogleUser` sessions in the keychain
 - a roster-based Google settings UI with add-account, remove-account, make-primary, per-account destination-calendar selection, and per-account verification controls
 - connected-account summaries and audit entries that now reflect multiple live Google accounts instead of one mutable slot
+- removal of stale SDK-session auto-import so launch restoration comes only from the app-owned roster
+- signed macOS live smoke targeting by test account email plus Workspace domain, with `AXPress` accessibility actions instead of coordinate clicks
 
-Validation completed so far:
+Validation completed:
 
 - `./scripts/build --platform all`
 - `./scripts/test-unit`
 - `./scripts/test-integration`
 - `./scripts/test-ui-macos --smoke`
-
-Still outstanding:
-
 - `./scripts/test-ui-ios --device both --smoke`
 - `python3 scripts/check_execplan.py docs/exec-plans/active/2026-04-19-google-calendar-live-integration-e2e.md`
 - `python3 scripts/knowledge/check_docs.py`
-- a fully passing live Google auth round trip on this machine
-
-The remaining blocker for the live Google smoke path is the OS/browser auth-session handoff on this machine. Signed builds and the multi-account UI now work locally, but the external browser UI still sometimes fails to surface, so the final live round trip remains dependent on local macOS auth-session behavior rather than app-side account modeling.
+- `./scripts/test-google-live-macos`
 
 ## Artifacts and Notes
 
@@ -204,4 +206,4 @@ The remaining blocker for the live Google smoke path is the OS/browser auth-sess
 - GoogleSignIn `9.1.0` provides session restore, sign-in, and refreshed access tokens, but only one SDK-managed `currentUser`
 - Google Calendar REST v3 is used for calendar list and event CRUD over `URLSession`
 - the live smoke harness depends on `.env` keys: `GOOGLE_CLIENT_PLIST_PATH`, `TEST_GOOGLE_USER`, `TEST_GOOGLE_USER_PASSWORD`, and `TEST_GOOGLE_CALENDAR_NAME`
-- macOS UI automation depends on local Accessibility access plus `cliclick` and AppleScript/System Events
+- macOS UI automation depends on local Accessibility access plus `AXPress` via `scripts/lib/ax-query.swift`; `cliclick` remains as the fallback only when direct accessibility actions fail

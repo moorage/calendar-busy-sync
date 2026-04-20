@@ -62,7 +62,8 @@ Stable identifiers should include:
 - `sync-status.last-run`
 - `sync-status.pending-count`
 - `sync-status.failed-count`
-- `sync-status.run-now`
+- `sync-status.detail`
+- `sync-status.sync-now`
 - `mirror-preview.list`
 - `mirror-preview.row.<id>`
 - `mirror-preview.source-calendar`
@@ -113,5 +114,7 @@ Planned stable harness commands include:
 - the Google Sign-In callback URL is handled through the app lifecycle, but harness smoke launches stay scenario-backed and do not initiate interactive auth
 - unsigned harness launches must block interactive macOS Google sign-in with explicit signed-build guidance, because the OAuth session relies on keychain persistence
 - Apple / iCloud calendar access uses EventKit permission on the current device; harness `--ui-test-mode 1` launches must stay side-effect free and should not trigger permission prompts automatically
-- the live macOS Google smoke path reads `CALENDAR_BUSY_SYNC_LIVE_E2E=1` and `CALENDAR_BUSY_SYNC_E2E_CALENDAR_NAME=<name>` from the launch environment so the app can auto-select a writable calendar and run the managed event create/delete verification
+- the live macOS Google smoke path reads `CALENDAR_BUSY_SYNC_LIVE_E2E=1`, `CALENDAR_BUSY_SYNC_E2E_ACCOUNT_EMAIL=<email>`, and `CALENDAR_BUSY_SYNC_E2E_CALENDAR_NAME=<name>` from the launch environment so the app can constrain Google auth to the expected Workspace domain, auto-select the intended writable calendar, and run the managed event create/delete verification
 - multi-account Google UI is roster-based: harness and UI automation should treat Google controls as account-scoped using the `<id>` suffix rather than assuming a single global picker or disconnect button
+- changing a selected participant calendar can trigger immediate cleanup and reconciliation, so harness-driven assertions should allow the sync status text to change without waiting for the macOS poll timer
+- `scripts/lib/ax-query.swift` must support both value reads and `AXPress` actions so the live macOS Google smoke runner does not rely on brittle screen-coordinate clicks

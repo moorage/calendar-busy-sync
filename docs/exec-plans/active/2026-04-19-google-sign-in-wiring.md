@@ -86,7 +86,7 @@ External references that shaped this plan:
    - resolving the effective OAuth configuration
    - validating custom-client compatibility against the app's bundled callback scheme
 4. Update `AppModel` and `Calendar_Busy_SyncApp.swift` to:
-   - restore previous sign-in on launch
+   - restore the app-owned Google account roster on launch without auto-importing stale SDK session state
    - handle `onOpenURL`
    - run connect/disconnect flows on macOS and iOS
    - surface errors and user-facing auth state

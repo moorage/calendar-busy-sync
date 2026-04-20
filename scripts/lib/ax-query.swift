@@ -7,6 +7,7 @@ enum AXQueryError: Error {
     case unsupportedCommand(String)
     case elementNotFound(String)
     case unavailableAttribute(String)
+    case actionFailed(String)
 }
 
 func attributeValue(_ element: AXUIElement, attribute: String) -> AnyObject? {
@@ -78,7 +79,7 @@ func stringValue(from value: AnyObject?) -> String? {
 
 let arguments = CommandLine.arguments
 guard arguments.count >= 4 else {
-    fatalError("usage: ax-query.swift value|center <app-name> <identifier>")
+    fatalError("usage: ax-query.swift value|center|press <app-name> <identifier>")
 }
 
 let command = arguments[1]
@@ -118,6 +119,11 @@ case "center":
     let x = Int(position.x + (size.width / 2))
     let y = Int(position.y + (size.height / 2))
     print("\(x) \(y)")
+case "press":
+    let error = AXUIElementPerformAction(element, kAXPressAction as CFString)
+    guard error == .success else {
+        throw AXQueryError.actionFailed(identifier)
+    }
 default:
     throw AXQueryError.unsupportedCommand(command)
 }

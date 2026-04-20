@@ -310,6 +310,50 @@ final class Calendar_Busy_SyncTests: XCTestCase {
         XCTAssertEqual(decoded.displayName, "Team Calendar (Primary)")
     }
 
+    func testLiveGoogleAccountResolverPrefersMatchingEmailThenActiveAccountThenFirstStoredAccount() {
+        let alpha = StoredGoogleAccount(
+            id: "alpha",
+            email: "alpha@example.com",
+            displayName: "Alpha",
+            grantedScopes: ["calendar.events"],
+            usesCustomOAuthApp: false,
+            archivedUserData: Data("alpha".utf8)
+        )
+        let beta = StoredGoogleAccount(
+            id: "beta",
+            email: "beta@example.com",
+            displayName: "Beta",
+            grantedScopes: ["calendar.events"],
+            usesCustomOAuthApp: false,
+            archivedUserData: Data("beta".utf8)
+        )
+
+        XCTAssertEqual(
+            LiveGoogleAccountResolver.resolvedAccountID(
+                accounts: [alpha, beta],
+                activeAccountID: "alpha",
+                preferredEmail: "BETA@example.com"
+            ),
+            "beta"
+        )
+        XCTAssertEqual(
+            LiveGoogleAccountResolver.resolvedAccountID(
+                accounts: [alpha, beta],
+                activeAccountID: "beta",
+                preferredEmail: "missing@example.com"
+            ),
+            "beta"
+        )
+        XCTAssertEqual(
+            LiveGoogleAccountResolver.resolvedAccountID(
+                accounts: [alpha, beta],
+                activeAccountID: "missing",
+                preferredEmail: nil
+            ),
+            "alpha"
+        )
+    }
+
     func testAppleCalendarSelectionResolverPrefersPersistedCalendarThenICloudThenFirst() {
         let iCloud = AppleCalendarSummary(
             id: "icloud",
@@ -444,6 +488,105 @@ final class Calendar_Busy_SyncTests: XCTestCase {
         XCTAssertEqual(try store.loadAccounts(), [])
     }
 
+    func testBusyMirrorSyncPlannerBuildsFullMeshMirrorsAcrossParticipants() {
+        let alpha = testParticipant(provider: .apple, calendarID: "alpha", displayName: "Alpha")
+        let beta = testParticipant(provider: .google, accountID: "acct-beta", calendarID: "beta", displayName: "Beta")
+        let gamma = testParticipant(provider: .google, accountID: "acct-gamma", calendarID: "gamma", displayName: "Gamma")
+        let start = testDate(hour: 9)
+        let end = testDate(hour: 10)
+
+        let desiredMirrors = BusyMirrorSyncPlanner.desiredMirrors(
+            participants: [alpha, beta, gamma],
+            sourceEvents: [
+                BusyMirrorSourceEvent(
+                    key: BusyMirrorSourceKey(provider: .apple, calendarID: alpha.calendarID, eventID: "event-alpha"),
+                    participantID: alpha.id,
+                    startDate: start,
+                    endDate: end,
+                    isAllDay: false
+                ),
+                BusyMirrorSourceEvent(
+                    key: BusyMirrorSourceKey(provider: .google, calendarID: beta.calendarID, eventID: "event-beta"),
+                    participantID: beta.id,
+                    startDate: start.addingTimeInterval(3600),
+                    endDate: end.addingTimeInterval(3600),
+                    isAllDay: false
+                ),
+            ]
+        )
+
+        XCTAssertEqual(desiredMirrors.count, 4)
+        XCTAssertEqual(Set(desiredMirrors.map(\.targetParticipant.id)), Set([alpha.id, beta.id, gamma.id]))
+        XCTAssertFalse(desiredMirrors.contains(where: { $0.identity.sourceKey.calendarID == $0.targetParticipant.calendarID }))
+    }
+
+    func testBusyMirrorSyncPlannerProducesCreateUpdateAndDeleteOperations() {
+        let alpha = testParticipant(provider: .apple, calendarID: "alpha", displayName: "Alpha")
+        let beta = testParticipant(provider: .google, accountID: "acct-beta", calendarID: "beta", displayName: "Beta")
+        let gamma = testParticipant(provider: .google, accountID: "acct-gamma", calendarID: "gamma", displayName: "Gamma")
+
+        let retainedIdentity = BusyMirrorIdentity(
+            sourceKey: BusyMirrorSourceKey(provider: .apple, calendarID: alpha.calendarID, eventID: "kept"),
+            targetParticipantID: beta.id
+        )
+        let staleIdentity = BusyMirrorIdentity(
+            sourceKey: BusyMirrorSourceKey(provider: .google, calendarID: gamma.calendarID, eventID: "stale"),
+            targetParticipantID: alpha.id
+        )
+        let updatedStart = testDate(hour: 11)
+        let updatedEnd = testDate(hour: 12)
+        let staleStart = testDate(hour: 13)
+        let staleEnd = testDate(hour: 14)
+
+        let desiredMirrors = [
+            DesiredBusyMirrorEvent(
+                identity: retainedIdentity,
+                targetParticipant: beta,
+                startDate: updatedStart,
+                endDate: updatedEnd,
+                isAllDay: false
+            ),
+            DesiredBusyMirrorEvent(
+                identity: BusyMirrorIdentity(
+                    sourceKey: BusyMirrorSourceKey(provider: .google, calendarID: beta.calendarID, eventID: "new"),
+                    targetParticipantID: gamma.id
+                ),
+                targetParticipant: gamma,
+                startDate: staleStart,
+                endDate: staleEnd,
+                isAllDay: false
+            ),
+        ]
+        let existingMirrors = [
+            ExistingBusyMirrorEvent(
+                identity: retainedIdentity,
+                targetParticipant: beta,
+                eventID: "existing-updated",
+                startDate: updatedStart.addingTimeInterval(-1800),
+                endDate: updatedEnd.addingTimeInterval(-1800),
+                isAllDay: false
+            ),
+            ExistingBusyMirrorEvent(
+                identity: staleIdentity,
+                targetParticipant: alpha,
+                eventID: "existing-stale",
+                startDate: staleStart,
+                endDate: staleEnd,
+                isAllDay: false
+            ),
+        ]
+
+        let operations = BusyMirrorSyncPlanner.operations(
+            desiredMirrors: desiredMirrors,
+            existingMirrors: existingMirrors
+        )
+
+        XCTAssertEqual(operations.count, 3)
+        XCTAssertEqual(operations.filterCreate.count, 1)
+        XCTAssertEqual(operations.filterUpdate.count, 1)
+        XCTAssertEqual(operations.filterDelete.count, 1)
+    }
+
     @MainActor
     func testAppModelAppleCalendarConnectionLoadsCalendarsAndManagedEventLifecycle() async {
         let defaults = UserDefaults(suiteName: #function)!
@@ -560,6 +703,11 @@ final class Calendar_Busy_SyncTests: XCTestCase {
         let defaults = UserDefaults(suiteName: #function)!
         defaults.removePersistentDomain(forName: #function)
         let settingsOpener = MockAppleCalendarSettingsOpener(openResult: true)
+        let appleService = MockAppleCalendarService(
+            authorizationState: .granted,
+            calendars: [],
+            createdEvent: nil
+        )
 
         let model = AppModel(
             launchOptions: HarnessLaunchOptions(
@@ -575,13 +723,15 @@ final class Calendar_Busy_SyncTests: XCTestCase {
                 deviceClass: .mac
             ),
             userDefaults: defaults,
+            appleCalendarService: appleService,
             appleCalendarSettingsOpener: settingsOpener,
             googleAccountStore: MockGoogleAccountStore()
         )
 
-        model.openAppleCalendarSettings()
+        await model.openAppleCalendarSettings()
 
         XCTAssertTrue(settingsOpener.didOpenCalendarAccessSettings)
+        XCTAssertFalse(appleService.didRequestAccess)
         XCTAssertEqual(model.appleCalendarMessage, "Opened System Settings to Privacy & Security > Calendars.")
     }
 
@@ -590,6 +740,11 @@ final class Calendar_Busy_SyncTests: XCTestCase {
         let defaults = UserDefaults(suiteName: #function)!
         defaults.removePersistentDomain(forName: #function)
         let settingsOpener = MockAppleCalendarSettingsOpener(openResult: false)
+        let appleService = MockAppleCalendarService(
+            authorizationState: .granted,
+            calendars: [],
+            createdEvent: nil
+        )
 
         let model = AppModel(
             launchOptions: HarnessLaunchOptions(
@@ -605,16 +760,187 @@ final class Calendar_Busy_SyncTests: XCTestCase {
                 deviceClass: .mac
             ),
             userDefaults: defaults,
+            appleCalendarService: appleService,
             appleCalendarSettingsOpener: settingsOpener,
             googleAccountStore: MockGoogleAccountStore()
         )
 
-        model.openAppleCalendarSettings()
+        await model.openAppleCalendarSettings()
 
         XCTAssertTrue(settingsOpener.didOpenCalendarAccessSettings)
+        XCTAssertFalse(appleService.didRequestAccess)
         XCTAssertEqual(
             model.appleCalendarMessage,
             "Calendar privacy settings could not be opened from this app. Open System Settings > Privacy & Security > Calendars manually."
+        )
+    }
+
+    @MainActor
+    func testAppModelRequestsAppleCalendarAccessBeforeOpeningSettingsWhenPermissionIsUndetermined() async {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let settingsOpener = MockAppleCalendarSettingsOpener(openResult: true)
+        let appleService = MockAppleCalendarService(
+            authorizationState: .notDetermined,
+            calendars: [],
+            createdEvent: nil
+        )
+
+        let model = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: false,
+                platformTarget: .macos,
+                deviceClass: .mac
+            ),
+            userDefaults: defaults,
+            appleCalendarService: appleService,
+            appleCalendarSettingsOpener: settingsOpener,
+            googleAccountStore: MockGoogleAccountStore()
+        )
+
+        await model.openAppleCalendarSettings()
+
+        XCTAssertTrue(appleService.didRequestAccess)
+        XCTAssertTrue(settingsOpener.didOpenCalendarAccessSettings)
+        XCTAssertEqual(model.appleCalendarAuthorizationState, .granted)
+        XCTAssertEqual(model.appleCalendarMessage, "Opened System Settings to Privacy & Security > Calendars.")
+    }
+
+    @MainActor
+    func testAppModelSyncRemovesStaleMirrorsWhenOnlyOneParticipantRemains() async {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        defaults.set(true, forKey: "settings.appleCalendar.enabled")
+        defaults.set("icloud", forKey: "settings.appleCalendar.selectedCalendarID")
+
+        let iCloud = AppleCalendarSummary(
+            id: "icloud",
+            title: "Busy Mirror",
+            sourceTitle: "iCloud",
+            sourceKind: .iCloud
+        )
+        let participant = testParticipant(provider: .apple, calendarID: iCloud.id, displayName: iCloud.displayName)
+        let appleService = MockAppleCalendarService(
+            authorizationState: .granted,
+            calendars: [iCloud],
+            createdEvent: nil
+        )
+        appleService.existingMirrors = [
+            ExistingBusyMirrorEvent(
+                identity: BusyMirrorIdentity(
+                    sourceKey: BusyMirrorSourceKey(provider: .google, calendarID: "google-work", eventID: "orphaned"),
+                    targetParticipantID: participant.id
+                ),
+                targetParticipant: participant,
+                eventID: "mirror-1",
+                startDate: testDate(hour: 8),
+                endDate: testDate(hour: 9),
+                isAllDay: false
+            )
+        ]
+
+        let model = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: false,
+                platformTarget: .macos,
+                deviceClass: .mac
+            ),
+            userDefaults: defaults,
+            appleCalendarService: appleService,
+            googleAccountStore: MockGoogleAccountStore()
+        )
+
+        await model.prepareIfNeeded()
+
+        XCTAssertEqual(appleService.deletedMirrorEventIDs, ["mirror-1"])
+        XCTAssertEqual(model.syncFailureCountLabel, "Failed writes: 0")
+        XCTAssertEqual(
+            model.syncStatusDetail,
+            "Only one calendar is selected. Removed stale mirrored busy holds from the remaining calendar."
+        )
+    }
+
+    @MainActor
+    func testAppModelChangingAppleCalendarSelectionCleansOldDestinationMirrors() async {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        defaults.set(true, forKey: "settings.appleCalendar.enabled")
+        defaults.set("old-calendar", forKey: "settings.appleCalendar.selectedCalendarID")
+
+        let oldCalendar = AppleCalendarSummary(
+            id: "old-calendar",
+            title: "Old",
+            sourceTitle: "iCloud",
+            sourceKind: .iCloud
+        )
+        let newCalendar = AppleCalendarSummary(
+            id: "new-calendar",
+            title: "New",
+            sourceTitle: "iCloud",
+            sourceKind: .iCloud
+        )
+        let oldParticipant = testParticipant(provider: .apple, calendarID: oldCalendar.id, displayName: oldCalendar.displayName)
+        let appleService = MockAppleCalendarService(
+            authorizationState: .granted,
+            calendars: [oldCalendar, newCalendar],
+            createdEvent: nil
+        )
+
+        let model = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: false,
+                platformTarget: .macos,
+                deviceClass: .mac
+            ),
+            userDefaults: defaults,
+            appleCalendarService: appleService,
+            googleAccountStore: MockGoogleAccountStore()
+        )
+
+        await model.prepareIfNeeded()
+        appleService.existingMirrors = [
+            ExistingBusyMirrorEvent(
+                identity: BusyMirrorIdentity(
+                    sourceKey: BusyMirrorSourceKey(provider: .google, calendarID: "source", eventID: "event-1"),
+                    targetParticipantID: oldParticipant.id
+                ),
+                targetParticipant: oldParticipant,
+                eventID: "mirror-old",
+                startDate: testDate(hour: 15),
+                endDate: testDate(hour: 16),
+                isAllDay: false
+            )
+        ]
+
+        model.selectedAppleCalendarID = newCalendar.id
+        await Task.yield()
+        await Task.yield()
+
+        XCTAssertEqual(appleService.deletedMirrorEventIDs, ["mirror-old"])
+        XCTAssertEqual(
+            model.appleCalendarMessage,
+            "Removed 1 mirrored busy hold(s) from \(oldCalendar.displayName)."
         )
     }
 
@@ -634,6 +960,11 @@ private final class MockAppleCalendarService: AppleCalendarProviding {
     var requestAccessError: Error?
     var didRequestAccess = false
     var deletedEventIDs: [String] = []
+    var sourceEvents: [BusyMirrorSourceEvent] = []
+    var existingMirrors: [ExistingBusyMirrorEvent] = []
+    var createdMirrorIdentities: [BusyMirrorIdentity] = []
+    var updatedMirrorIdentities: [BusyMirrorIdentity] = []
+    var deletedMirrorEventIDs: [String] = []
 
     init(
         authorizationState: AppleCalendarAuthorizationState,
@@ -677,6 +1008,26 @@ private final class MockAppleCalendarService: AppleCalendarProviding {
     func deleteManagedBusyEvent(_ event: AppleManagedEventRecord) throws {
         deletedEventIDs.append(event.eventID)
     }
+
+    func listBusySourceEvents(in participant: BusyMirrorParticipant, window: DateInterval) throws -> [BusyMirrorSourceEvent] {
+        sourceEvents.filter { $0.participantID == participant.id }
+    }
+
+    func listManagedMirrorEvents(in participant: BusyMirrorParticipant, window: DateInterval) throws -> [ExistingBusyMirrorEvent] {
+        existingMirrors.filter { $0.targetParticipant.id == participant.id }
+    }
+
+    func createManagedMirrorEvent(in calendar: AppleCalendarSummary, desiredMirror: DesiredBusyMirrorEvent) throws {
+        createdMirrorIdentities.append(desiredMirror.identity)
+    }
+
+    func updateManagedMirrorEvent(_ existingMirror: ExistingBusyMirrorEvent, desiredMirror: DesiredBusyMirrorEvent) throws {
+        updatedMirrorIdentities.append(desiredMirror.identity)
+    }
+
+    func deleteManagedMirrorEvent(_ existingMirror: ExistingBusyMirrorEvent) throws {
+        deletedMirrorEventIDs.append(existingMirror.eventID)
+    }
 }
 
 private final class MockAppleCalendarSettingsOpener: AppleCalendarSettingsOpening {
@@ -717,5 +1068,60 @@ private final class MockGoogleAccountStore: GoogleAccountStoring {
     func removeAccount(id: String) throws -> [StoredGoogleAccount] {
         accounts.removeAll(where: { $0.id == id })
         return accounts
+    }
+}
+
+private func testDate(hour: Int) -> Date {
+    Calendar(identifier: .gregorian).date(
+        from: DateComponents(
+            timeZone: TimeZone(secondsFromGMT: 0),
+            year: 2026,
+            month: 4,
+            day: 19,
+            hour: hour
+        )
+    )!
+}
+
+private func testParticipant(
+    provider: BusyMirrorProvider,
+    accountID: String? = nil,
+    calendarID: String,
+    displayName: String
+) -> BusyMirrorParticipant {
+    BusyMirrorParticipant(
+        provider: provider,
+        accountID: accountID,
+        calendarID: calendarID,
+        displayName: displayName
+    )
+}
+
+private extension Array where Element == BusyMirrorOperation {
+    var filterCreate: [BusyMirrorOperation] {
+        filter {
+            if case .create = $0 {
+                return true
+            }
+            return false
+        }
+    }
+
+    var filterUpdate: [BusyMirrorOperation] {
+        filter {
+            if case .update = $0 {
+                return true
+            }
+            return false
+        }
+    }
+
+    var filterDelete: [BusyMirrorOperation] {
+        filter {
+            if case .delete = $0 {
+                return true
+            }
+            return false
+        }
     }
 }

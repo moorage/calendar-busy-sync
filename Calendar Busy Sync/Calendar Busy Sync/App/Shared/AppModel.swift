@@ -58,8 +58,14 @@ final class AppModel: ObservableObject {
     @Published private(set) var googleOperationAccountIDs: Set<String> = []
     @Published private(set) var activeGoogleAccountID: String?
     @Published private(set) var liveGoogleSmokeStatus: LiveGoogleSmokeStatus = .idle
+    @Published private(set) var isSyncInFlight = false
+    @Published private(set) var lastBusyMirrorSyncSummary: BusyMirrorSyncSummary?
+    @Published private(set) var syncMessage: String?
     @Published var pollIntervalMinutes: Int {
-        didSet { persistSettings() }
+        didSet {
+            persistSettings()
+            restartSyncLoopIfNeeded()
+        }
     }
     @Published var auditTrailLogLength: AuditTrailLogLength {
         didSet { persistSettings() }
@@ -74,7 +80,19 @@ final class AppModel: ObservableObject {
         didSet { persistSettingsAndRefreshGoogleConfiguration() }
     }
     @Published var selectedAppleCalendarID: String {
-        didSet { persistSettings() }
+        didSet {
+            persistSettings()
+
+            guard hasPrepared, selectedAppleCalendarID != oldValue else { return }
+            let previousCalendarID = oldValue
+            let nextCalendarID = selectedAppleCalendarID
+            Task { @MainActor [weak self] in
+                await self?.handleAppleCalendarSelectionChange(
+                    from: previousCalendarID,
+                    to: nextCalendarID
+                )
+            }
+        }
     }
     @Published private(set) var googleSelectedCalendarIDs: [String: String]
 
@@ -92,6 +110,7 @@ final class AppModel: ObservableObject {
     private let liveGoogleDebugConfiguration: LiveGoogleDebugConfiguration
     private var hasPrepared = false
     private var hasAttemptedLiveGoogleSmoke = false
+    private var syncLoopTask: Task<Void, Never>?
 
     private enum SettingKey {
         static let pollIntervalMinutes = "settings.pollIntervalMinutes"
@@ -115,7 +134,8 @@ final class AppModel: ObservableObject {
         appleCalendarSettingsOpener: (any AppleCalendarSettingsOpening)? = nil,
         googleCalendarService: GoogleCalendarService? = nil,
         googleAccountStore: (any GoogleAccountStoring)? = nil,
-        googleSignInEnvironment: GoogleSignInEnvironment? = nil
+        googleSignInEnvironment: GoogleSignInEnvironment? = nil,
+        liveGoogleDebugConfiguration: LiveGoogleDebugConfiguration? = nil
     ) {
         self.launchOptions = launchOptions
         self.loader = ScenarioLoader()
@@ -128,7 +148,7 @@ final class AppModel: ObservableObject {
         self.googleCalendarService = googleCalendarService ?? GoogleCalendarService()
         self.googleAccountStore = googleAccountStore ?? GoogleAccountStore()
         self.googleSignInEnvironment = googleSignInEnvironment ?? GoogleSignInEnvironment.current()
-        self.liveGoogleDebugConfiguration = LiveGoogleDebugConfiguration.from(processInfo: processInfo)
+        self.liveGoogleDebugConfiguration = liveGoogleDebugConfiguration ?? LiveGoogleDebugConfiguration.from(processInfo: processInfo)
         self.pollIntervalMinutes = Self.loadPollInterval(from: userDefaults)
         self.auditTrailLogLength = Self.loadAuditTrailLogLength(from: userDefaults, platform: launchOptions.platformTarget)
         self.isAppleCalendarEnabled = userDefaults.object(forKey: SettingKey.usesAppleCalendar) as? Bool ?? false
@@ -139,9 +159,13 @@ final class AppModel: ObservableObject {
         self.customGoogleOAuthServerClientID = userDefaults.string(forKey: SettingKey.customGoogleOAuthServerClientID) ?? ""
         self.googleSelectedCalendarIDs = Self.loadGoogleSelectedCalendarIDs(from: userDefaults)
         self.activeGoogleAccountID = userDefaults.string(forKey: SettingKey.activeGoogleAccountID)
-        if liveGoogleDebugConfiguration.isEnabled {
+        if self.liveGoogleDebugConfiguration.isEnabled {
             self.liveGoogleSmokeStatus = .awaitingAuthentication
         }
+    }
+
+    deinit {
+        syncLoopTask?.cancel()
     }
 
     func prepareIfNeeded() async {
@@ -172,10 +196,60 @@ final class AppModel: ObservableObject {
         refreshAppleCalendarAuthorizationState()
         await restoreAppleCalendarAccessIfNeeded()
         await restoreGoogleAccountsIfPossible()
+        restartSyncLoopIfNeeded()
+        await syncNowIfReady()
     }
 
     var supportsPollingSettings: Bool {
         launchOptions.platformTarget == .macos
+    }
+
+    var syncStatusLabel: String {
+        if isSyncInFlight {
+            return "Syncing…"
+        }
+
+        guard let lastBusyMirrorSyncSummary else {
+            return "Waiting"
+        }
+
+        return lastBusyMirrorSyncSummary.failedCount == 0 ? "Ready" : "Needs attention"
+    }
+
+    var syncStatusDetail: String {
+        if isSyncInFlight {
+            return "Reconciling busy holds across all selected calendars."
+        }
+
+        if let syncMessage {
+            return syncMessage
+        }
+
+        guard let lastBusyMirrorSyncSummary else {
+            return "Select calendars to manage mirrored busy holds. Two or more selected calendars create new mirrors."
+        }
+
+        return "Last run created \(lastBusyMirrorSyncSummary.createdCount), updated \(lastBusyMirrorSyncSummary.updatedCount), deleted \(lastBusyMirrorSyncSummary.deletedCount), failed \(lastBusyMirrorSyncSummary.failedCount)."
+    }
+
+    var syncLastRunLabel: String {
+        guard let lastBusyMirrorSyncSummary else {
+            return "Never"
+        }
+
+        return Self.syncTimestampFormatter.string(from: lastBusyMirrorSyncSummary.completedAt)
+    }
+
+    var syncPendingCountLabel: String {
+        "Pending writes: \(isSyncInFlight ? "calculating" : "0")"
+    }
+
+    var syncFailureCountLabel: String {
+        "Failed writes: \(lastBusyMirrorSyncSummary?.failedCount ?? 0)"
+    }
+
+    var canSyncNow: Bool {
+        !isSyncInFlight && selectedParticipantCount >= 1
     }
 
     var googleOAuthConfiguration: GoogleOAuthOverrideConfiguration {
@@ -206,6 +280,11 @@ final class AppModel: ObservableObject {
 
     var selectedAppleCalendar: AppleCalendarSummary? {
         appleCalendars.first(where: { $0.id == selectedAppleCalendarID })
+    }
+
+    var selectedParticipantCount: Int {
+        googleAccountCards.filter { $0.selectedCalendar != nil }.count
+            + (selectedAppleCalendar == nil ? 0 : 1)
     }
 
     var appleConnectionStatusLabel: String {
@@ -367,7 +446,7 @@ final class AppModel: ObservableObject {
 
     var googleConnectionDetail: String {
         if !googleStoredAccounts.isEmpty {
-            return "Add another Google account or manage each connected account's destination calendar below."
+            return "Add another Google account or manage each participating calendar below."
         }
 
         if let blockingReason = googleSignInEnvironment.blockingReason {
@@ -419,7 +498,7 @@ final class AppModel: ObservableObject {
 
         let readyCount = googleAccountCards.filter { $0.selectedCalendar != nil }.count
         let total = googleAccountCards.count
-        return "\(readyCount) of \(total) Google accounts have a selected destination calendar."
+        return "\(readyCount) of \(total) Google accounts have a participating calendar selected."
     }
 
     var liveGoogleSmokeStatusLabel: String? {
@@ -442,6 +521,7 @@ final class AppModel: ObservableObject {
         entries.insert(contentsOf: appleCalendarAuditEntries, at: min(2, entries.count))
         entries.insert(contentsOf: googleCalendarAuditEntries, at: min(2, entries.count))
         entries.insert(contentsOf: googleAuditEntries, at: min(2, entries.count))
+        entries.insert(contentsOf: syncAuditEntries, at: min(2, entries.count))
 
         if let limit = auditTrailLogLength.limit, entries.count > limit {
             return Array(entries.suffix(limit))
@@ -466,18 +546,39 @@ final class AppModel: ObservableObject {
     func disconnectAppleCalendar() {
         guard !isAppleCalendarOperationInFlight else { return }
 
+        let previousCalendarID = selectedAppleCalendarID
         isAppleCalendarEnabled = false
         clearAppleCalendarState()
         appleCalendarMessage = "Apple Calendar was disconnected for this app. System calendar permission remains managed in Settings."
         refreshAppleCalendarAuthorizationState()
         persistSettings()
+
+        Task { @MainActor [weak self] in
+            await self?.cleanupDeselectedAppleCalendar(calendarID: previousCalendarID)
+            await self?.syncAfterParticipantConfigurationChange()
+        }
     }
 
-    func openAppleCalendarSettings() {
+    func openAppleCalendarSettings() async {
         guard canOpenAppleCalendarSettings else { return }
 
+        let authorizationStateBeforeOpening = appleCalendarAuthorizationState
+        if authorizationStateBeforeOpening == .notDetermined {
+            do {
+                _ = try await appleCalendarService.requestAccessIfNeeded()
+            } catch {
+                refreshAppleCalendarAuthorizationState()
+            }
+        }
+
+        refreshAppleCalendarAuthorizationState()
+
         if appleCalendarSettingsOpener.openCalendarAccessSettings() {
-            appleCalendarMessage = "Opened System Settings to Privacy & Security > Calendars."
+            if authorizationStateBeforeOpening == .notDetermined && appleCalendarAuthorizationState == .notDetermined {
+                appleCalendarMessage = "Opened System Settings to Privacy & Security > Calendars. If this app still is not listed there, click Connect Apple Calendar from the app to trigger the macOS permission prompt first."
+            } else {
+                appleCalendarMessage = "Opened System Settings to Privacy & Security > Calendars."
+            }
         } else {
             appleCalendarMessage = "Calendar privacy settings could not be opened from this app. Open System Settings > Privacy & Security > Calendars manually."
         }
@@ -503,6 +604,7 @@ final class AppModel: ObservableObject {
             refreshAppleCalendarAuthorizationState()
             let calendars = try appleCalendarService.listWritableCalendars()
             appleCalendars = calendars
+            let previousCalendarID = selectedAppleCalendarID
             selectedAppleCalendarID = AppleCalendarSelectionResolver.resolvedCalendarID(
                 availableCalendars: calendars,
                 persistedCalendarID: selectedAppleCalendarID
@@ -511,6 +613,9 @@ final class AppModel: ObservableObject {
                 appleCalendarMessage = "Loaded \(calendars.count) writable Apple calendars. Selected \(selectedAppleCalendar.displayName)."
             } else {
                 appleCalendarMessage = "No writable Apple calendars were found on this device."
+            }
+            if previousCalendarID == selectedAppleCalendarID {
+                await syncAfterParticipantConfigurationChange()
             }
         } catch let error as AppleCalendarServiceError {
             refreshAppleCalendarAuthorizationState()
@@ -547,6 +652,139 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func syncNow() async {
+        guard !isSyncInFlight else { return }
+
+        isSyncInFlight = true
+        syncMessage = nil
+
+        defer {
+            isSyncInFlight = false
+        }
+
+        do {
+            let participantsBundle = try await collectSyncParticipants()
+            guard !participantsBundle.participants.isEmpty else {
+                lastBusyMirrorSyncSummary = nil
+                syncMessage = "Select calendars to manage mirrored busy holds. Two or more selected calendars create new mirrors."
+                return
+            }
+
+            let window = BusyMirrorSyncWindow.defaultWindow()
+            var sourceEvents: [BusyMirrorSourceEvent] = []
+            var existingMirrors: [ExistingBusyMirrorEvent] = []
+
+            for participant in participantsBundle.participants {
+                switch participant.provider {
+                case .google:
+                    guard
+                        let accountID = participant.accountID,
+                        let authorizedAccount = participantsBundle.googleAccountsByID[accountID],
+                        let googleCalendar = participantsBundle.googleCalendarsByAccountID[accountID]
+                    else {
+                        continue
+                    }
+
+                    sourceEvents.append(
+                        contentsOf: try await googleCalendarService.listBusySourceEvents(
+                            in: participant,
+                            calendarTimeZone: googleCalendar.timeZone,
+                            window: window,
+                            accessToken: authorizedAccount.accessToken
+                        )
+                    )
+                    existingMirrors.append(
+                        contentsOf: try await googleCalendarService.listManagedMirrorEvents(
+                            in: participant,
+                            calendarTimeZone: googleCalendar.timeZone,
+                            window: window,
+                            accessToken: authorizedAccount.accessToken
+                        )
+                    )
+                case .apple:
+                    sourceEvents.append(
+                        contentsOf: try appleCalendarService.listBusySourceEvents(
+                            in: participant,
+                            window: window
+                        )
+                    )
+                    existingMirrors.append(
+                        contentsOf: try appleCalendarService.listManagedMirrorEvents(
+                            in: participant,
+                            window: window
+                        )
+                    )
+                }
+            }
+
+            let desiredMirrors = BusyMirrorSyncPlanner.desiredMirrors(
+                participants: participantsBundle.participants,
+                sourceEvents: sourceEvents
+            )
+            let operations = BusyMirrorSyncPlanner.operations(
+                desiredMirrors: desiredMirrors,
+                existingMirrors: existingMirrors
+            )
+
+            var createdCount = 0
+            var updatedCount = 0
+            var deletedCount = 0
+            var failureMessages: [String] = []
+
+            for operation in operations {
+                do {
+                    try await applySyncOperation(operation, participantsBundle: participantsBundle)
+                    switch operation {
+                    case .create:
+                        createdCount += 1
+                    case .update:
+                        updatedCount += 1
+                    case .delete:
+                        deletedCount += 1
+                    }
+                } catch {
+                    failureMessages.append(error.localizedDescription)
+                }
+            }
+
+            let summary = BusyMirrorSyncSummary(
+                participantCount: participantsBundle.participants.count,
+                sourceEventCount: sourceEvents.count,
+                createdCount: createdCount,
+                updatedCount: updatedCount,
+                deletedCount: deletedCount,
+                failedCount: failureMessages.count,
+                completedAt: Date(),
+                failureMessages: failureMessages
+            )
+
+            lastBusyMirrorSyncSummary = summary
+            if failureMessages.isEmpty {
+                if summary.participantCount == 1 {
+                    syncMessage = summary.deletedCount == 0
+                        ? "Only one calendar is selected, so no new mirrored busy holds are needed."
+                        : "Only one calendar is selected. Removed stale mirrored busy holds from the remaining calendar."
+                } else {
+                    syncMessage = "Busy mirroring is up to date across \(summary.participantCount) selected calendars."
+                }
+            } else {
+                syncMessage = "Busy mirroring completed with \(summary.failedCount) failed write(s)."
+            }
+        } catch {
+            lastBusyMirrorSyncSummary = BusyMirrorSyncSummary(
+                participantCount: selectedParticipantCount,
+                sourceEventCount: 0,
+                createdCount: 0,
+                updatedCount: 0,
+                deletedCount: 0,
+                failedCount: 1,
+                completedAt: Date(),
+                failureMessages: [error.localizedDescription]
+            )
+            syncMessage = error.localizedDescription
+        }
+    }
+
     func connectGoogleAccount() async {
         guard !isGoogleAuthInFlight else { return }
         if let blockingReason = googleSignInEnvironment.blockingReason {
@@ -561,7 +799,15 @@ final class AppModel: ObservableObject {
         }
 
         do {
-            let storedAccount = try await GoogleSignInService.signIn(using: googleOAuthResolution)
+            let storedAccount = try await GoogleSignInService.signIn(
+                using: googleOAuthResolution,
+                hint: liveGoogleDebugConfiguration.preferredAccountEmail
+            )
+            if let mismatchMessage = liveGoogleEmailMismatchMessage(for: storedAccount) {
+                GoogleSignInService.clearSavedSession()
+                googleAuthMessage = mismatchMessage
+                return
+            }
             let accounts = try googleAccountStore.upsertAccount(storedAccount)
             updateGoogleStoredAccounts(accounts)
             activeGoogleAccountID = storedAccount.id
@@ -570,6 +816,7 @@ final class AppModel: ObservableObject {
                 ? "Google authorization succeeded. A server auth code was issued for backend exchange."
                 : "Google authorization succeeded. Added \(storedAccount.displayName)."
             await refreshGoogleCalendars(for: storedAccount.id)
+            await syncAfterParticipantConfigurationChange()
         } catch let error as GoogleSignInServiceError {
             googleAuthMessage = error.localizedDescription
         } catch let error as GoogleAccountStoreError {
@@ -581,6 +828,7 @@ final class AppModel: ObservableObject {
 
     func removeGoogleAccount(_ accountID: String) {
         guard !isGoogleAuthInFlight else { return }
+        let previousCalendarID = googleSelectedCalendarIDs[accountID] ?? ""
         do {
             GoogleSignInService.removeCurrentUserIfMatches(
                 accountID: accountID,
@@ -595,6 +843,13 @@ final class AppModel: ObservableObject {
             googleAuthMessage = accounts.isEmpty
                 ? "Removed the Google account from this app."
                 : "Removed the Google account from this app. \(accounts.count) Google account(s) remain connected."
+            Task { @MainActor [weak self] in
+                await self?.cleanupDeselectedGoogleCalendar(
+                    accountID: accountID,
+                    calendarID: previousCalendarID
+                )
+                await self?.syncAfterParticipantConfigurationChange()
+            }
         } catch let error as GoogleAccountStoreError {
             googleAuthMessage = error.localizedDescription
         } catch {
@@ -619,7 +874,7 @@ final class AppModel: ObservableObject {
                 accessToken: authorizedAccount.accessToken
             )
             googleCalendarsByAccountID[accountID] = calendars
-            let preferredCalendarName = accountID == activeResolvedGoogleAccountID
+            let preferredCalendarName = accountID == liveGoogleResolvedAccountID
                 ? liveGoogleDebugConfiguration.preferredCalendarName
                 : nil
             let resolvedCalendarID = GoogleCalendarSelectionResolver.resolvedCalendarID(
@@ -627,6 +882,7 @@ final class AppModel: ObservableObject {
                 persistedCalendarID: googleSelectedCalendarIDs[accountID] ?? "",
                 preferredCalendarName: preferredCalendarName
             )
+            let previousCalendarID = googleSelectedCalendarIDs[accountID] ?? ""
             googleSelectedCalendarIDs[accountID] = resolvedCalendarID
             persistSettings()
             if let selectedGoogleCalendar = calendars.first(where: { $0.id == resolvedCalendarID }) {
@@ -636,6 +892,15 @@ final class AppModel: ObservableObject {
                 )
             } else {
                 setGoogleMessage("No writable Google calendars were found for this account.", for: accountID)
+            }
+            if previousCalendarID == resolvedCalendarID {
+                await syncAfterParticipantConfigurationChange()
+            } else {
+                await handleGoogleCalendarSelectionChange(
+                    for: accountID,
+                    from: previousCalendarID,
+                    to: resolvedCalendarID
+                )
             }
             await runLiveGoogleSmokeIfNeeded()
         } catch let error as GoogleSignInServiceError {
@@ -745,6 +1010,220 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func syncNowIfReady() async {
+        guard selectedParticipantCount >= 1 else {
+            return
+        }
+
+        await syncNow()
+    }
+
+    private func syncAfterParticipantConfigurationChange() async {
+        guard hasPrepared else { return }
+
+        guard selectedParticipantCount >= 1 else {
+            lastBusyMirrorSyncSummary = nil
+            syncMessage = "Select calendars to manage mirrored busy holds. Two or more selected calendars create new mirrors."
+            return
+        }
+
+        await syncNow()
+    }
+
+    private func restartSyncLoopIfNeeded() {
+        syncLoopTask?.cancel()
+        syncLoopTask = nil
+
+        guard supportsPollingSettings else {
+            return
+        }
+
+        syncLoopTask = Task { [weak self] in
+            guard let self else { return }
+
+            while !Task.isCancelled {
+                let sleepSeconds = UInt64(max(1, self.pollIntervalMinutes) * 60)
+                do {
+                    try await Task.sleep(for: .seconds(sleepSeconds))
+                } catch {
+                    return
+                }
+
+                if Task.isCancelled {
+                    return
+                }
+
+                await self.syncNowIfReady()
+            }
+        }
+    }
+
+    private func collectSyncParticipants() async throws -> SyncParticipantsBundle {
+        var participants: [BusyMirrorParticipant] = []
+        var googleAccountsByID: [String: GoogleAuthorizedAccount] = [:]
+        var googleCalendarsByAccountID: [String: GoogleCalendarSummary] = [:]
+
+        for storedAccount in googleStoredAccounts {
+            let selectedCalendarID = googleSelectedCalendarIDs[storedAccount.id] ?? ""
+            guard !selectedCalendarID.isEmpty else {
+                continue
+            }
+
+            let authorizedAccount = try await GoogleSignInService.authorizeStoredAccount(storedAccount)
+            try replaceStoredGoogleAccount(authorizedAccount.storedAccount)
+            googleAccountsByID[storedAccount.id] = authorizedAccount
+
+            let writableCalendars: [GoogleCalendarSummary]
+            if
+                let cachedCalendars = self.googleCalendarsByAccountID[storedAccount.id],
+                cachedCalendars.contains(where: { $0.id == selectedCalendarID })
+            {
+                writableCalendars = cachedCalendars
+            } else {
+                writableCalendars = try await googleCalendarService.listWritableCalendars(
+                    accessToken: authorizedAccount.accessToken
+                )
+                self.googleCalendarsByAccountID[storedAccount.id] = writableCalendars
+            }
+
+            guard let selectedCalendar = writableCalendars.first(where: { $0.id == selectedCalendarID }) else {
+                continue
+            }
+
+            googleCalendarsByAccountID[storedAccount.id] = selectedCalendar
+            participants.append(
+                BusyMirrorParticipant(
+                    provider: .google,
+                    accountID: storedAccount.id,
+                    calendarID: selectedCalendar.id,
+                    displayName: "\(storedAccount.displayName) • \(selectedCalendar.displayName)"
+                )
+            )
+        }
+
+        if
+            isAppleCalendarEnabled,
+            appleCalendarAuthorizationState == .granted,
+            let selectedAppleCalendar
+        {
+            participants.append(
+                BusyMirrorParticipant(
+                    provider: .apple,
+                    accountID: nil,
+                    calendarID: selectedAppleCalendar.id,
+                    displayName: selectedAppleCalendar.displayName
+                )
+            )
+        }
+
+        return SyncParticipantsBundle(
+            participants: participants,
+            googleAccountsByID: googleAccountsByID,
+            googleCalendarsByAccountID: googleCalendarsByAccountID
+        )
+    }
+
+    private func applySyncOperation(
+        _ operation: BusyMirrorOperation,
+        participantsBundle: SyncParticipantsBundle
+    ) async throws {
+        switch operation {
+        case let .create(desiredMirror):
+            try await createManagedMirror(desiredMirror, participantsBundle: participantsBundle)
+        case let .update(existingMirror, desiredMirror):
+            try await updateManagedMirror(
+                existingMirror,
+                desiredMirror: desiredMirror,
+                participantsBundle: participantsBundle
+            )
+        case let .delete(existingMirror):
+            try await deleteManagedMirror(existingMirror, participantsBundle: participantsBundle)
+        }
+    }
+
+    private func createManagedMirror(
+        _ desiredMirror: DesiredBusyMirrorEvent,
+        participantsBundle: SyncParticipantsBundle
+    ) async throws {
+        switch desiredMirror.targetParticipant.provider {
+        case .google:
+            guard
+                let accountID = desiredMirror.targetParticipant.accountID,
+                let authorizedAccount = participantsBundle.googleAccountsByID[accountID]
+            else {
+                throw GoogleSignInServiceError.missingAccessToken
+            }
+
+            try await googleCalendarService.createManagedMirrorEvent(
+                desiredMirror: desiredMirror,
+                accessToken: authorizedAccount.accessToken
+            )
+        case .apple:
+            guard let calendar = appleCalendarSummary(for: desiredMirror.targetParticipant.calendarID) else {
+                throw AppleCalendarServiceError.calendarNotFound
+            }
+
+            try appleCalendarService.createManagedMirrorEvent(
+                in: calendar,
+                desiredMirror: desiredMirror
+            )
+        }
+    }
+
+    private func updateManagedMirror(
+        _ existingMirror: ExistingBusyMirrorEvent,
+        desiredMirror: DesiredBusyMirrorEvent,
+        participantsBundle: SyncParticipantsBundle
+    ) async throws {
+        switch existingMirror.targetParticipant.provider {
+        case .google:
+            guard
+                let accountID = existingMirror.targetParticipant.accountID,
+                let authorizedAccount = participantsBundle.googleAccountsByID[accountID]
+            else {
+                throw GoogleSignInServiceError.missingAccessToken
+            }
+
+            try await googleCalendarService.updateManagedMirrorEvent(
+                existingMirror,
+                desiredMirror: desiredMirror,
+                accessToken: authorizedAccount.accessToken
+            )
+        case .apple:
+            try appleCalendarService.updateManagedMirrorEvent(
+                existingMirror,
+                desiredMirror: desiredMirror
+            )
+        }
+    }
+
+    private func deleteManagedMirror(
+        _ existingMirror: ExistingBusyMirrorEvent,
+        participantsBundle: SyncParticipantsBundle
+    ) async throws {
+        switch existingMirror.targetParticipant.provider {
+        case .google:
+            guard
+                let accountID = existingMirror.targetParticipant.accountID,
+                let authorizedAccount = participantsBundle.googleAccountsByID[accountID]
+            else {
+                throw GoogleSignInServiceError.missingAccessToken
+            }
+
+            try await googleCalendarService.deleteManagedMirrorEvent(
+                existingMirror,
+                accessToken: authorizedAccount.accessToken
+            )
+        case .apple:
+            try appleCalendarService.deleteManagedMirrorEvent(existingMirror)
+        }
+    }
+
+    private func appleCalendarSummary(for calendarID: String) -> AppleCalendarSummary? {
+        appleCalendars.first(where: { $0.id == calendarID })
+            ?? selectedAppleCalendar.flatMap { $0.id == calendarID ? $0 : nil }
+    }
+
     private func loadInitialState() throws -> ScenarioState {
         guard launchOptions.scenarioRoot != nil || launchOptions.scenarioName != nil else {
             return .emptyLiveShell
@@ -787,6 +1266,8 @@ final class AppModel: ObservableObject {
     }
 
     private func restoreGoogleAccountsIfPossible() async {
+        GoogleSignInService.clearSavedSession()
+
         do {
             let storedAccounts = try googleAccountStore.loadAccounts()
             updateGoogleStoredAccounts(storedAccounts)
@@ -807,30 +1288,6 @@ final class AppModel: ObservableObject {
         } catch {
             googleAuthMessage = "Saved Google accounts could not be restored from secure storage."
             return
-        }
-
-        guard case .valid = googleOAuthResolution else {
-            return
-        }
-        guard googleSignInEnvironment.allowsInteractiveSignIn else {
-            return
-        }
-
-        do {
-            if let importedAccount = try await GoogleSignInService.restorePreviousSignIn(using: googleOAuthResolution) {
-                let accounts = try googleAccountStore.upsertAccount(importedAccount)
-                updateGoogleStoredAccounts(accounts)
-                activeGoogleAccountID = importedAccount.id
-                persistSettings()
-                googleAuthMessage = "Imported a previously connected Google account into this app."
-                await refreshGoogleCalendars(for: importedAccount.id)
-            }
-        } catch let error as GoogleSignInServiceError {
-            googleAuthMessage = error.localizedDescription
-        } catch let error as GoogleAccountStoreError {
-            googleAuthMessage = error.localizedDescription
-        } catch {
-            googleAuthMessage = "A stored Google session could not be restored. Connect Google again if you want live calendar access."
         }
     }
 
@@ -892,6 +1349,14 @@ final class AppModel: ObservableObject {
         return googleStoredAccounts.first?.id
     }
 
+    private var liveGoogleResolvedAccountID: String? {
+        LiveGoogleAccountResolver.resolvedAccountID(
+            accounts: googleStoredAccounts,
+            activeAccountID: activeResolvedGoogleAccountID,
+            preferredEmail: liveGoogleDebugConfiguration.preferredAccountEmail
+        )
+    }
+
     private func storedGoogleAccount(id: String) -> StoredGoogleAccount? {
         googleStoredAccounts.first(where: { $0.id == id })
     }
@@ -910,9 +1375,19 @@ final class AppModel: ObservableObject {
     }
 
     func setSelectedGoogleCalendarID(_ calendarID: String, for accountID: String) {
+        let previousCalendarID = googleSelectedCalendarIDs[accountID] ?? ""
         googleSelectedCalendarIDs[accountID] = calendarID
         activeGoogleAccountID = accountID
         persistSettings()
+
+        guard hasPrepared, previousCalendarID != calendarID else { return }
+        Task { @MainActor [weak self] in
+            await self?.handleGoogleCalendarSelectionChange(
+                for: accountID,
+                from: previousCalendarID,
+                to: calendarID
+            )
+        }
     }
 
     func setActiveGoogleAccount(_ accountID: String) {
@@ -953,12 +1428,24 @@ final class AppModel: ObservableObject {
         return "Google authorization did not complete: \(description)"
     }
 
+    private func liveGoogleEmailMismatchMessage(for account: StoredGoogleAccount) -> String? {
+        guard
+            liveGoogleDebugConfiguration.isEnabled,
+            let preferredAccountEmail = liveGoogleDebugConfiguration.preferredAccountEmail,
+            account.email.compare(preferredAccountEmail, options: .caseInsensitive) != .orderedSame
+        else {
+            return nil
+        }
+
+        return "Google authorization completed as \(account.email), but live verification requires \(preferredAccountEmail)."
+    }
+
     private func runLiveGoogleSmokeIfNeeded() async {
         guard liveGoogleDebugConfiguration.isEnabled, !hasAttemptedLiveGoogleSmoke else {
             return
         }
 
-        guard let accountID = activeResolvedGoogleAccountID else {
+        guard let accountID = liveGoogleResolvedAccountID else {
             liveGoogleSmokeStatus = .awaitingAuthentication
             return
         }
@@ -1028,6 +1515,140 @@ final class AppModel: ObservableObject {
         return selectedGoogleCalendar(for: accountID)
     }
 
+    private func handleAppleCalendarSelectionChange(
+        from previousCalendarID: String,
+        to nextCalendarID: String
+    ) async {
+        if !previousCalendarID.isEmpty {
+            await cleanupDeselectedAppleCalendar(calendarID: previousCalendarID)
+        }
+
+        if previousCalendarID != nextCalendarID {
+            lastManagedAppleEvent = nil
+        }
+
+        await syncAfterParticipantConfigurationChange()
+    }
+
+    private func handleGoogleCalendarSelectionChange(
+        for accountID: String,
+        from previousCalendarID: String,
+        to nextCalendarID: String
+    ) async {
+        if !previousCalendarID.isEmpty {
+            await cleanupDeselectedGoogleCalendar(
+                accountID: accountID,
+                calendarID: previousCalendarID
+            )
+        }
+
+        if previousCalendarID != nextCalendarID {
+            lastManagedGoogleEventsByAccountID[accountID] = nil
+        }
+
+        await syncAfterParticipantConfigurationChange()
+    }
+
+    private func cleanupDeselectedAppleCalendar(calendarID: String) async {
+        guard !calendarID.isEmpty else { return }
+        guard appleCalendarAuthorizationState == .granted else { return }
+
+        let participant = BusyMirrorParticipant(
+            provider: .apple,
+            accountID: nil,
+            calendarID: calendarID,
+            displayName: appleCalendarSummary(for: calendarID)?.displayName ?? "Previous Apple calendar"
+        )
+
+        do {
+            let mirrors = try appleCalendarService.listManagedMirrorEvents(
+                in: participant,
+                window: BusyMirrorSyncWindow.defaultWindow()
+            )
+            for mirror in mirrors {
+                try appleCalendarService.deleteManagedMirrorEvent(mirror)
+            }
+
+            if !mirrors.isEmpty {
+                appleCalendarMessage = "Removed \(mirrors.count) mirrored busy hold(s) from \(participant.displayName)."
+            }
+        } catch let error as AppleCalendarServiceError {
+            appleCalendarMessage = error.localizedDescription
+        } catch {
+            appleCalendarMessage = "Apple Calendar cleanup failed from the current app session."
+        }
+    }
+
+    private func cleanupDeselectedGoogleCalendar(
+        accountID: String,
+        calendarID: String
+    ) async {
+        guard !calendarID.isEmpty else { return }
+        guard let storedAccount = storedGoogleAccount(id: accountID) else { return }
+
+        do {
+            let authorizedAccount = try await GoogleSignInService.authorizeStoredAccount(storedAccount)
+            try replaceStoredGoogleAccount(authorizedAccount.storedAccount)
+            let calendar = try await googleCalendarSummary(
+                for: accountID,
+                calendarID: calendarID,
+                authorizedAccount: authorizedAccount
+            )
+            let participant = BusyMirrorParticipant(
+                provider: .google,
+                accountID: accountID,
+                calendarID: calendarID,
+                displayName: "\(storedAccount.displayName) • \(calendar?.displayName ?? "Previous Google calendar")"
+            )
+            let mirrors = try await googleCalendarService.listManagedMirrorEvents(
+                in: participant,
+                calendarTimeZone: calendar?.timeZone,
+                window: BusyMirrorSyncWindow.defaultWindow(),
+                accessToken: authorizedAccount.accessToken
+            )
+            for mirror in mirrors {
+                try await googleCalendarService.deleteManagedMirrorEvent(
+                    mirror,
+                    accessToken: authorizedAccount.accessToken
+                )
+            }
+
+            if !mirrors.isEmpty {
+                setGoogleMessage(
+                    "Removed \(mirrors.count) mirrored busy hold(s) from \(participant.displayName).",
+                    for: accountID
+                )
+            }
+        } catch let error as GoogleSignInServiceError {
+            setGoogleMessage(error.localizedDescription, for: accountID)
+        } catch let error as GoogleCalendarServiceError {
+            setGoogleMessage(error.localizedDescription, for: accountID)
+        } catch let error as GoogleAccountStoreError {
+            setGoogleMessage(error.localizedDescription, for: accountID)
+        } catch {
+            setGoogleMessage(
+                "Google Calendar cleanup failed. Try again from the current app window.",
+                for: accountID
+            )
+        }
+    }
+
+    private func googleCalendarSummary(
+        for accountID: String,
+        calendarID: String,
+        authorizedAccount: GoogleAuthorizedAccount
+    ) async throws -> GoogleCalendarSummary? {
+        if let cachedCalendar = googleCalendarsByAccountID[accountID]?.first(where: { $0.id == calendarID }) {
+            return cachedCalendar
+        }
+
+        let calendars = try await googleCalendarService.listWritableCalendars(
+            accessToken: authorizedAccount.accessToken
+        )
+        googleCalendarsByAccountID[accountID] = calendars
+        return calendars.first(where: { $0.id == calendarID })
+    }
+
     private var googleAuditEntries: [AuditTrailEntry] {
         var entries: [AuditTrailEntry] = []
 
@@ -1060,6 +1681,45 @@ final class AppModel: ObservableObject {
                     title: "Authorization status",
                     detail: message,
                     status: googleStoredAccounts.isEmpty ? "pending" : "ready"
+                )
+            )
+        }
+
+        return entries
+    }
+
+    private var syncAuditEntries: [AuditTrailEntry] {
+        var entries: [AuditTrailEntry] = [
+            AuditTrailEntry(
+                timestampLabel: "Sync",
+                title: "Participant calendars",
+                detail: selectedParticipantCount == 0
+                    ? "Select calendars to manage mirrored busy holds."
+                    : (selectedParticipantCount == 1
+                        ? "One calendar is selected. Existing mirrored holds can be cleaned up, but new mirrors require at least two calendars."
+                        : "\(selectedParticipantCount) calendars participate in full-mesh busy mirroring."),
+                status: selectedParticipantCount == 0 ? "pending" : (selectedParticipantCount == 1 ? "limited" : "ready")
+            )
+        ]
+
+        if let lastBusyMirrorSyncSummary {
+            entries.append(
+                AuditTrailEntry(
+                    timestampLabel: "Sync",
+                    title: "Last reconciliation run",
+                    detail: "Created \(lastBusyMirrorSyncSummary.createdCount), updated \(lastBusyMirrorSyncSummary.updatedCount), deleted \(lastBusyMirrorSyncSummary.deletedCount), failed \(lastBusyMirrorSyncSummary.failedCount).",
+                    status: lastBusyMirrorSyncSummary.status
+                )
+            )
+        }
+
+        if let syncMessage {
+            entries.append(
+                AuditTrailEntry(
+                    timestampLabel: "Sync",
+                    title: "Sync status",
+                    detail: syncMessage,
+                    status: isSyncInFlight ? "working" : (lastBusyMirrorSyncSummary?.status ?? "pending")
                 )
             )
         }
@@ -1217,23 +1877,64 @@ final class AppModel: ObservableObject {
             }
         }
     }
+
+    private static let syncTimestampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "MMM d, HH:mm:ss"
+        return formatter
+    }()
 }
 
-private struct LiveGoogleDebugConfiguration {
+private struct SyncParticipantsBundle {
+    let participants: [BusyMirrorParticipant]
+    let googleAccountsByID: [String: GoogleAuthorizedAccount]
+    let googleCalendarsByAccountID: [String: GoogleCalendarSummary]
+}
+
+struct LiveGoogleDebugConfiguration: Equatable {
     let isEnabled: Bool
+    let preferredAccountEmail: String?
     let preferredCalendarName: String?
 
     static func from(processInfo: ProcessInfo) -> LiveGoogleDebugConfiguration {
         let environment = processInfo.environment
         let enabled = environment["CALENDAR_BUSY_SYNC_LIVE_E2E"] == "1"
+        let preferredAccountEmail = environment["CALENDAR_BUSY_SYNC_E2E_ACCOUNT_EMAIL"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nilIfEmpty
         let preferredCalendarName = environment["CALENDAR_BUSY_SYNC_E2E_CALENDAR_NAME"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .nilIfEmpty
 
         return LiveGoogleDebugConfiguration(
             isEnabled: enabled,
+            preferredAccountEmail: preferredAccountEmail,
             preferredCalendarName: preferredCalendarName
         )
+    }
+}
+
+enum LiveGoogleAccountResolver {
+    static func resolvedAccountID(
+        accounts: [StoredGoogleAccount],
+        activeAccountID: String?,
+        preferredEmail: String?
+    ) -> String? {
+        if
+            let preferredEmail = preferredEmail?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+            let preferredAccount = accounts.first(where: {
+                $0.email.compare(preferredEmail, options: .caseInsensitive) == .orderedSame
+            })
+        {
+            return preferredAccount.id
+        }
+
+        if let activeAccountID, accounts.contains(where: { $0.id == activeAccountID }) {
+            return activeAccountID
+        }
+
+        return accounts.first?.id
     }
 }
 

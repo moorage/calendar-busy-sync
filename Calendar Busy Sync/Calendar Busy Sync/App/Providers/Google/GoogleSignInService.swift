@@ -62,21 +62,31 @@ enum GoogleSignInService {
     }
 
     static func signIn(using resolution: GoogleOAuthConfigurationResolution) async throws -> StoredGoogleAccount {
+        try await signIn(using: resolution, hint: nil)
+    }
+
+    static func signIn(
+        using resolution: GoogleOAuthConfigurationResolution,
+        hint: String?
+    ) async throws -> StoredGoogleAccount {
         let configuration = try validatedConfiguration(from: resolution)
-        apply(configuration: configuration)
+        let normalizedHint = normalizedHint(hint)
+        let hostedDomain = hostedDomain(for: normalizedHint)
+        apply(configuration: configuration, hostedDomain: hostedDomain)
+        clearSavedSession()
 
         #if os(iOS)
         let presenter = try presentingViewController()
         let result = try await GIDSignIn.sharedInstance.signIn(
             withPresenting: presenter,
-            hint: nil,
+            hint: normalizedHint,
             additionalScopes: GoogleCalendarScopes.required
         )
         #elseif os(macOS)
         let presenter = try presentingWindow()
         let result = try await GIDSignIn.sharedInstance.signIn(
             withPresenting: presenter,
-            hint: nil,
+            hint: normalizedHint,
             additionalScopes: GoogleCalendarScopes.required
         )
         #endif
@@ -99,6 +109,10 @@ enum GoogleSignInService {
             return
         }
 
+        GIDSignIn.sharedInstance.signOut()
+    }
+
+    static func clearSavedSession() {
         GIDSignIn.sharedInstance.signOut()
     }
 
@@ -147,10 +161,15 @@ enum GoogleSignInService {
         return configuration
     }
 
-    private static func apply(configuration: ResolvedGoogleOAuthConfiguration) {
+    private static func apply(
+        configuration: ResolvedGoogleOAuthConfiguration,
+        hostedDomain: String? = nil
+    ) {
         GIDSignIn.sharedInstance.configuration = GIDConfiguration(
             clientID: configuration.clientID,
-            serverClientID: configuration.serverClientID
+            serverClientID: configuration.serverClientID,
+            hostedDomain: hostedDomain,
+            openIDRealm: nil
         )
     }
 
@@ -261,6 +280,27 @@ enum GoogleSignInService {
         throw GoogleSignInServiceError.presenterUnavailable
     }
     #endif
+
+    private static func normalizedHint(_ hint: String?) -> String? {
+        let trimmed = hint?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func hostedDomain(for hint: String?) -> String? {
+        guard
+            let hint,
+            let domain = hint.split(separator: "@", maxSplits: 1).last.map(String.init)
+        else {
+            return nil
+        }
+
+        switch domain.lowercased() {
+        case "gmail.com", "googlemail.com":
+            return nil
+        default:
+            return domain
+        }
+    }
 }
 
 #if os(iOS)

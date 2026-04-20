@@ -7,6 +7,11 @@ protocol AppleCalendarProviding: AnyObject {
     func listWritableCalendars() throws -> [AppleCalendarSummary]
     func createManagedBusyEvent(in calendar: AppleCalendarSummary) throws -> AppleManagedEventRecord
     func deleteManagedBusyEvent(_ event: AppleManagedEventRecord) throws
+    func listBusySourceEvents(in participant: BusyMirrorParticipant, window: DateInterval) throws -> [BusyMirrorSourceEvent]
+    func listManagedMirrorEvents(in participant: BusyMirrorParticipant, window: DateInterval) throws -> [ExistingBusyMirrorEvent]
+    func createManagedMirrorEvent(in calendar: AppleCalendarSummary, desiredMirror: DesiredBusyMirrorEvent) throws
+    func updateManagedMirrorEvent(_ existingMirror: ExistingBusyMirrorEvent, desiredMirror: DesiredBusyMirrorEvent) throws
+    func deleteManagedMirrorEvent(_ existingMirror: ExistingBusyMirrorEvent) throws
 }
 
 enum AppleCalendarServiceError: LocalizedError, Equatable {
@@ -16,6 +21,7 @@ enum AppleCalendarServiceError: LocalizedError, Equatable {
     case calendarNotFound
     case managedEventMissing
     case requestFailed(String)
+    case invalidManagedMetadata
 
     var errorDescription: String? {
         switch self {
@@ -31,6 +37,8 @@ enum AppleCalendarServiceError: LocalizedError, Equatable {
             return "The managed busy slot is no longer present in the selected Apple calendar."
         case let .requestFailed(message):
             return message
+        case .invalidManagedMetadata:
+            return "Apple Calendar returned a managed mirror event with invalid metadata."
         }
     }
 }
@@ -146,6 +154,115 @@ final class AppleCalendarService: AppleCalendarProviding {
         }
     }
 
+    func listBusySourceEvents(in participant: BusyMirrorParticipant, window: DateInterval) throws -> [BusyMirrorSourceEvent] {
+        try requireGrantedAuthorization()
+
+        guard let calendar = eventStore.calendar(withIdentifier: participant.calendarID) else {
+            throw AppleCalendarServiceError.calendarNotFound
+        }
+
+        return try events(in: calendar, window: window).compactMap { event in
+            guard !ManagedAppleMirrorNotes.isManagedMirror(event.notes) else {
+                return nil
+            }
+            guard event.blocksTime else {
+                return nil
+            }
+
+            return BusyMirrorSourceEvent(
+                key: BusyMirrorSourceKey(
+                    provider: .apple,
+                    calendarID: participant.calendarID,
+                    eventID: event.eventIdentifier
+                ),
+                participantID: participant.id,
+                startDate: event.startDate,
+                endDate: event.endDate,
+                isAllDay: event.isAllDay
+            )
+        }
+    }
+
+    func listManagedMirrorEvents(in participant: BusyMirrorParticipant, window: DateInterval) throws -> [ExistingBusyMirrorEvent] {
+        try requireGrantedAuthorization()
+
+        guard let calendar = eventStore.calendar(withIdentifier: participant.calendarID) else {
+            throw AppleCalendarServiceError.calendarNotFound
+        }
+
+        return try events(in: calendar, window: window).compactMap { event in
+            guard let sourceKey = ManagedAppleMirrorNotes.sourceKey(from: event.notes) else {
+                return nil
+            }
+
+            return ExistingBusyMirrorEvent(
+                identity: BusyMirrorIdentity(
+                    sourceKey: sourceKey,
+                    targetParticipantID: participant.id
+                ),
+                targetParticipant: participant,
+                eventID: event.eventIdentifier,
+                startDate: event.startDate,
+                endDate: event.endDate,
+                isAllDay: event.isAllDay
+            )
+        }
+    }
+
+    func createManagedMirrorEvent(in calendar: AppleCalendarSummary, desiredMirror: DesiredBusyMirrorEvent) throws {
+        try requireGrantedAuthorization()
+
+        guard let writableCalendar = eventStore.calendar(withIdentifier: calendar.id) else {
+            throw AppleCalendarServiceError.calendarNotFound
+        }
+
+        let event = EKEvent(eventStore: eventStore)
+        event.calendar = writableCalendar
+        applyManagedMirror(desiredMirror, to: event)
+
+        do {
+            try eventStore.save(event, span: .thisEvent, commit: true)
+        } catch {
+            throw AppleCalendarServiceError.requestFailed(
+                "Apple Calendar could not create a mirrored busy slot during sync."
+            )
+        }
+    }
+
+    func updateManagedMirrorEvent(_ existingMirror: ExistingBusyMirrorEvent, desiredMirror: DesiredBusyMirrorEvent) throws {
+        try requireGrantedAuthorization()
+
+        guard let event = eventStore.event(withIdentifier: existingMirror.eventID) else {
+            throw AppleCalendarServiceError.managedEventMissing
+        }
+
+        applyManagedMirror(desiredMirror, to: event)
+
+        do {
+            try eventStore.save(event, span: .thisEvent, commit: true)
+        } catch {
+            throw AppleCalendarServiceError.requestFailed(
+                "Apple Calendar could not update a mirrored busy slot during sync."
+            )
+        }
+    }
+
+    func deleteManagedMirrorEvent(_ existingMirror: ExistingBusyMirrorEvent) throws {
+        try requireGrantedAuthorization()
+
+        guard let event = eventStore.event(withIdentifier: existingMirror.eventID) else {
+            throw AppleCalendarServiceError.managedEventMissing
+        }
+
+        do {
+            try eventStore.remove(event, span: .thisEvent, commit: true)
+        } catch {
+            throw AppleCalendarServiceError.requestFailed(
+                "Apple Calendar could not delete a stale mirrored busy slot during sync."
+            )
+        }
+    }
+
     private func requestCalendarAccess() async throws {
         do {
             if #available(iOS 17.0, macOS 14.0, *) {
@@ -181,7 +298,40 @@ final class AppleCalendarService: AppleCalendarProviding {
         }
     }
 
+    private func events(in calendar: EKCalendar, window: DateInterval) throws -> [EKEvent] {
+        let predicate = eventStore.predicateForEvents(
+            withStart: window.start,
+            end: window.end,
+            calendars: [calendar]
+        )
+        return eventStore.events(matching: predicate)
+    }
+
+    private func applyManagedMirror(_ desiredMirror: DesiredBusyMirrorEvent, to event: EKEvent) {
+        event.title = "Busy"
+        event.notes = ManagedAppleMirrorNotes.notes(for: desiredMirror.identity)
+        event.startDate = desiredMirror.startDate
+        event.endDate = desiredMirror.endDate
+        event.availability = .busy
+        event.isAllDay = desiredMirror.isAllDay
+    }
+
     private static func authorizationState(from status: EKAuthorizationStatus) -> AppleCalendarAuthorizationState {
+        if #available(iOS 17.0, macOS 14.0, *) {
+            switch status {
+            case .authorized, .fullAccess, .writeOnly:
+                return .granted
+            case .denied:
+                return .denied
+            case .restricted:
+                return .restricted
+            case .notDetermined:
+                return .notDetermined
+            @unknown default:
+                return .denied
+            }
+        }
+
         switch status {
         case .authorized:
             return .granted
@@ -192,15 +342,6 @@ final class AppleCalendarService: AppleCalendarProviding {
         case .notDetermined:
             return .notDetermined
         @unknown default:
-            if #available(iOS 17.0, macOS 14.0, *) {
-                switch status {
-                case .fullAccess, .writeOnly:
-                    return .granted
-                default:
-                    return .denied
-                }
-            }
-
             return .denied
         }
     }
@@ -234,6 +375,83 @@ final class AppleCalendarService: AppleCalendarProviding {
             return .birthdays
         default:
             return .other
+        }
+    }
+}
+
+private enum ManagedAppleMirrorNotes {
+    private static let managedPrefix = "calendarBusySyncManaged=true"
+    private static let kindPrefix = "calendarBusySyncKind=mirror"
+    private static let sourceProviderPrefix = "calendarBusySyncSourceProvider="
+    private static let sourceCalendarPrefix = "calendarBusySyncSourceCalendarID="
+    private static let sourceEventPrefix = "calendarBusySyncSourceEventID="
+
+    static func notes(for identity: BusyMirrorIdentity) -> String {
+        [
+            "Managed by Calendar Busy Sync mirror reconciliation.",
+            managedPrefix,
+            kindPrefix,
+            "\(sourceProviderPrefix)\(identity.sourceKey.provider.rawValue)",
+            "\(sourceCalendarPrefix)\(identity.sourceKey.calendarID)",
+            "\(sourceEventPrefix)\(identity.sourceKey.eventID)",
+        ].joined(separator: "\n")
+    }
+
+    static func isManagedMirror(_ notes: String?) -> Bool {
+        sourceKey(from: notes) != nil
+    }
+
+    static func sourceKey(from notes: String?) -> BusyMirrorSourceKey? {
+        guard let notes else {
+            return nil
+        }
+
+        var providerRawValue: String?
+        var calendarID: String?
+        var eventID: String?
+        var isManaged = false
+        var isMirror = false
+
+        for line in notes.components(separatedBy: .newlines) {
+            if line == managedPrefix {
+                isManaged = true
+            } else if line == kindPrefix {
+                isMirror = true
+            } else if line.hasPrefix(sourceProviderPrefix) {
+                providerRawValue = String(line.dropFirst(sourceProviderPrefix.count))
+            } else if line.hasPrefix(sourceCalendarPrefix) {
+                calendarID = String(line.dropFirst(sourceCalendarPrefix.count))
+            } else if line.hasPrefix(sourceEventPrefix) {
+                eventID = String(line.dropFirst(sourceEventPrefix.count))
+            }
+        }
+
+        guard
+            isManaged,
+            isMirror,
+            let providerRawValue,
+            let provider = BusyMirrorProvider(rawValue: providerRawValue),
+            let calendarID,
+            let eventID
+        else {
+            return nil
+        }
+
+        return BusyMirrorSourceKey(
+            provider: provider,
+            calendarID: calendarID,
+            eventID: eventID
+        )
+    }
+}
+
+private extension EKEvent {
+    var blocksTime: Bool {
+        switch availability {
+        case .free:
+            return false
+        default:
+            return true
         }
     }
 }

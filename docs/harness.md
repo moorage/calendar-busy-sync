@@ -51,6 +51,6 @@ The scripts are responsible for:
 
 This harness currently covers local bootstrap, build, unit-test, integration-test, checkpoint capture, Google client-plist sync for the default auth configuration, the live Apple / iCloud EventKit settings slice, and a macOS live Google smoke runner that drives the app through accessibility identifiers.
 
-The live macOS smoke runner attempts the real Google auth handoff, waits for writable-calendar selection and managed event create/delete, and fails explicitly when local Apple signing/account state prevents the OS auth session from surfacing.
+The live macOS smoke runner builds a signed macOS debug app, clears the app-owned Google roster, sets `CALENDAR_BUSY_SYNC_E2E_ACCOUNT_EMAIL` plus `CALENDAR_BUSY_SYNC_E2E_CALENDAR_NAME` from `.env`, and uses `AXPress` accessibility actions to drive the real Google auth handoff before the managed event create/delete round-trip.
 
 Manual macOS Google auth checks also need a signed app launch. The default harness build uses `CODE_SIGNING_ALLOWED=NO`, so it is suitable for build/test automation and scenario smoke work, but not for a browser-to-keychain Google sign-in round trip.

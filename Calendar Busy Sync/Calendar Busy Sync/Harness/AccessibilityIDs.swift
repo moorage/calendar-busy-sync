@@ -6,6 +6,8 @@ enum AccessibilityIDs {
     static let syncStatusLastRun = "sync-status.last-run"
     static let syncStatusPendingCount = "sync-status.pending-count"
     static let syncStatusFailedCount = "sync-status.failed-count"
+    static let syncStatusDetail = "sync-status.detail"
+    static let syncNowButton = "sync-status.sync-now"
     static let syncPollIntervalStepper = "settings.sync.poll-interval"
     static let appleCalendarConnectionStatusLabel = "apple-calendar.connection-status"
     static let appleCalendarStatusLabel = "apple-calendar.status"

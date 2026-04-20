@@ -39,14 +39,14 @@ struct GoogleAccountCardModel: Identifiable, Equatable {
 
     var detail: String {
         if let selectedCalendar {
-            return "Destination calendar: \(selectedCalendar.displayName)"
+            return "Participating calendar: \(selectedCalendar.displayName)"
         }
 
         if calendars.isEmpty {
-            return "Load writable calendars for this account, then choose where mirrored busy slots should be written."
+            return "Load writable calendars for this account, then choose which one participates in busy mirroring."
         }
 
-        return "Choose which calendar in this Google account should receive mirrored busy slots."
+        return "Choose which calendar in this Google account participates in busy mirroring."
     }
 
     var metadataLine: String {

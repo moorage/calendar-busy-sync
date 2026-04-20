@@ -4,6 +4,7 @@ enum GoogleCalendarServiceError: LocalizedError, Equatable {
     case missingAccessToken
     case invalidResponse
     case api(statusCode: Int, message: String)
+    case invalidEventDate
 
     var errorDescription: String? {
         switch self {
@@ -13,6 +14,8 @@ enum GoogleCalendarServiceError: LocalizedError, Equatable {
             return "Google Calendar returned an unexpected response."
         case let .api(statusCode, message):
             return "Google Calendar API error \(statusCode): \(message)"
+        case .invalidEventDate:
+            return "Google Calendar returned an event with an invalid date."
         }
     }
 }
@@ -89,6 +92,141 @@ struct GoogleCalendarService {
             eventID: response.id,
             summary: response.summary ?? draft.summary,
             windowDescription: draft.windowDescription
+        )
+    }
+
+    func listBusySourceEvents(
+        in participant: BusyMirrorParticipant,
+        calendarTimeZone: String?,
+        window: DateInterval,
+        accessToken: String
+    ) async throws -> [BusyMirrorSourceEvent] {
+        let response: CalendarEventsResponse = try await performJSONRequest(
+            accessToken: accessToken,
+            method: "GET",
+            path: "/calendar/v3/calendars/\(participant.calendarID.urlPathComponentEncoded)/events",
+            queryItems: [
+                URLQueryItem(name: "singleEvents", value: "true"),
+                URLQueryItem(name: "showDeleted", value: "false"),
+                URLQueryItem(name: "orderBy", value: "startTime"),
+                URLQueryItem(name: "timeMin", value: RFC3339.format(window.start)),
+                URLQueryItem(name: "timeMax", value: RFC3339.format(window.end)),
+            ],
+            body: Optional<InsertEventRequest>.none
+        )
+
+        return try response.items.compactMap { item in
+            guard item.status?.lowercased() != "cancelled" else {
+                return nil
+            }
+            guard !item.isManagedBusyMirror else {
+                return nil
+            }
+            guard item.blocksTime else {
+                return nil
+            }
+
+            let eventWindow = try item.window(calendarTimeZone: calendarTimeZone)
+            return BusyMirrorSourceEvent(
+                key: BusyMirrorSourceKey(
+                    provider: .google,
+                    calendarID: participant.calendarID,
+                    eventID: item.id
+                ),
+                participantID: participant.id,
+                startDate: eventWindow.startDate,
+                endDate: eventWindow.endDate,
+                isAllDay: eventWindow.isAllDay
+            )
+        }
+    }
+
+    func listManagedMirrorEvents(
+        in participant: BusyMirrorParticipant,
+        calendarTimeZone: String?,
+        window: DateInterval,
+        accessToken: String
+    ) async throws -> [ExistingBusyMirrorEvent] {
+        let response: CalendarEventsResponse = try await performJSONRequest(
+            accessToken: accessToken,
+            method: "GET",
+            path: "/calendar/v3/calendars/\(participant.calendarID.urlPathComponentEncoded)/events",
+            queryItems: [
+                URLQueryItem(name: "singleEvents", value: "true"),
+                URLQueryItem(name: "showDeleted", value: "false"),
+                URLQueryItem(name: "timeMin", value: RFC3339.format(window.start)),
+                URLQueryItem(name: "timeMax", value: RFC3339.format(window.end)),
+                URLQueryItem(name: "privateExtendedProperty", value: "\(ManagedMirrorMetadata.keys.managed)=true"),
+                URLQueryItem(name: "privateExtendedProperty", value: "\(ManagedMirrorMetadata.keys.kind)=mirror"),
+            ],
+            body: Optional<InsertEventRequest>.none
+        )
+
+        return try response.items.compactMap { item in
+            guard let metadata = item.managedMirrorMetadata else {
+                return nil
+            }
+
+            let eventWindow = try item.window(calendarTimeZone: calendarTimeZone)
+            return ExistingBusyMirrorEvent(
+                identity: BusyMirrorIdentity(
+                    sourceKey: metadata.sourceKey,
+                    targetParticipantID: participant.id
+                ),
+                targetParticipant: participant,
+                eventID: item.id,
+                startDate: eventWindow.startDate,
+                endDate: eventWindow.endDate,
+                isAllDay: eventWindow.isAllDay
+            )
+        }
+    }
+
+    func createManagedMirrorEvent(
+        desiredMirror: DesiredBusyMirrorEvent,
+        accessToken: String
+    ) async throws {
+        let payload = InsertEventRequest.mirror(for: desiredMirror)
+        _ = try await performJSONRequest(
+            accessToken: accessToken,
+            method: "POST",
+            path: "/calendar/v3/calendars/\(desiredMirror.targetParticipant.calendarID.urlPathComponentEncoded)/events",
+            queryItems: [
+                URLQueryItem(name: "sendUpdates", value: "none"),
+            ],
+            body: payload
+        ) as InsertEventResponse
+    }
+
+    func updateManagedMirrorEvent(
+        _ existingMirror: ExistingBusyMirrorEvent,
+        desiredMirror: DesiredBusyMirrorEvent,
+        accessToken: String
+    ) async throws {
+        let payload = InsertEventRequest.mirror(for: desiredMirror)
+        _ = try await performJSONRequest(
+            accessToken: accessToken,
+            method: "PATCH",
+            path: "/calendar/v3/calendars/\(existingMirror.targetParticipant.calendarID.urlPathComponentEncoded)/events/\(existingMirror.eventID.urlPathComponentEncoded)",
+            queryItems: [
+                URLQueryItem(name: "sendUpdates", value: "none"),
+            ],
+            body: payload
+        ) as InsertEventResponse
+    }
+
+    func deleteManagedMirrorEvent(
+        _ existingMirror: ExistingBusyMirrorEvent,
+        accessToken: String
+    ) async throws {
+        _ = try await performRequest(
+            accessToken: accessToken,
+            method: "DELETE",
+            path: "/calendar/v3/calendars/\(existingMirror.targetParticipant.calendarID.urlPathComponentEncoded)/events/\(existingMirror.eventID.urlPathComponentEncoded)",
+            queryItems: [
+                URLQueryItem(name: "sendUpdates", value: "none"),
+            ],
+            body: Optional<InsertEventRequest>.none
         )
     }
 
@@ -191,6 +329,10 @@ private struct CalendarListResponse: Decodable {
     let items: [GoogleCalendarSummary]
 }
 
+private struct CalendarEventsResponse: Decodable {
+    let items: [GoogleCalendarEventItem]
+}
+
 private struct GoogleAPIErrorEnvelope: Decodable {
     struct Payload: Decodable {
         let message: String
@@ -213,6 +355,29 @@ private struct InsertEventRequest: Encodable {
     let extendedProperties: EventExtendedProperties
     let start: EventDateTime
     let end: EventDateTime
+
+    static func mirror(for desiredMirror: DesiredBusyMirrorEvent) -> InsertEventRequest {
+        InsertEventRequest(
+            summary: "Busy",
+            description: "Managed by Calendar Busy Sync mirror reconciliation.",
+            visibility: "private",
+            transparency: "opaque",
+            reminders: EventReminders(useDefault: false),
+            extendedProperties: EventExtendedProperties(
+                privateProperties: ManagedMirrorMetadata.privateProperties(for: desiredMirror.identity)
+            ),
+            start: EventDateTime.from(
+                startDate: desiredMirror.startDate,
+                endDate: desiredMirror.endDate,
+                isAllDay: desiredMirror.isAllDay
+            ).start,
+            end: EventDateTime.from(
+                startDate: desiredMirror.startDate,
+                endDate: desiredMirror.endDate,
+                isAllDay: desiredMirror.isAllDay
+            ).end
+        )
+    }
 }
 
 private struct EventReminders: Encodable {
@@ -228,8 +393,34 @@ private struct EventExtendedProperties: Encodable {
 }
 
 private struct EventDateTime: Encodable {
-    let dateTime: String
-    let timeZone: String
+    let dateTime: String?
+    let timeZone: String?
+    let date: String?
+
+    static func from(
+        startDate: Date,
+        endDate: Date,
+        isAllDay: Bool
+    ) -> (start: EventDateTime, end: EventDateTime) {
+        if isAllDay {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = TimeZone(secondsFromGMT: 0)
+            formatter.dateFormat = "yyyy-MM-dd"
+            return (
+                EventDateTime(dateTime: nil, timeZone: nil, date: formatter.string(from: startDate)),
+                EventDateTime(dateTime: nil, timeZone: nil, date: formatter.string(from: endDate))
+            )
+        }
+
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        formatter.timeZone = .current
+        return (
+            EventDateTime(dateTime: formatter.string(from: startDate), timeZone: TimeZone.current.identifier, date: nil),
+            EventDateTime(dateTime: formatter.string(from: endDate), timeZone: TimeZone.current.identifier, date: nil)
+        )
+    }
 }
 
 private struct EmptyResponse: Decodable {}
@@ -259,11 +450,13 @@ private struct ManagedBusyEventDraft {
             description: "Managed by Calendar Busy Sync verification flow.",
             start: EventDateTime(
                 dateTime: timestampFormatter.string(from: roundedStart),
-                timeZone: timeZone.identifier
+                timeZone: timeZone.identifier,
+                date: nil
             ),
             end: EventDateTime(
                 dateTime: timestampFormatter.string(from: endDate),
-                timeZone: timeZone.identifier
+                timeZone: timeZone.identifier,
+                date: nil
             ),
             windowDescription: "\(displayFormatter.string(from: roundedStart)) - \(displayFormatter.string(from: endDate))"
         )
@@ -274,6 +467,140 @@ private struct ManagedBusyEventDraft {
         let step = 5.0 * 60.0
         let rounded = ceil(interval / step) * step
         return Date(timeIntervalSinceReferenceDate: rounded)
+    }
+}
+
+private struct GoogleCalendarEventItem: Decodable {
+    let id: String
+    let status: String?
+    let transparency: String?
+    let start: GoogleEventDatePayload
+    let end: GoogleEventDatePayload
+    let extendedProperties: EventExtendedPropertiesPayload?
+
+    var blocksTime: Bool {
+        transparency?.lowercased() != "transparent"
+    }
+
+    var isManagedBusyMirror: Bool {
+        managedMirrorMetadata != nil
+    }
+
+    var managedMirrorMetadata: ManagedMirrorMetadata? {
+        guard let properties = extendedProperties?.privateProperties else {
+            return nil
+        }
+        return ManagedMirrorMetadata(privateProperties: properties)
+    }
+
+    func window(calendarTimeZone: String?) throws -> (startDate: Date, endDate: Date, isAllDay: Bool) {
+        let resolvedTimeZone = calendarTimeZone.flatMap(TimeZone.init(identifier:)) ?? .current
+        return try (
+            startDate: start.resolvedDate(defaultTimeZone: resolvedTimeZone),
+            endDate: end.resolvedDate(defaultTimeZone: resolvedTimeZone),
+            isAllDay: start.date != nil
+        )
+    }
+}
+
+private struct GoogleEventDatePayload: Decodable {
+    let dateTime: String?
+    let date: String?
+    let timeZone: String?
+
+    func resolvedDate(defaultTimeZone: TimeZone) throws -> Date {
+        if let dateTime {
+            if let parsed = RFC3339.parse(dateTime) {
+                return parsed
+            }
+            throw GoogleCalendarServiceError.invalidEventDate
+        }
+
+        guard let date else {
+            throw GoogleCalendarServiceError.invalidEventDate
+        }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = defaultTimeZone
+        formatter.dateFormat = "yyyy-MM-dd"
+        guard let parsed = formatter.date(from: date) else {
+            throw GoogleCalendarServiceError.invalidEventDate
+        }
+        return parsed
+    }
+}
+
+private struct EventExtendedPropertiesPayload: Decodable {
+    enum CodingKeys: String, CodingKey {
+        case privateProperties = "private"
+    }
+
+    let privateProperties: [String: String]?
+}
+
+private struct ManagedMirrorMetadata {
+    struct Keys {
+        let managed = "calendarBusySyncManaged"
+        let kind = "calendarBusySyncKind"
+        let sourceProvider = "calendarBusySyncSourceProvider"
+        let sourceCalendarID = "calendarBusySyncSourceCalendarID"
+        let sourceEventID = "calendarBusySyncSourceEventID"
+    }
+
+    static let keys = Keys()
+
+    let sourceKey: BusyMirrorSourceKey
+
+    init?(privateProperties: [String: String]) {
+        guard
+            privateProperties[Self.keys.managed] == "true",
+            privateProperties[Self.keys.kind] == "mirror",
+            let providerRawValue = privateProperties[Self.keys.sourceProvider],
+            let provider = BusyMirrorProvider(rawValue: providerRawValue),
+            let sourceCalendarID = privateProperties[Self.keys.sourceCalendarID],
+            let sourceEventID = privateProperties[Self.keys.sourceEventID]
+        else {
+            return nil
+        }
+
+        self.sourceKey = BusyMirrorSourceKey(
+            provider: provider,
+            calendarID: sourceCalendarID,
+            eventID: sourceEventID
+        )
+    }
+
+    static func privateProperties(for identity: BusyMirrorIdentity) -> [String: String] {
+        [
+            Self.keys.managed: "true",
+            Self.keys.kind: "mirror",
+            Self.keys.sourceProvider: identity.sourceKey.provider.rawValue,
+            Self.keys.sourceCalendarID: identity.sourceKey.calendarID,
+            Self.keys.sourceEventID: identity.sourceKey.eventID,
+        ]
+    }
+}
+
+private enum RFC3339 {
+    private static let fractionalFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    private static let basicFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+
+    static func format(_ date: Date) -> String {
+        fractionalFormatter.string(from: date)
+    }
+
+    static func parse(_ value: String) -> Date? {
+        fractionalFormatter.date(from: value) ?? basicFormatter.date(from: value)
     }
 }
 

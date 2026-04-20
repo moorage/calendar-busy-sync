@@ -28,7 +28,7 @@ enum ConnectedAccountListBuilder {
 
         if appleCalendarEnabled {
             let selectedCalendars = selectedAppleCalendar.map {
-                [SelectedCalendar(id: $0.id, name: $0.displayName, role: .destination)]
+                [SelectedCalendar(id: $0.id, name: $0.displayName, role: .sourceAndDestination)]
             } ?? []
             accounts.append(
                 ConnectedAccountListEntry(
@@ -46,7 +46,7 @@ enum ConnectedAccountListBuilder {
 
         for googleAccountCard in googleAccountCards {
             let selectedCalendars = googleAccountCard.selectedCalendar.map {
-                [SelectedCalendar(id: $0.id, name: $0.displayName, role: .destination)]
+                [SelectedCalendar(id: $0.id, name: $0.displayName, role: .sourceAndDestination)]
             } ?? []
             accounts.append(
                 ConnectedAccountListEntry(

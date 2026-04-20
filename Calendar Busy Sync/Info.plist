@@ -31,5 +31,9 @@
 	</array>
 	<key>GIDClientID</key>
 	<string>551260352529-b8bfn0u4c9tnj2lfg99so0njk93j26th.apps.googleusercontent.com</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Calendar Busy Sync needs calendar access to read busy events from the calendars you select and write opaque Busy holds to your other selected calendars.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Calendar Busy Sync needs calendar access to read busy events from the calendars you select and write opaque Busy holds to your other selected calendars.</string>
 </dict>
 </plist>
