@@ -6,6 +6,7 @@ source "$(cd "$(dirname "$0")" && pwd)/lib/xcode-env.sh"
 
 ensure_dirs
 sync_google_client_config
+load_local_env
 
 command -v xcodebuild >/dev/null || { echo "xcodebuild is missing" >&2; exit 1; }
 command -v swift >/dev/null || { echo "swift is missing" >&2; exit 1; }
@@ -32,6 +33,9 @@ echo "derived-data: ${DERIVED_DATA_DIR}"
 echo "scenario-root: ${FIXTURE_ROOT}"
 echo "google-client-plist: ${GOOGLE_DEFAULT_CLIENT_PLIST_PATH}"
 echo "app-info-plist: ${GOOGLE_INFO_PLIST_PATH}"
+echo "apple-signing-team-id: $(apple_signing_team_id)"
+echo "apple-distribution-identity: $(apple_distribution_signing_identity)"
+echo "apple-distribution-sha1: $(apple_distribution_signing_sha1)"
 echo "mac-destination: ${MAC_DESTINATION}"
 echo "iphone-sim-id: ${IPHONE_ID:-missing}"
 echo "ipad-sim-id: ${IPAD_ID:-missing}"

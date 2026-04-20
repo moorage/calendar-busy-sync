@@ -25,6 +25,8 @@
   - `./scripts/test-ui-macos --smoke`
   - `./scripts/test-ui-ios --device both --smoke`
   - `./scripts/test-google-live-macos`
+  - `./scripts/archive-appstore --platform macos`
+  - `./scripts/archive-appstore --platform ios`
   - `./scripts/test-google-live-macos` (signed macOS E2E passed against the `.env` test account and calendar after the stale-session/import fix)
   - `python3 scripts/check_execplan.py docs/exec-plans/active/2026-04-19-busy-slot-mirroring-core.md`
   - `python3 scripts/check_execplan.py docs/exec-plans/active/2026-04-19-settings-shell-ia-refresh.md`
@@ -39,6 +41,7 @@
   - `./scripts/test-ui-ios --device both --smoke` (shared iCloud configuration validation)
   - `./scripts/build --platform macos` (shared iCloud configuration validation)
   - `xcodebuild -project "$PROJECT_PATH" -scheme "$SCHEME_NAME" -configuration Debug -derivedDataPath "$SIGNED_DERIVED_DATA_DIR" -destination "$MAC_DESTINATION" -allowProvisioningUpdates build` (signed macOS validation for iCloud KVS entitlement)
+  - `./scripts/archive-appstore --platform macos` (automatic archive + App Store export path exercised end to end; export summary confirms Apple Distribution signing and a Mac Team Store provisioning profile)
   - `python3 scripts/check_execplan.py docs/exec-plans/active/2026-04-20-shared-configuration-icloud.md`
 - evidence gathered:
   - `scripts/sync-google-client-config.py` now turns `.env` + `GOOGLE_CLIENT_PLIST_PATH` into the checked-in app plist inputs used by build/test commands
@@ -51,6 +54,7 @@
   - kept local Xcode app icon changes that surfaced during validation: `Calendar Busy Sync/Calendar Busy Sync.xcodeproj/project.pbxproj` now sets `ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon`, and `Calendar Busy Sync/Calendar Busy Sync/Assets.xcassets/AppIcon.appiconset/` remains in the worktree by user request
   - participant changes now trigger immediate reconciliation, and deselecting or disconnecting a calendar performs best-effort cleanup of stale app-managed mirror events from the old destination calendar
   - source-event eligibility now requires both busy availability and an accepted commitment: self-owned/no-attendee busy events still mirror, while invited events mirror only after the current user responds `Yes`
+  - duplicate busy holds were traced to identity-only reconciliation: the planner previously ignored exact target-slot occupancy and could write a second mirror into a slot that was already busy; reconciliation now suppresses creates when the destination already has the same exact busy block, collapses redundant managed duplicates at that slot, and still reuses identity-based updates when a source event moves
   - the app now detects unsigned macOS launches before starting Google auth and shows explicit signed-build guidance instead of surfacing a late generic keychain failure
   - `scripts/lib/ax-query.swift` now supports `AXPress`, and `scripts/test-google-live-macos` now builds a signed app, targets `TEST_GOOGLE_USER` by Workspace domain plus exact email, and can complete the real macOS create/delete Google verification loop end to end
   - the main window is now organized as a compact Apple-settings-style form with rounded gray panels, branded Google/iCloud badges, refresh controls beside each calendar row, timestamped provider footnotes, and a bottom status line with `Logs`, `Sync Now`, current activity, pending work, and failures
@@ -65,6 +69,9 @@
   - the iCloud KVS entitlement build path is now verified on both unsigned and signed macOS builds; the signed app still provisions with `Mac Team Provisioning Profile: com.matthewpaulmoore.Calendar-Busy-Sync`
   - `scripts/sync-google-client-config.py` now also writes the iOS launch-screen placeholder plus iPhone/iPad multitasking orientations into the generated `Info.plist`, which fixes App Store Connect upload validation for the universal iOS build
   - Mac App Store packaging now has a dedicated `Calendar_Busy_Sync-macOS.entitlements` file with sandbox, network-client, and calendar entitlements, while the generated `Info.plist` once again carries `LSApplicationCategoryType` so macOS uploads are not blocked by the plist generator
+  - `.env` is now the repo-local source of truth for Apple signing config too: `APPLE_SIGNING_TEAM_ID`, `APPLE_DISTRIBUTION_SIGNING_IDENTITY`, and `APPLE_DISTRIBUTION_SIGNING_SHA1` feed shared harness helpers in `scripts/lib/xcode-env.sh`, while `scripts/archive-appstore` drives the full App Store packaging flow from those repo-local values
+  - forcing the Sous Chef Studio distribution cert directly onto the current signed macOS debug build is not a drop-in replacement for the working local OAuth/iCloud path; the iCloud-enabled debug target still relies on team-managed development signing, so the harness documents that split instead of pretending one cert fits both flows
+  - the working macOS App Store path is now explicit and verified: automatic archive succeeds, App Store export re-signs the output onto Apple Distribution, `DistributionSummary.plist` matches the configured distribution certificate SHA-1, and the export reports a `Mac Team Store Provisioning Profile` for `com.matthewpaulmoore.Calendar-Busy-Sync`
   - macOS, iPhone simulator, and iPad simulator smoke scripts still pass end-to-end after the auth wiring landed
 - open risks or blockers:
   - custom Google native client IDs still require a build that already includes the matching reversed callback scheme, so arbitrary runtime swaps remain intentionally blocked

@@ -41,6 +41,12 @@ The bootstrap and build/test wrappers automatically sync the Google client plist
 - `Calendar Busy Sync/Info.plist`
 - `Calendar Busy Sync/Calendar Busy Sync/DefaultGoogleOAuth.plist`
 
+The same local `.env` file is also the signing source of truth for release/archive work:
+
+- `APPLE_SIGNING_TEAM_ID`
+- `APPLE_DISTRIBUTION_SIGNING_IDENTITY`
+- `APPLE_DISTRIBUTION_SIGNING_SHA1`
+
 Build the app:
 
 ```bash
@@ -48,6 +54,15 @@ Build the app:
 ```
 
 For manual macOS Google auth testing, do not use the unsigned harness build in `artifacts/DerivedData`. Google Sign-In on macOS needs a development-signed app so it can persist OAuth state in the keychain, and the local Xcode Apple account must have valid credentials/provisioning for bundle ID `com.matthewpaulmoore.Calendar-Busy-Sync`.
+
+Create an App Store archive with the configured Sous Chef Studio distribution identity:
+
+```bash
+./scripts/archive-appstore --platform macos
+./scripts/archive-appstore --platform ios
+```
+
+The App Store packaging flow now uses the provisioning mode Xcode actually accepts for this target: automatic archive plus App Store export. On macOS, that export is verified to land on `Apple Distribution` with the exact certificate SHA-1 from `.env` plus a `Mac Team Store Provisioning Profile` for `com.matthewpaulmoore.Calendar-Busy-Sync`, while the signed macOS debug flow used for local OAuth and iCloud checks still stays on team-managed development signing.
 
 Normal macOS launches now suppress the initial Settings window and rely on the menu bar item instead. The harness `--ui-test-mode 1` launch path intentionally keeps the Settings window visible so smoke automation can still operate on a deterministic surface.
 
@@ -91,10 +106,12 @@ Capture a deterministic checkpoint:
 - provider-specific SDK code belongs behind adapter boundaries; shared sync logic stays platform- and provider-neutral
 - full-mesh mirroring is live for the selected calendars: only accepted busy commitments become an opaque `Busy` hold on every other selected calendar, and moved or deleted source events reconcile on the next sync pass
 - invited events mirror only when the current user has responded `Yes`; tentative, declined, and pending/no-response events do not create mirror writes
+- reconciliation is exact-slot aware: if a selected destination calendar already has a busy event with the same start, end, and all-day state, the app does not create a second busy slot there and cleans up redundant app-managed duplicates on the next pass
 - sync writes are future-only: past source time is never mirrored, and an already-in-progress source event is clipped so the mirrored busy hold starts at the current time
 - Apple / iCloud mirrors now keep only a short human-readable note and store their recoverable identity behind a `calendarbusysync://mirror/<token>` URL marker plus app-local token mapping; older note-heavy mirrors migrate forward automatically and orphaned tokens are removed instead of duplicating busy holds
 - shared configuration sync is limited to non-secret settings such as selected calendars and advanced preferences; Google account tokens and Apple permission state stay local to each device, and each device can opt out from Advanced without affecting the others
 - the reconciliation scan still uses a bounded lookback plus the next 60 days so the app can clean up stale managed mirrors and catch in-progress events without scanning unbounded history
 - the app now blocks macOS Google sign-in from unsigned local harness launches and tells the user to switch to a signed Xcode run when keychain-backed auth cannot work
 - the macOS live Google smoke script now builds a signed app, targets `TEST_GOOGLE_USER` plus `TEST_GOOGLE_CALENDAR_NAME` from `.env`, and fails clearly when local Apple signing/account state prevents the OS/browser auth surface from opening
+- App Store archive work now has an explicit repo script and a single `.env` signing source of truth for team/distribution identity instead of ad hoc terminal flags
 - `artifacts/` is runtime-only and ignored by git

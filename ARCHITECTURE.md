@@ -54,7 +54,7 @@ Purpose:
 - normalize provider-specific event data into one internal busy-plus-commitment model
 - treat every selected calendar as both source and destination
 - prevent recursive mirrors and duplicate holds
-- reconcile a bounded sync window by comparing desired mirrors to provider-owned mirror metadata
+- reconcile a bounded sync window by comparing desired mirrors to provider-owned mirror metadata plus exact target-slot occupancy
 
 Expected primary code area:
 
@@ -124,6 +124,7 @@ Primary code areas:
 - accessibility-driven live smoke helpers live in `scripts/lib/ax-query.swift` and are used by the macOS Google E2E script
 - docs verification and repo-map generation use only standard Python 3 library modules
 - automatic reconciliation uses a bounded scan window with limited lookback plus the next 60 days so repeated sync passes remain idempotent without scanning unbounded history, while desired mirror writes themselves are clipped to present-and-future time only
+- reconciliation is exact-slot aware: an identical busy block that already exists in a selected destination calendar suppresses a new mirror create, while identity matching still lets moved source events update their existing managed mirrors instead of delete/recreate churn
 - Apple / iCloud mirror identity recovery now uses a hybrid boundary: an on-event `calendarbusysync://mirror/<token>` URL marker plus app-local token persistence, with migration of older note-heavy mirror events and cleanup of orphaned markers
 - shared configuration is privacy-scoped: only non-secret settings roam through iCloud, while Google keychain payloads, archived Google user state, Apple permission state, and mirror token maps remain local; the per-device opt-out switch itself is stored only in local `UserDefaults`
 

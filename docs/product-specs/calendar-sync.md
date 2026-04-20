@@ -21,6 +21,7 @@ People with multiple jobs, gigs, or companies often keep separate calendars per 
 - free/available events do not create mirrored holds
 - tentative, declined, and no-response invited events do not create mirrored holds
 - moving, deleting, cancelling, or changing a source event to free/available must update or remove the mirrored holds on the next reconciliation pass
+- if a selected destination calendar already has a busy event with the exact same start, end, and all-day state, the app must not create a second busy hold for that slot
 - Apple / iCloud mirrors should not expose raw source identifiers in visible notes; their recoverable identity should stay opaque to the user while still letting the app update or delete them later
 - non-secret configuration should sync across the app's macOS and iOS/iPadOS installs through iCloud when the same Apple ID is signed in, while provider auth tokens and device permission state remain local
 
@@ -48,6 +49,7 @@ People with multiple jobs, gigs, or companies often keep separate calendars per 
 - the app can share non-secret configuration through iCloud key-value storage, including selected calendars and advanced preferences, while keeping Google account payloads and Apple permission state device-local
 - each device can disable shared iCloud configuration locally without changing the shared-setting behavior of the user's other devices
 - the app now reconciles the selected calendars as one participant set: accepted busy source events become opaque `Busy` holds on all the others, and moved/deleted/free/non-accepted source events update or delete the mirrored holds on the next pass
+- reconciliation is exact-slot aware, so pre-existing busy occupancy and redundant app-managed duplicates suppress extra mirror writes instead of stacking duplicate busy events into the same slot
 - Apple / iCloud mirrors now keep only a short note sentence visible to the user and move their recoverable identity into a URL marker plus app-local token mapping, with automatic migration of older note-heavy mirrors
 - mirrored busy writes are future-only: past time is never written, and an ongoing source event is mirrored only from "now" through its end
 - deselecting or disconnecting a participant calendar triggers cleanup of app-managed mirror events that were written into that calendar
@@ -76,6 +78,7 @@ People with multiple jobs, gigs, or companies often keep separate calendars per 
 - a free/available event does not create any mirrored busy slot
 - an invited event with RSVP `Maybe`, `No`, or no response does not create any mirrored busy slot
 - disconnecting an account removes its calendars from future sync planning
+- an exact matching busy slot on a selected destination calendar does not cause a second mirrored busy event to be created
 - changing a selected participating calendar immediately cleans old mirror events from the deselected calendar and reconciles the newly selected participant set
 - the configuration UI makes the selected participating calendars legible before sync runs
 - Google auth state is visible in the settings shell with explicit add/remove account controls, per-account calendar selection, and clear custom-client validation

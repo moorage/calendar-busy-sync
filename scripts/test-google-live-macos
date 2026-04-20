@@ -8,14 +8,12 @@ ensure_dirs
 sync_google_client_config
 require_project
 
+load_local_env
+
 if ! command -v cliclick >/dev/null 2>&1; then
   echo "Missing required dependency: cliclick" >&2
   exit 1
 fi
-
-set -a
-source "${ROOT_DIR}/.env"
-set +a
 
 : "${TEST_GOOGLE_USER:?Missing TEST_GOOGLE_USER in .env}"
 : "${TEST_GOOGLE_USER_PASSWORD:?Missing TEST_GOOGLE_USER_PASSWORD in .env}"
@@ -32,6 +30,7 @@ xcodebuild \
   -derivedDataPath "${SIGNED_DERIVED_DATA_DIR}" \
   -destination "${MAC_DESTINATION}" \
   -allowProvisioningUpdates \
+  DEVELOPMENT_TEAM="$(apple_signing_team_id)" \
   build >/dev/null
 
 pkill -f "${APP_NAME}.app/Contents/MacOS/${APP_NAME}" || true

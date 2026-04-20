@@ -886,6 +886,7 @@ final class AppModel: ObservableObject {
             let window = BusyMirrorSyncWindow.defaultWindow()
             var sourceEvents: [BusyMirrorSourceEvent] = []
             var existingMirrors: [ExistingBusyMirrorEvent] = []
+            var existingBusyBlocks: [BusyMirrorTargetBusyBlock] = []
 
             for participant in participantsBundle.participants {
                 switch participant.provider {
@@ -914,6 +915,14 @@ final class AppModel: ObservableObject {
                             accessToken: authorizedAccount.accessToken
                         )
                     )
+                    existingBusyBlocks.append(
+                        contentsOf: try await googleCalendarService.listBusyTargetBlocks(
+                            in: participant,
+                            calendarTimeZone: googleCalendar.timeZone,
+                            window: window,
+                            accessToken: authorizedAccount.accessToken
+                        )
+                    )
                 case .apple:
                     sourceEvents.append(
                         contentsOf: try appleCalendarService.listBusySourceEvents(
@@ -927,6 +936,12 @@ final class AppModel: ObservableObject {
                             window: window
                         )
                     )
+                    existingBusyBlocks.append(
+                        contentsOf: try appleCalendarService.listBusyTargetBlocks(
+                            in: participant,
+                            window: window
+                        )
+                    )
                 }
             }
 
@@ -936,7 +951,8 @@ final class AppModel: ObservableObject {
             )
             let operations = BusyMirrorSyncPlanner.operations(
                 desiredMirrors: desiredMirrors,
-                existingMirrors: existingMirrors
+                existingMirrors: existingMirrors,
+                existingBusyBlocks: existingBusyBlocks
             )
 
             var createdCount = 0

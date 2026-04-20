@@ -31,6 +31,7 @@ This plan is promoted from `docs/ideas/backlog/busy-slot-mirroring-core.md` beca
 - [x] 2026-04-20T22:40Z migrate Apple / iCloud mirror identity metadata out of visible notes into a URL marker plus a local token map, while auto-repairing old note-heavy mirrors
 - [x] 2026-04-20T16:55Z add Apple token-store coverage, update durable docs, and confirm the migration compiles in the live macOS app target
 - [x] 2026-04-20T17:00Z rerun unit/docs/ExecPlan validation sequentially after the earlier concurrent `xcodebuild` collision and confirm the Apple metadata migration passes cleanly
+- [x] 2026-04-20T19:20Z fix duplicate busy-slot writes by teaching reconciliation to reason about exact target-slot occupancy, suppress mirror creates when an identical busy block already exists, and delete redundant managed duplicates without regressing source-event move handling
 
 ## Surprises & Discoveries
 
@@ -40,6 +41,7 @@ This plan is promoted from `docs/ideas/backlog/busy-slot-mirroring-core.md` beca
 - 2026-04-20: "future-only" mirroring still needs a bounded lookback in the reconciliation scan; otherwise in-progress events that started before now and stale old mirror events would be missed.
 - 2026-04-20: "busy" alone is not enough for invited events; the sync rule has to combine availability with attendee response so tentative, declined, and pending invites do not leak soft holds into other calendars.
 - 2026-04-20: Apple EventKit does not expose a hidden per-event metadata bag like Google private extended properties, so hiding raw mirror metadata from users requires a URL marker plus app-owned local persistence instead of a provider-native field.
+- 2026-04-20: the first reconciliation pass compared only source-event identity to existing managed mirrors, so it could create duplicate busy holds whenever another event or pre-existing busy block already occupied the same exact target slot.
 
 ## Decision Log
 
@@ -49,6 +51,7 @@ This plan is promoted from `docs/ideas/backlog/busy-slot-mirroring-core.md` beca
 - 2026-04-20: the reconciliation scan may look back briefly, but desired mirror writes themselves must start no earlier than `now`; past occupancy should never be written into another calendar.
 - 2026-04-20: invited events only qualify as source events when the current user RSVP is accepted; tentative, declined, and no-response invites are excluded even if the provider marks them busy.
 - 2026-04-20: verification create/delete buttons remain because they still prove provider write access independently of the automatic mirroring loop.
+- 2026-04-20: exact-slot occupancy now participates in reconciliation. If a selected destination calendar already has any busy event with the same start, end, and all-day state, the engine must not create a second busy hold for that slot; app-managed duplicates at the same exact slot are collapsed back down to one mirror, while moved source events still update by identity.
 - 2026-04-20: Apple / iCloud mirror events should keep only a human-readable note sentence. Their recoverable identity moves to a `calendarbusysync://mirror/<token>` URL marker plus a local token-to-source mapping store, with migration for older note-heavy mirrors and cleanup for orphaned markers.
 
 ## Outcomes & Retrospective
@@ -190,6 +193,7 @@ The reconciliation engine must be safe to rerun repeatedly:
 
 - mirror metadata must uniquely identify the source event and source calendar
 - rerunning sync with no upstream changes must produce no net writes
+- rerunning sync when the destination already contains an exact matching busy block must produce no additional mirror write for that slot
 - deleting stale managed mirrors must only target events marked as app-managed mirror events
 - Apple mirror recovery must either migrate old note-heavy mirrors forward or safely remove orphaned URL-marked mirrors before they can cause duplicate busy writes
 - if one provider write fails, the app should keep reconciling the rest of the participant set and surface the failure in sync status instead of silently stopping

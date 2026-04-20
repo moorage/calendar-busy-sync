@@ -182,6 +182,52 @@ struct GoogleCalendarService {
         }
     }
 
+    func listBusyTargetBlocks(
+        in participant: BusyMirrorParticipant,
+        calendarTimeZone: String?,
+        window: DateInterval,
+        accessToken: String
+    ) async throws -> [BusyMirrorTargetBusyBlock] {
+        let response: CalendarEventsResponse = try await performJSONRequest(
+            accessToken: accessToken,
+            method: "GET",
+            path: "/calendar/v3/calendars/\(participant.calendarID.urlPathComponentEncoded)/events",
+            queryItems: [
+                URLQueryItem(name: "singleEvents", value: "true"),
+                URLQueryItem(name: "showDeleted", value: "false"),
+                URLQueryItem(name: "timeMin", value: RFC3339.format(window.start)),
+                URLQueryItem(name: "timeMax", value: RFC3339.format(window.end)),
+            ],
+            body: Optional<InsertEventRequest>.none
+        )
+
+        return try response.items.compactMap { item in
+            guard item.status?.lowercased() != "cancelled" else {
+                return nil
+            }
+            guard item.blocksTime else {
+                return nil
+            }
+
+            let eventWindow = try item.window(calendarTimeZone: calendarTimeZone)
+            let managedMirrorIdentity = item.managedMirrorMetadata.map {
+                BusyMirrorIdentity(
+                    sourceKey: $0.sourceKey,
+                    targetParticipantID: participant.id
+                )
+            }
+
+            return BusyMirrorTargetBusyBlock(
+                targetParticipant: participant,
+                eventID: item.id,
+                startDate: eventWindow.startDate,
+                endDate: eventWindow.endDate,
+                isAllDay: eventWindow.isAllDay,
+                managedMirrorIdentity: managedMirrorIdentity
+            )
+        }
+    }
+
     func createManagedMirrorEvent(
         desiredMirror: DesiredBusyMirrorEvent,
         accessToken: String

@@ -9,6 +9,7 @@ protocol AppleCalendarProviding: AnyObject {
     func deleteManagedBusyEvent(_ event: AppleManagedEventRecord) throws
     func listBusySourceEvents(in participant: BusyMirrorParticipant, window: DateInterval) throws -> [BusyMirrorSourceEvent]
     func listManagedMirrorEvents(in participant: BusyMirrorParticipant, window: DateInterval) throws -> [ExistingBusyMirrorEvent]
+    func listBusyTargetBlocks(in participant: BusyMirrorParticipant, window: DateInterval) throws -> [BusyMirrorTargetBusyBlock]
     func createManagedMirrorEvent(in calendar: AppleCalendarSummary, desiredMirror: DesiredBusyMirrorEvent) throws
     func updateManagedMirrorEvent(_ existingMirror: ExistingBusyMirrorEvent, desiredMirror: DesiredBusyMirrorEvent) throws
     func deleteManagedMirrorEvent(_ existingMirror: ExistingBusyMirrorEvent) throws
@@ -214,6 +215,48 @@ final class AppleCalendarService: AppleCalendarProviding {
                 return nil
             case .none:
                 return nil
+            }
+        }
+    }
+
+    func listBusyTargetBlocks(in participant: BusyMirrorParticipant, window: DateInterval) throws -> [BusyMirrorTargetBusyBlock] {
+        try requireGrantedAuthorization()
+
+        guard let calendar = eventStore.calendar(withIdentifier: participant.calendarID) else {
+            throw AppleCalendarServiceError.calendarNotFound
+        }
+
+        return try events(in: calendar, window: window).compactMap { event in
+            guard event.blocksTime else {
+                return nil
+            }
+
+            let resolution = try resolveManagedMirror(for: event)
+            switch resolution {
+            case let .resolved(sourceKey, _):
+                return BusyMirrorTargetBusyBlock(
+                    targetParticipant: participant,
+                    eventID: event.eventIdentifier,
+                    startDate: event.startDate,
+                    endDate: event.endDate,
+                    isAllDay: event.isAllDay,
+                    managedMirrorIdentity: BusyMirrorIdentity(
+                        sourceKey: sourceKey,
+                        targetParticipantID: participant.id
+                    )
+                )
+            case let .orphaned(token):
+                try removeOrphanedManagedMirrorEvent(event, token: token)
+                return nil
+            case .none:
+                return BusyMirrorTargetBusyBlock(
+                    targetParticipant: participant,
+                    eventID: event.eventIdentifier,
+                    startDate: event.startDate,
+                    endDate: event.endDate,
+                    isAllDay: event.isAllDay,
+                    managedMirrorIdentity: nil
+                )
             }
         }
     }

@@ -48,6 +48,17 @@ struct BusyMirrorIdentity: Codable, Equatable, Hashable, Identifiable {
     }
 }
 
+struct BusyMirrorOccupancyKey: Equatable, Hashable, Identifiable {
+    let targetParticipantID: String
+    let startDate: Date
+    let endDate: Date
+    let isAllDay: Bool
+
+    var id: String {
+        "\(targetParticipantID)|\(startDate.timeIntervalSinceReferenceDate)|\(endDate.timeIntervalSinceReferenceDate)|\(isAllDay)"
+    }
+}
+
 struct DesiredBusyMirrorEvent: Equatable, Hashable, Identifiable {
     let identity: BusyMirrorIdentity
     let targetParticipant: BusyMirrorParticipant
@@ -56,6 +67,15 @@ struct DesiredBusyMirrorEvent: Equatable, Hashable, Identifiable {
     let isAllDay: Bool
 
     var id: String { identity.id }
+
+    var occupancyKey: BusyMirrorOccupancyKey {
+        BusyMirrorOccupancyKey(
+            targetParticipantID: targetParticipant.id,
+            startDate: startDate,
+            endDate: endDate,
+            isAllDay: isAllDay
+        )
+    }
 }
 
 struct ExistingBusyMirrorEvent: Equatable, Hashable, Identifiable {
@@ -68,6 +88,41 @@ struct ExistingBusyMirrorEvent: Equatable, Hashable, Identifiable {
 
     var id: String {
         "\(identity.id)|\(eventID)"
+    }
+
+    var occupancyKey: BusyMirrorOccupancyKey {
+        BusyMirrorOccupancyKey(
+            targetParticipantID: targetParticipant.id,
+            startDate: startDate,
+            endDate: endDate,
+            isAllDay: isAllDay
+        )
+    }
+}
+
+struct BusyMirrorTargetBusyBlock: Equatable, Hashable, Identifiable {
+    let targetParticipant: BusyMirrorParticipant
+    let eventID: String
+    let startDate: Date
+    let endDate: Date
+    let isAllDay: Bool
+    let managedMirrorIdentity: BusyMirrorIdentity?
+
+    var id: String {
+        "\(targetParticipant.id)|\(eventID)"
+    }
+
+    var occupancyKey: BusyMirrorOccupancyKey {
+        BusyMirrorOccupancyKey(
+            targetParticipantID: targetParticipant.id,
+            startDate: startDate,
+            endDate: endDate,
+            isAllDay: isAllDay
+        )
+    }
+
+    var isManagedMirror: Bool {
+        managedMirrorIdentity != nil
     }
 }
 

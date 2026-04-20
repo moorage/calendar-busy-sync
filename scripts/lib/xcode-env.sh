@@ -12,6 +12,11 @@ fi
 
 ROOT_DIR="$(cd "$(dirname "${XCODE_ENV_SOURCE_PATH}")/../.." && pwd)"
 source "${ROOT_DIR}/scripts/lib/product-identity.sh"
+LOCAL_ENV_PATH="${ROOT_DIR}/.env"
+DEFAULT_APPLE_SIGNING_TEAM_ID="GG34PA8F4A"
+DEFAULT_APPLE_DISTRIBUTION_SIGNING_IDENTITY="Apple Distribution: Sous Chef Studio, Inc. (GG34PA8F4A)"
+DEFAULT_APPLE_DISTRIBUTION_SIGNING_SHA1="2C2851AE3C7CD73F56F377FEC2F0696AC66957DC"
+LOCAL_ENV_LOADED=0
 
 PROJECT_PATH="${ROOT_DIR}/${APP_PROJECT_DIR_NAME}/${APP_PROJECT_FILE_NAME}"
 SCHEME_NAME="${APP_SCHEME_NAME}"
@@ -28,6 +33,35 @@ GOOGLE_DEFAULT_CLIENT_PLIST_PATH="${ROOT_DIR}/Calendar Busy Sync/Calendar Busy S
 GOOGLE_INFO_PLIST_PATH="${ROOT_DIR}/Calendar Busy Sync/Info.plist"
 
 MAC_DESTINATION="platform=macOS,arch=arm64"
+
+load_local_env() {
+  if [[ "${LOCAL_ENV_LOADED}" -eq 1 ]]; then
+    return 0
+  fi
+
+  if [[ -f "${LOCAL_ENV_PATH}" ]]; then
+    set -a
+    source "${LOCAL_ENV_PATH}"
+    set +a
+  fi
+
+  LOCAL_ENV_LOADED=1
+}
+
+apple_signing_team_id() {
+  load_local_env
+  printf '%s\n' "${APPLE_SIGNING_TEAM_ID:-${DEFAULT_APPLE_SIGNING_TEAM_ID}}"
+}
+
+apple_distribution_signing_identity() {
+  load_local_env
+  printf '%s\n' "${APPLE_DISTRIBUTION_SIGNING_IDENTITY:-${DEFAULT_APPLE_DISTRIBUTION_SIGNING_IDENTITY}}"
+}
+
+apple_distribution_signing_sha1() {
+  load_local_env
+  printf '%s\n' "${APPLE_DISTRIBUTION_SIGNING_SHA1:-${DEFAULT_APPLE_DISTRIBUTION_SIGNING_SHA1}}"
+}
 
 ensure_dirs() {
   mkdir -p "${ARTIFACTS_DIR}" "${XCODEBUILD_DIR}" "${TEST_RESULTS_DIR}" "${CHECKPOINTS_DIR}" "${DERIVED_DATA_DIR}" "${SIGNED_DERIVED_DATA_DIR}"

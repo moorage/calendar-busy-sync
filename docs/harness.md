@@ -11,11 +11,19 @@ The harness is the shell-first control plane for this repository.
 - `./scripts/test-ui-macos --smoke`
 - `./scripts/test-ui-ios --device both --smoke`
 - `./scripts/test-google-live-macos`
+- `./scripts/archive-appstore --platform macos`
+- `./scripts/archive-appstore --platform ios`
 - `./scripts/capture-checkpoint --scenario basic-cross-busy.json --platform-target macos --checkpoint shell-smoke-macos`
 - `./scripts/agent-loop`
 - `./scripts/verify-product-identity`
 
 All build/test wrappers now run `scripts/sync-google-client-config.py` first. That script reads `.env`, loads `GOOGLE_CLIENT_PLIST_PATH`, copies the source Google plist into `Calendar Busy Sync/Calendar Busy Sync/DefaultGoogleOAuth.plist`, and regenerates `Calendar Busy Sync/Info.plist`.
+
+The shared Xcode harness also treats `.env` as the local source of truth for Apple signing config:
+
+- `APPLE_SIGNING_TEAM_ID`
+- `APPLE_DISTRIBUTION_SIGNING_IDENTITY`
+- `APPLE_DISTRIBUTION_SIGNING_SHA1`
 
 ## Artifacts
 
@@ -52,6 +60,10 @@ The scripts are responsible for:
 
 This harness currently covers local bootstrap, build, unit-test, integration-test, checkpoint capture, Google client-plist sync for the default auth configuration, the live Apple / iCloud EventKit settings slice, the macOS menu bar utility shell, and a macOS live Google smoke runner that drives the app through accessibility identifiers.
 
-The live macOS smoke runner builds a signed macOS debug app, clears the app-owned Google roster, sets `CALENDAR_BUSY_SYNC_E2E_ACCOUNT_EMAIL` plus `CALENDAR_BUSY_SYNC_E2E_CALENDAR_NAME` from `.env`, and uses `AXPress` accessibility actions to drive the real Google auth handoff before the managed event create/delete round-trip.
+The live macOS smoke runner builds a signed macOS debug app, clears the app-owned Google roster, sets `CALENDAR_BUSY_SYNC_E2E_ACCOUNT_EMAIL` plus `CALENDAR_BUSY_SYNC_E2E_CALENDAR_NAME` from `.env`, and uses `AXPress` accessibility actions to drive the real Google auth handoff before the managed event create/delete round-trip. It uses the `.env` team value, but it intentionally stays on the working debug-signing path instead of forcing the distribution identity.
 
 Manual macOS Google auth checks also need a signed app launch. The default harness build uses `CODE_SIGNING_ALLOWED=NO`, so it is suitable for build/test automation and scenario smoke work, but not for a browser-to-keychain Google sign-in round trip.
+
+For App Store packaging, use `./scripts/archive-appstore`. That script forces the Sous Chef Studio distribution identity from `.env` and avoids depending on ad hoc terminal history for release/archive work.
+
+For macOS, the script now follows the working Apple flow for this target: automatic archive, then App Store export. The exported package is verified through `DistributionSummary.plist` to use `Apple Distribution`, the exact certificate SHA-1 declared in `.env`, and a `Mac Team Store Provisioning Profile` for the repo bundle ID.

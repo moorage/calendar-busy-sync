@@ -1112,12 +1112,144 @@ final class Calendar_Busy_SyncTests: XCTestCase {
 
         let operations = BusyMirrorSyncPlanner.operations(
             desiredMirrors: desiredMirrors,
-            existingMirrors: existingMirrors
+            existingMirrors: existingMirrors,
+            existingBusyBlocks: []
         )
 
         XCTAssertEqual(operations.count, 3)
         XCTAssertEqual(operations.filterCreate.count, 1)
         XCTAssertEqual(operations.filterUpdate.count, 1)
+        XCTAssertEqual(operations.filterDelete.count, 1)
+    }
+
+    func testBusyMirrorSyncPlannerCollapsesSameSlotDesiredMirrorsIntoSingleOperation() {
+        let alpha = testParticipant(provider: .apple, calendarID: "alpha", displayName: "Alpha")
+        let beta = testParticipant(provider: .google, accountID: "acct-beta", calendarID: "beta", displayName: "Beta")
+        let start = testDate(hour: 9)
+        let end = testDate(hour: 10)
+
+        let duplicateSlotMirrors = [
+            DesiredBusyMirrorEvent(
+                identity: BusyMirrorIdentity(
+                    sourceKey: BusyMirrorSourceKey(provider: .apple, calendarID: "alpha", eventID: "alpha-source"),
+                    targetParticipantID: beta.id
+                ),
+                targetParticipant: beta,
+                startDate: start,
+                endDate: end,
+                isAllDay: false
+            ),
+            DesiredBusyMirrorEvent(
+                identity: BusyMirrorIdentity(
+                    sourceKey: BusyMirrorSourceKey(provider: .google, calendarID: "gamma", eventID: "gamma-source"),
+                    targetParticipantID: beta.id
+                ),
+                targetParticipant: beta,
+                startDate: start,
+                endDate: end,
+                isAllDay: false
+            ),
+        ]
+
+        let operations = BusyMirrorSyncPlanner.operations(
+            desiredMirrors: duplicateSlotMirrors,
+            existingMirrors: [],
+            existingBusyBlocks: []
+        )
+
+        XCTAssertEqual(operations.count, 1)
+        XCTAssertEqual(operations.filterCreate.count, 1)
+
+        guard case let .create(desiredMirror) = operations[0] else {
+            return XCTFail("Expected one create operation for the canonical mirror.")
+        }
+
+        XCTAssertEqual(desiredMirror.targetParticipant.id, beta.id)
+        XCTAssertEqual(desiredMirror.startDate, start)
+        XCTAssertEqual(desiredMirror.endDate, end)
+    }
+
+    func testBusyMirrorSyncPlannerSuppressesCreateWhenExactBusySlotAlreadyExists() {
+        let beta = testParticipant(provider: .google, accountID: "acct-beta", calendarID: "beta", displayName: "Beta")
+        let start = testDate(hour: 9)
+        let end = testDate(hour: 10)
+        let desiredMirror = DesiredBusyMirrorEvent(
+            identity: BusyMirrorIdentity(
+                sourceKey: BusyMirrorSourceKey(provider: .apple, calendarID: "alpha", eventID: "alpha-source"),
+                targetParticipantID: beta.id
+            ),
+            targetParticipant: beta,
+            startDate: start,
+            endDate: end,
+            isAllDay: false
+        )
+
+        let operations = BusyMirrorSyncPlanner.operations(
+            desiredMirrors: [desiredMirror],
+            existingMirrors: [],
+            existingBusyBlocks: [
+                BusyMirrorTargetBusyBlock(
+                    targetParticipant: beta,
+                    eventID: "manual-busy",
+                    startDate: start,
+                    endDate: end,
+                    isAllDay: false,
+                    managedMirrorIdentity: nil
+                )
+            ]
+        )
+
+        XCTAssertTrue(operations.isEmpty)
+    }
+
+    func testBusyMirrorSyncPlannerDeletesRedundantManagedMirrorWhenExactBusySlotAlreadyExists() {
+        let beta = testParticipant(provider: .google, accountID: "acct-beta", calendarID: "beta", displayName: "Beta")
+        let start = testDate(hour: 9)
+        let end = testDate(hour: 10)
+        let existingMirror = ExistingBusyMirrorEvent(
+            identity: BusyMirrorIdentity(
+                sourceKey: BusyMirrorSourceKey(provider: .apple, calendarID: "alpha", eventID: "alpha-source"),
+                targetParticipantID: beta.id
+            ),
+            targetParticipant: beta,
+            eventID: "managed-mirror",
+            startDate: start,
+            endDate: end,
+            isAllDay: false
+        )
+
+        let operations = BusyMirrorSyncPlanner.operations(
+            desiredMirrors: [
+                DesiredBusyMirrorEvent(
+                    identity: existingMirror.identity,
+                    targetParticipant: beta,
+                    startDate: start,
+                    endDate: end,
+                    isAllDay: false
+                )
+            ],
+            existingMirrors: [existingMirror],
+            existingBusyBlocks: [
+                BusyMirrorTargetBusyBlock(
+                    targetParticipant: beta,
+                    eventID: existingMirror.eventID,
+                    startDate: start,
+                    endDate: end,
+                    isAllDay: false,
+                    managedMirrorIdentity: existingMirror.identity
+                ),
+                BusyMirrorTargetBusyBlock(
+                    targetParticipant: beta,
+                    eventID: "manual-busy",
+                    startDate: start,
+                    endDate: end,
+                    isAllDay: false,
+                    managedMirrorIdentity: nil
+                )
+            ]
+        )
+
+        XCTAssertEqual(operations.count, 1)
         XCTAssertEqual(operations.filterDelete.count, 1)
     }
 
@@ -1520,6 +1652,7 @@ private final class MockAppleCalendarService: AppleCalendarProviding {
     var deletedEventIDs: [String] = []
     var sourceEvents: [BusyMirrorSourceEvent] = []
     var existingMirrors: [ExistingBusyMirrorEvent] = []
+    var busyTargetBlocks: [BusyMirrorTargetBusyBlock] = []
     var createdMirrorIdentities: [BusyMirrorIdentity] = []
     var updatedMirrorIdentities: [BusyMirrorIdentity] = []
     var deletedMirrorEventIDs: [String] = []
@@ -1573,6 +1706,10 @@ private final class MockAppleCalendarService: AppleCalendarProviding {
 
     func listManagedMirrorEvents(in participant: BusyMirrorParticipant, window: DateInterval) throws -> [ExistingBusyMirrorEvent] {
         existingMirrors.filter { $0.targetParticipant.id == participant.id }
+    }
+
+    func listBusyTargetBlocks(in participant: BusyMirrorParticipant, window: DateInterval) throws -> [BusyMirrorTargetBusyBlock] {
+        busyTargetBlocks.filter { $0.targetParticipant.id == participant.id }
     }
 
     func createManagedMirrorEvent(in calendar: AppleCalendarSummary, desiredMirror: DesiredBusyMirrorEvent) throws {
