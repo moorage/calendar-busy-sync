@@ -60,9 +60,12 @@ Create an App Store archive with the configured Sous Chef Studio distribution id
 ```bash
 ./scripts/archive-appstore --platform macos
 ./scripts/archive-appstore --platform ios
+./scripts/upload-appstore --platform ios
 ```
 
 The App Store packaging flow now uses the provisioning mode Xcode actually accepts for this target: automatic archive plus App Store export. On macOS, that export is verified to land on `Apple Distribution` with the exact certificate SHA-1 from `.env` plus a `Mac Team Store Provisioning Profile` for `com.matthewpaulmoore.Calendar-Busy-Sync`, while the signed macOS debug flow used for local OAuth and iCloud checks still stays on team-managed development signing.
+
+For iOS, the same export summary verification now runs before upload. `scripts/upload-appstore` uses the `.env` App Store Connect API key values (`ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_PATH`) and uploads the newest exported `.ipa` unless you pass `--package` explicitly.
 
 Normal macOS launches now suppress the initial Settings window and rely on the menu bar item instead. The harness `--ui-test-mode 1` launch path intentionally keeps the Settings window visible so smoke automation can still operate on a deterministic surface.
 

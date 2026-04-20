@@ -13,6 +13,7 @@ The harness is the shell-first control plane for this repository.
 - `./scripts/test-google-live-macos`
 - `./scripts/archive-appstore --platform macos`
 - `./scripts/archive-appstore --platform ios`
+- `./scripts/upload-appstore --platform ios`
 - `./scripts/capture-checkpoint --scenario basic-cross-busy.json --platform-target macos --checkpoint shell-smoke-macos`
 - `./scripts/agent-loop`
 - `./scripts/verify-product-identity`
@@ -67,3 +68,5 @@ Manual macOS Google auth checks also need a signed app launch. The default harne
 For App Store packaging, use `./scripts/archive-appstore`. That script forces the Sous Chef Studio distribution identity from `.env` and avoids depending on ad hoc terminal history for release/archive work.
 
 For macOS, the script now follows the working Apple flow for this target: automatic archive, then App Store export. The exported package is verified through `DistributionSummary.plist` to use `Apple Distribution`, the exact certificate SHA-1 declared in `.env`, and a `Mac Team Store Provisioning Profile` for the repo bundle ID.
+
+For iOS, the same script verifies the exported `.ipa` through `DistributionSummary.plist` before `scripts/upload-appstore` sends it to App Store Connect with the `.env` API key credentials.

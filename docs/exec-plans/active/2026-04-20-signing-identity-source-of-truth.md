@@ -16,6 +16,7 @@ Completed outcomes:
   - `APPLE_DISTRIBUTION_SIGNING_SHA1`
 - `scripts/lib/xcode-env.sh` now exposes shared helpers that load those values.
 - `scripts/archive-appstore` now gives the repo one explicit App Store archive entry point for `macos` and `ios` that forces the configured distribution identity.
+- `scripts/upload-appstore` now gives the repo an iOS App Store upload entry point that uses the verified exported `.ipa` plus the `.env` App Store Connect API key.
 - docs and implementation notes now explain the split between:
   - signed debug builds for local OAuth/iCloud verification
   - distribution-signed archive work for App Store packaging
@@ -52,6 +53,7 @@ Repository facts that shaped this work:
 - [x] 2026-04-20T20:05Z update harness/docs/implementation notes to explain where the local signing source of truth lives and why signed debug still uses team-managed development signing
 - [x] 2026-04-20T20:15Z discover that direct manual-distribution archive overrides are the wrong provisioning mode for this target, then pivot the harness to the working Apple flow: automatic archive plus App Store export
 - [x] 2026-04-20T20:20Z verify that the exported macOS package now lands on `Apple Distribution` with a `Mac Team Store Provisioning Profile` for the repo bundle ID
+- [x] 2026-04-20T20:30Z verify that the iOS export lands on the same Apple Distribution SHA-1 and add a dedicated upload script backed by the `.env` App Store Connect API key
 
 ## Surprises & Discoveries
 
@@ -59,6 +61,7 @@ Repository facts that shaped this work:
 - 2026-04-20: the current signed macOS debug flow cannot simply be switched to the Sous Chef Studio distribution certificate from the command line. With the app's iCloud entitlement and current automatic-signing setup, Xcode rejects the override and/or requires a different provisioning profile.
 - 2026-04-20: there was no repo-level archive harness, so previous App Store packaging depended on ad hoc commands instead of a durable scripted path.
 - 2026-04-20: the successful macOS release path is not "force distribution at archive time"; it is "let Xcode archive with the working automatic-signing setup, then let App Store export re-sign the result onto Apple Distribution and the store provisioning profile."
+- 2026-04-20: the same pattern holds for iOS; the exported `.ipa` already exposes the final Apple Distribution SHA-1 and store provisioning profile in `DistributionSummary.plist`, so upload should consume that verified artifact instead of raw archives.
 - 2026-04-20: even after the archive path was scripted, the current machine still cannot complete a forced-distribution macOS archive without an iCloud-capable distribution provisioning profile for `com.matthewpaulmoore.Calendar-Busy-Sync`.
 
 ## Decision Log
@@ -88,6 +91,11 @@ Repository facts that shaped this work:
    - archives with the team resolved from `.env`
    - exports the archive for App Store distribution
    - verifies the macOS export summary reports `Apple Distribution`
+4. Add `scripts/upload-appstore` that:
+   - accepts `--platform ios|macos`
+   - builds via `scripts/archive-appstore` unless `--skip-build` is supplied
+   - uploads the newest verified exported package with `xcrun altool`
+   - authenticates from `.env` App Store Connect API key settings
 4. Update `.env`, `scripts/bootstrap-apple`, `README.md`, `docs/harness.md`, and `.agents/DOCUMENTATION.md` so users know:
   - where the Sous Chef Studio distribution identity and exact SHA-1 are declared locally
    - how to discover it from the harness
@@ -101,6 +109,8 @@ Validation run:
 - `./scripts/bootstrap-apple`
 - `./scripts/build --platform macos`
 - `./scripts/archive-appstore --platform macos`
+- `./scripts/archive-appstore --platform ios`
+- `./scripts/upload-appstore --platform ios`
 - `python3 scripts/check_execplan.py docs/exec-plans/active/2026-04-20-signing-identity-source-of-truth.md`
 - `python3 scripts/knowledge/check_docs.py`
 

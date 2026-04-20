@@ -1,0 +1,95 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+source "$(cd "$(dirname "$0")" && pwd)/lib/xcode-env.sh"
+
+ensure_dirs
+load_local_env
+
+PLATFORM=""
+PACKAGE_PATH=""
+BUILD_FIRST=1
+WAIT_FLAG=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --platform)
+      PLATFORM="${2:-}"
+      shift 2
+      ;;
+    --package)
+      PACKAGE_PATH="${2:-}"
+      shift 2
+      ;;
+    --skip-build)
+      BUILD_FIRST=0
+      shift
+      ;;
+    --wait)
+      WAIT_FLAG=1
+      shift
+      ;;
+    *)
+      echo "usage: ./scripts/upload-appstore --platform macos|ios [--package path] [--skip-build] [--wait]" >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [[ -z "${PLATFORM}" ]]; then
+  echo "usage: ./scripts/upload-appstore --platform macos|ios [--package path] [--skip-build] [--wait]" >&2
+  exit 1
+fi
+
+API_KEY_ID="$(appstore_connect_api_key_id)"
+API_ISSUER_ID="$(appstore_connect_api_issuer_id)"
+API_KEY_PATH="$(appstore_connect_api_key_path)"
+
+: "${API_KEY_ID:?Missing ASC_KEY_ID in .env}"
+: "${API_ISSUER_ID:?Missing ASC_ISSUER_ID in .env}"
+: "${API_KEY_PATH:?Missing ASC_KEY_PATH in .env}"
+
+if [[ ! -f "${API_KEY_PATH}" ]]; then
+  echo "Missing App Store Connect API key file at ${API_KEY_PATH}" >&2
+  exit 1
+fi
+
+if [[ "${BUILD_FIRST}" -eq 1 ]]; then
+  "${ROOT_DIR}/scripts/archive-appstore" --platform "${PLATFORM}"
+fi
+
+if [[ -z "${PACKAGE_PATH}" ]]; then
+  case "${PLATFORM}" in
+    ios)
+      PACKAGE_PATH="$(find "${ARTIFACTS_DIR}/exports" -maxdepth 2 -type f -name '*.ipa' | sort | tail -n 1)"
+      ;;
+    macos)
+      PACKAGE_PATH="$(find "${ARTIFACTS_DIR}/exports" -maxdepth 2 -type f -name '*.pkg' | sort | tail -n 1)"
+      ;;
+    *)
+      echo "expected --platform macos|ios" >&2
+      exit 1
+      ;;
+  esac
+fi
+
+if [[ -z "${PACKAGE_PATH}" || ! -f "${PACKAGE_PATH}" ]]; then
+  echo "Unable to find an exported package for platform ${PLATFORM}" >&2
+  exit 1
+fi
+
+ALTOOL_ARGS=(
+  --upload-package "${PACKAGE_PATH}"
+  --api-key "${API_KEY_ID}"
+  --api-issuer "${API_ISSUER_ID}"
+  --p8-file-path "${API_KEY_PATH}"
+  --output-format json
+  --show-progress
+)
+
+if [[ "${WAIT_FLAG}" -eq 1 ]]; then
+  ALTOOL_ARGS+=(--wait)
+fi
+
+xcrun altool "${ALTOOL_ARGS[@]}"

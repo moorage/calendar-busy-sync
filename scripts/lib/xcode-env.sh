@@ -63,6 +63,29 @@ apple_distribution_signing_sha1() {
   printf '%s\n' "${APPLE_DISTRIBUTION_SIGNING_SHA1:-${DEFAULT_APPLE_DISTRIBUTION_SIGNING_SHA1}}"
 }
 
+appstore_connect_api_key_id() {
+  load_local_env
+  printf '%s\n' "${ASC_KEY_ID:-}"
+}
+
+appstore_connect_api_issuer_id() {
+  load_local_env
+  printf '%s\n' "${ASC_ISSUER_ID:-}"
+}
+
+appstore_connect_api_key_path() {
+  load_local_env
+  local key_path="${ASC_KEY_PATH:-}"
+  if [[ -z "${key_path}" ]]; then
+    return 0
+  fi
+  if [[ "${key_path}" = /* ]]; then
+    printf '%s\n' "${key_path}"
+  else
+    printf '%s\n' "${ROOT_DIR}/${key_path#./}"
+  fi
+}
+
 ensure_dirs() {
   mkdir -p "${ARTIFACTS_DIR}" "${XCODEBUILD_DIR}" "${TEST_RESULTS_DIR}" "${CHECKPOINTS_DIR}" "${DERIVED_DATA_DIR}" "${SIGNED_DERIVED_DATA_DIR}"
 }

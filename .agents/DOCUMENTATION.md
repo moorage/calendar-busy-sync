@@ -27,6 +27,7 @@
   - `./scripts/test-google-live-macos`
   - `./scripts/archive-appstore --platform macos`
   - `./scripts/archive-appstore --platform ios`
+  - `./scripts/upload-appstore --platform ios`
   - `./scripts/test-google-live-macos` (signed macOS E2E passed against the `.env` test account and calendar after the stale-session/import fix)
   - `python3 scripts/check_execplan.py docs/exec-plans/active/2026-04-19-busy-slot-mirroring-core.md`
   - `python3 scripts/check_execplan.py docs/exec-plans/active/2026-04-19-settings-shell-ia-refresh.md`
@@ -42,6 +43,8 @@
   - `./scripts/build --platform macos` (shared iCloud configuration validation)
   - `xcodebuild -project "$PROJECT_PATH" -scheme "$SCHEME_NAME" -configuration Debug -derivedDataPath "$SIGNED_DERIVED_DATA_DIR" -destination "$MAC_DESTINATION" -allowProvisioningUpdates build` (signed macOS validation for iCloud KVS entitlement)
   - `./scripts/archive-appstore --platform macos` (automatic archive + App Store export path exercised end to end; export summary confirms Apple Distribution signing and a Mac Team Store provisioning profile)
+  - `./scripts/archive-appstore --platform ios` (automatic archive + App Store export path exercised end to end; export summary confirms Apple Distribution signing and an iOS Team Store provisioning profile)
+  - `./scripts/upload-appstore --platform ios --skip-build` (uploaded the verified `.ipa` to App Store Connect successfully; delivery UUID `abab0ada-9bb3-4fc4-a975-1904de595cfa`)
   - `python3 scripts/check_execplan.py docs/exec-plans/active/2026-04-20-shared-configuration-icloud.md`
 - evidence gathered:
   - `scripts/sync-google-client-config.py` now turns `.env` + `GOOGLE_CLIENT_PLIST_PATH` into the checked-in app plist inputs used by build/test commands
@@ -72,6 +75,7 @@
   - `.env` is now the repo-local source of truth for Apple signing config too: `APPLE_SIGNING_TEAM_ID`, `APPLE_DISTRIBUTION_SIGNING_IDENTITY`, and `APPLE_DISTRIBUTION_SIGNING_SHA1` feed shared harness helpers in `scripts/lib/xcode-env.sh`, while `scripts/archive-appstore` drives the full App Store packaging flow from those repo-local values
   - forcing the Sous Chef Studio distribution cert directly onto the current signed macOS debug build is not a drop-in replacement for the working local OAuth/iCloud path; the iCloud-enabled debug target still relies on team-managed development signing, so the harness documents that split instead of pretending one cert fits both flows
   - the working macOS App Store path is now explicit and verified: automatic archive succeeds, App Store export re-signs the output onto Apple Distribution, `DistributionSummary.plist` matches the configured distribution certificate SHA-1, and the export reports a `Mac Team Store Provisioning Profile` for `com.matthewpaulmoore.Calendar-Busy-Sync`
+  - the iOS App Store path now uses the same exact-cert verification and has a dedicated `scripts/upload-appstore` command that uploads the verified `.ipa` to App Store Connect using the `.env` API key credentials
   - macOS, iPhone simulator, and iPad simulator smoke scripts still pass end-to-end after the auth wiring landed
 - open risks or blockers:
   - custom Google native client IDs still require a build that already includes the matching reversed callback scheme, so arbitrary runtime swaps remain intentionally blocked

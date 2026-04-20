@@ -122,6 +122,23 @@ if [[ "${PLATFORM}" == "macos" ]]; then
   fi
 fi
 
+if [[ "${PLATFORM}" == "ios" ]]; then
+  EXPORT_SUMMARY="${EXPORT_PATH}/DistributionSummary.plist"
+  if [[ -f "${EXPORT_SUMMARY}" ]]; then
+    SUMMARY_TEXT="$(plutil -p "${EXPORT_SUMMARY}")"
+    CERT_TYPE="$(printf '%s\n' "${SUMMARY_TEXT}" | rg -o '"type" => "Apple Distribution"' || true)"
+    CERT_SHA1="$(printf '%s\n' "${SUMMARY_TEXT}" | sed -n 's/.*"SHA1" => "\(.*\)"/\1/p' | head -n 1)"
+    if [[ -z "${CERT_TYPE}" ]]; then
+      echo "export validation failed: expected Apple Distribution signing in ${EXPORT_SUMMARY}" >&2
+      exit 1
+    fi
+    if [[ -n "${DIST_SHA1}" && "${CERT_SHA1}" != "${DIST_SHA1}" ]]; then
+      echo "export validation failed: expected Apple Distribution cert SHA1 ${DIST_SHA1}, got ${CERT_SHA1:-unknown}" >&2
+      exit 1
+    fi
+  fi
+fi
+
 echo "archive created at ${ARCHIVE_PATH}"
 echo "export created at ${EXPORT_PATH}"
 echo "expected distribution identity: ${DIST_IDENTITY}"
