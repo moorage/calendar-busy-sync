@@ -12,6 +12,7 @@ enum AccessibilityIDs {
     static let appleCalendarMessageLabel = "apple-calendar.message"
     static let appleCalendarConnectButton = "apple-calendar.connect"
     static let appleCalendarDisconnectButton = "apple-calendar.disconnect"
+    static let appleCalendarOpenSettingsButton = "apple-calendar.open-settings"
     static let appleCalendarRefreshButton = "apple-calendar.refresh"
     static let appleCalendarPicker = "apple-calendar.picker"
     static let appleCalendarCreateButton = "apple-calendar.create"
@@ -22,14 +23,7 @@ enum AccessibilityIDs {
     static let googleAuthMessageLabel = "google-auth.message"
     static let googleAuthResolutionWarning = "google-auth.resolution-warning"
     static let googleAuthConnectButton = "google-auth.connect"
-    static let googleAuthDisconnectButton = "google-auth.disconnect"
     static let googleCalendarStatusLabel = "google-calendar.status"
-    static let googleCalendarMessageLabel = "google-calendar.message"
-    static let googleCalendarRefreshButton = "google-calendar.refresh"
-    static let googleCalendarPicker = "google-calendar.picker"
-    static let googleCalendarCreateButton = "google-calendar.create"
-    static let googleCalendarDeleteButton = "google-calendar.delete"
-    static let googleCalendarLastEventLabel = "google-calendar.last-event"
     static let googleCalendarLiveSmokeStatusLabel = "google-calendar.live-smoke-status"
     static let googleOAuthUseCustomToggle = "settings.advanced.google-oauth.use-custom"
     static let googleOAuthClientIDField = "settings.advanced.google-oauth.client-id"
@@ -47,6 +41,42 @@ enum AccessibilityIDs {
 
     static func mirrorPreviewRow(_ id: String) -> String {
         "mirror-preview.row.\(sanitized(id))"
+    }
+
+    static func googleAccountCard(_ id: String) -> String {
+        "google-account.card.\(sanitized(id))"
+    }
+
+    static func googleAuthDisconnectButton(_ id: String) -> String {
+        "google-auth.disconnect.\(sanitized(id))"
+    }
+
+    static func googleAccountPrimaryButton(_ id: String) -> String {
+        "google-account.primary.\(sanitized(id))"
+    }
+
+    static func googleCalendarMessageLabel(_ id: String) -> String {
+        "google-calendar.message.\(sanitized(id))"
+    }
+
+    static func googleCalendarRefreshButton(_ id: String) -> String {
+        "google-calendar.refresh.\(sanitized(id))"
+    }
+
+    static func googleCalendarPicker(_ id: String) -> String {
+        "google-calendar.picker.\(sanitized(id))"
+    }
+
+    static func googleCalendarCreateButton(_ id: String) -> String {
+        "google-calendar.create.\(sanitized(id))"
+    }
+
+    static func googleCalendarDeleteButton(_ id: String) -> String {
+        "google-calendar.delete.\(sanitized(id))"
+    }
+
+    static func googleCalendarLastEventLabel(_ id: String) -> String {
+        "google-calendar.last-event.\(sanitized(id))"
     }
 
     private static func sanitized(_ value: String) -> String {

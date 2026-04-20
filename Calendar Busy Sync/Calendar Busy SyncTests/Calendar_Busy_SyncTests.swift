@@ -129,7 +129,8 @@ final class Calendar_Busy_SyncTests: XCTestCase {
                 platformTarget: .macos,
                 deviceClass: .mac
             ),
-            userDefaults: defaults
+            userDefaults: defaults,
+            googleAccountStore: MockGoogleAccountStore()
         )
 
         await model.prepareIfNeeded()
@@ -138,6 +139,38 @@ final class Calendar_Busy_SyncTests: XCTestCase {
         XCTAssertEqual(model.state, .emptyLiveShell)
         XCTAssertEqual(model.state?.connectedAccountCount, 0)
         XCTAssertEqual(model.googleCalendarStatusLabel, "Sign in required")
+    }
+
+    @MainActor
+    func testAppModelBlocksMacGoogleSignInWhenBuildIsUnsigned() async {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+
+        let model = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: false,
+                platformTarget: .macos,
+                deviceClass: .mac
+            ),
+            userDefaults: defaults,
+            googleAccountStore: MockGoogleAccountStore(),
+            googleSignInEnvironment: GoogleSignInEnvironment(
+                blockingReason: "Google Sign-In on macOS requires a signed app build."
+            )
+        )
+
+        await model.prepareIfNeeded()
+
+        XCTAssertEqual(model.googleConnectionStatusLabel, "Signed build required")
+        XCTAssertEqual(model.googleConnectionDetail, "Google Sign-In on macOS requires a signed app build.")
+        XCTAssertFalse(model.canStartGoogleSignIn)
     }
 
     func testAuditTrailIncludesCustomGoogleOAuthModeEntry() throws {
@@ -316,6 +349,101 @@ final class Calendar_Busy_SyncTests: XCTestCase {
         )
     }
 
+    func testConnectedAccountListBuilderIncludesLiveAccounts() {
+        let scenarioAccounts = [
+            ConnectedAccountScenario(
+                id: "scenario-google",
+                provider: "google",
+                displayName: "Fixture Account",
+                selectedCalendars: [
+                    SelectedCalendar(id: "fixture-calendar", name: "Fixture Calendar", role: .sourceAndDestination),
+                ]
+            )
+        ]
+
+        let appleCalendar = AppleCalendarSummary(
+            id: "apple-calendar",
+            title: "Busy Mirror",
+            sourceTitle: "iCloud",
+            sourceKind: .iCloud
+        )
+        let googleCalendar = GoogleCalendarSummary(
+            id: "google-calendar",
+            summary: "Consulting",
+            accessRole: .writer,
+            primary: false,
+            timeZone: "America/Los_Angeles"
+        )
+        let googleAccount = GoogleConnectedAccount(
+            id: "google-account",
+            email: "person@example.com",
+            displayName: "Person Example",
+            grantedScopes: ["calendar.events"],
+            usesCustomOAuthApp: false,
+            serverAuthCodeAvailable: false
+        )
+        let googleCard = GoogleAccountCardModel(
+            account: googleAccount,
+            calendars: [googleCalendar],
+            selectedCalendarID: googleCalendar.id,
+            message: nil,
+            lastManagedEvent: nil,
+            isOperationInFlight: false,
+            isActive: true
+        )
+
+        let accounts = ConnectedAccountListBuilder.build(
+            scenarioAccounts: scenarioAccounts,
+            appleCalendarEnabled: true,
+            appleCalendarAuthorizationState: .granted,
+            selectedAppleCalendar: appleCalendar,
+            googleAccountCards: [googleCard]
+        )
+
+        XCTAssertEqual(accounts.count, 3)
+        XCTAssertEqual(accounts[0].displayName, "Fixture Account")
+        XCTAssertEqual(accounts[1].providerLabel, "Apple / iCloud")
+        XCTAssertEqual(accounts[1].selectedCalendars.first?.name, "Busy Mirror • iCloud")
+        XCTAssertEqual(accounts[2].displayName, "Person Example")
+        XCTAssertEqual(accounts[2].detail, "person@example.com")
+        XCTAssertEqual(accounts[2].selectedCalendars.first?.name, "Consulting")
+    }
+
+    func testGoogleAccountStoreUpsertsAndRemovesAccounts() throws {
+        let store = GoogleAccountStore(
+            service: "test.google-account-store.\(#function)",
+            accountName: "connected-google-accounts"
+        )
+
+        try store.saveAccounts([])
+
+        let first = StoredGoogleAccount(
+            id: "first",
+            email: "first@example.com",
+            displayName: "First",
+            grantedScopes: ["calendar.events"],
+            usesCustomOAuthApp: false,
+            archivedUserData: Data("first".utf8)
+        )
+        let second = StoredGoogleAccount(
+            id: "second",
+            email: "second@example.com",
+            displayName: "Second",
+            grantedScopes: ["calendar.events", "calendar.calendarlist.readonly"],
+            usesCustomOAuthApp: true,
+            archivedUserData: Data("second".utf8)
+        )
+
+        XCTAssertEqual(try store.upsertAccount(first), [first])
+        XCTAssertEqual(try store.upsertAccount(second), [second, first])
+        XCTAssertEqual(try store.upsertAccount(first), [first, second])
+        XCTAssertEqual(try store.removeAccount(id: second.id), [first])
+        XCTAssertEqual(try store.loadAccounts(), [first])
+
+        try store.saveAccounts([])
+        XCTAssertEqual(try store.loadAccounts(), [])
+    }
+
     @MainActor
     func testAppModelAppleCalendarConnectionLoadsCalendarsAndManagedEventLifecycle() async {
         let defaults = UserDefaults(suiteName: #function)!
@@ -360,7 +488,8 @@ final class Calendar_Busy_SyncTests: XCTestCase {
                 deviceClass: .mac
             ),
             userDefaults: defaults,
-            appleCalendarService: appleService
+            appleCalendarService: appleService,
+            googleAccountStore: MockGoogleAccountStore()
         )
 
         await model.prepareIfNeeded()
@@ -413,7 +542,8 @@ final class Calendar_Busy_SyncTests: XCTestCase {
                 deviceClass: .iphone
             ),
             userDefaults: defaults,
-            appleCalendarService: appleService
+            appleCalendarService: appleService,
+            googleAccountStore: MockGoogleAccountStore()
         )
 
         await model.prepareIfNeeded()
@@ -423,6 +553,69 @@ final class Calendar_Busy_SyncTests: XCTestCase {
         XCTAssertEqual(model.appleConnectionStatusLabel, "Permission denied")
         XCTAssertEqual(model.appleCalendarStatusLabel, "Permission denied")
         XCTAssertTrue(model.appleCalendarMessage?.contains("System Settings") == true)
+    }
+
+    @MainActor
+    func testAppModelOpensAppleCalendarSettingsOnMacOS() async {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let settingsOpener = MockAppleCalendarSettingsOpener(openResult: true)
+
+        let model = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: false,
+                platformTarget: .macos,
+                deviceClass: .mac
+            ),
+            userDefaults: defaults,
+            appleCalendarSettingsOpener: settingsOpener,
+            googleAccountStore: MockGoogleAccountStore()
+        )
+
+        model.openAppleCalendarSettings()
+
+        XCTAssertTrue(settingsOpener.didOpenCalendarAccessSettings)
+        XCTAssertEqual(model.appleCalendarMessage, "Opened System Settings to Privacy & Security > Calendars.")
+    }
+
+    @MainActor
+    func testAppModelSurfacesFailureWhenAppleCalendarSettingsCannotOpen() async {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let settingsOpener = MockAppleCalendarSettingsOpener(openResult: false)
+
+        let model = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: false,
+                platformTarget: .macos,
+                deviceClass: .mac
+            ),
+            userDefaults: defaults,
+            appleCalendarSettingsOpener: settingsOpener,
+            googleAccountStore: MockGoogleAccountStore()
+        )
+
+        model.openAppleCalendarSettings()
+
+        XCTAssertTrue(settingsOpener.didOpenCalendarAccessSettings)
+        XCTAssertEqual(
+            model.appleCalendarMessage,
+            "Calendar privacy settings could not be opened from this app. Open System Settings > Privacy & Security > Calendars manually."
+        )
     }
 
     private func repoRootURL() -> URL {
@@ -483,5 +676,46 @@ private final class MockAppleCalendarService: AppleCalendarProviding {
 
     func deleteManagedBusyEvent(_ event: AppleManagedEventRecord) throws {
         deletedEventIDs.append(event.eventID)
+    }
+}
+
+private final class MockAppleCalendarSettingsOpener: AppleCalendarSettingsOpening {
+    let openResult: Bool
+    private(set) var didOpenCalendarAccessSettings = false
+
+    init(openResult: Bool) {
+        self.openResult = openResult
+    }
+
+    func openCalendarAccessSettings() -> Bool {
+        didOpenCalendarAccessSettings = true
+        return openResult
+    }
+}
+
+private final class MockGoogleAccountStore: GoogleAccountStoring {
+    private var accounts: [StoredGoogleAccount]
+
+    init(accounts: [StoredGoogleAccount] = []) {
+        self.accounts = accounts
+    }
+
+    func loadAccounts() throws -> [StoredGoogleAccount] {
+        accounts
+    }
+
+    func saveAccounts(_ accounts: [StoredGoogleAccount]) throws {
+        self.accounts = accounts
+    }
+
+    func upsertAccount(_ account: StoredGoogleAccount) throws -> [StoredGoogleAccount] {
+        accounts.removeAll(where: { $0.id == account.id })
+        accounts.insert(account, at: 0)
+        return accounts
+    }
+
+    func removeAccount(id: String) throws -> [StoredGoogleAccount] {
+        accounts.removeAll(where: { $0.id == id })
+        return accounts
     }
 }

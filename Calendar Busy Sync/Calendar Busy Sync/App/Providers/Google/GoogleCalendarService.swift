@@ -1,16 +1,12 @@
 import Foundation
-import GoogleSignIn
 
 enum GoogleCalendarServiceError: LocalizedError, Equatable {
-    case notSignedIn
     case missingAccessToken
     case invalidResponse
     case api(statusCode: Int, message: String)
 
     var errorDescription: String? {
         switch self {
-        case .notSignedIn:
-            return "Connect Google before loading calendars or writing busy slots."
         case .missingAccessToken:
             return "Google Sign-In did not return an access token for Calendar API calls."
         case .invalidResponse:
@@ -36,8 +32,9 @@ struct GoogleCalendarService {
         self.timeZone = timeZone
     }
 
-    func listWritableCalendars() async throws -> [GoogleCalendarSummary] {
+    func listWritableCalendars(accessToken: String) async throws -> [GoogleCalendarSummary] {
         let response: CalendarListResponse = try await performJSONRequest(
+            accessToken: accessToken,
             method: "GET",
             path: "/calendar/v3/users/me/calendarList",
             queryItems: [
@@ -55,7 +52,10 @@ struct GoogleCalendarService {
         }
     }
 
-    func createManagedBusyEvent(in calendar: GoogleCalendarSummary) async throws -> GoogleManagedEventRecord {
+    func createManagedBusyEvent(
+        in calendar: GoogleCalendarSummary,
+        accessToken: String
+    ) async throws -> GoogleManagedEventRecord {
         let draft = ManagedBusyEventDraft.verification(now: now(), timeZone: timeZone())
         let payload = InsertEventRequest(
             summary: draft.summary,
@@ -74,6 +74,7 @@ struct GoogleCalendarService {
         )
 
         let response: InsertEventResponse = try await performJSONRequest(
+            accessToken: accessToken,
             method: "POST",
             path: "/calendar/v3/calendars/\(calendar.id.urlPathComponentEncoded)/events",
             queryItems: [
@@ -91,8 +92,12 @@ struct GoogleCalendarService {
         )
     }
 
-    func deleteManagedBusyEvent(_ event: GoogleManagedEventRecord) async throws {
+    func deleteManagedBusyEvent(
+        _ event: GoogleManagedEventRecord,
+        accessToken: String
+    ) async throws {
         _ = try await performRequest(
+            accessToken: accessToken,
             method: "DELETE",
             path: "/calendar/v3/calendars/\(event.calendarID.urlPathComponentEncoded)/events/\(event.eventID.urlPathComponentEncoded)",
             queryItems: [
@@ -103,12 +108,14 @@ struct GoogleCalendarService {
     }
 
     private func performJSONRequest<Response: Decodable, Body: Encodable>(
+        accessToken: String,
         method: String,
         path: String,
         queryItems: [URLQueryItem],
         body: Body?
     ) async throws -> Response {
         let (data, _) = try await performRequest(
+            accessToken: accessToken,
             method: method,
             path: path,
             queryItems: queryItems,
@@ -124,12 +131,17 @@ struct GoogleCalendarService {
     }
 
     private func performRequest<Body: Encodable>(
+        accessToken: String,
         method: String,
         path: String,
         queryItems: [URLQueryItem],
         body: Body?
     ) async throws -> (Data, HTTPURLResponse) {
-        let token = try await refreshedAccessToken()
+        let token = accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else {
+            throw GoogleCalendarServiceError.missingAccessToken
+        }
+
         var components = URLComponents()
         components.scheme = "https"
         components.host = "www.googleapis.com"
@@ -162,20 +174,6 @@ struct GoogleCalendarService {
         }
 
         return (data, httpResponse)
-    }
-
-    private func refreshedAccessToken() async throws -> String {
-        guard let currentUser = GIDSignIn.sharedInstance.currentUser else {
-            throw GoogleCalendarServiceError.notSignedIn
-        }
-
-        let refreshedUser = try await currentUser.refreshTokensIfNeeded()
-        let token = refreshedUser.accessToken.tokenString.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !token.isEmpty else {
-            throw GoogleCalendarServiceError.missingAccessToken
-        }
-
-        return token
     }
 
     private func decodedErrorMessage(from data: Data) -> String? {

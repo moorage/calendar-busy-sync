@@ -8,7 +8,7 @@
   - `docs/exec-plans/completed/2026-04-18-initial-apple-app-and-smoke-path.md`
   - `docs/exec-plans/completed/2026-04-18-apple-codex-harness-bootstrap.md`
 - current milestone:
-  - the repo now has live Google Sign-In wiring, writable Google calendar loading, managed Google busy-slot create/delete actions, and a second live Apple / iCloud calendar slice backed by EventKit inside the settings-and-audit shell
+  - the repo now has live Google Sign-In wiring, a secure multi-account Google roster with per-account calendar selection and verification actions, and a second live Apple / iCloud calendar slice backed by EventKit inside the settings-and-audit shell
 - Apple identifiers:
   - bundle identifier: `com.matthewpaulmoore.Calendar-Busy-Sync`
   - Apple bundle ID resource ID: `7NFDF46V3H`
@@ -25,11 +25,13 @@
 - evidence gathered:
   - `scripts/sync-google-client-config.py` now turns `.env` + `GOOGLE_CLIENT_PLIST_PATH` into the checked-in app plist inputs used by build/test commands
   - `Calendar Busy Sync/Calendar Busy Sync.xcodeproj` now links `GoogleSignIn-iOS`, uses a generated project-root `Info.plist`, and includes a macOS keychain access-group entitlement
-  - the app now restores a previous Google session on launch, exposes connect/disconnect controls plus writable Google calendar selection and managed event create/delete in settings, and keeps custom native OAuth app overrides behind callback-scheme validation
+  - the app now restores multiple saved Google sessions on launch, exposes an add/manage/remove account roster plus per-account writable Google calendar selection and managed event create/delete in settings, and keeps custom native OAuth app overrides behind callback-scheme validation
   - the app now exposes a live Apple / iCloud calendar workflow through EventKit, including in-app connect/disconnect semantics, writable-calendar selection, and managed busy-slot create/delete verification
+  - the app now detects unsigned macOS launches before starting Google auth and shows explicit signed-build guidance instead of surfacing a late generic keychain failure
   - `scripts/lib/ax-query.swift` and `scripts/test-google-live-macos` can drive the app's accessibility identifiers and report when the OS/browser auth handoff fails to surface
   - macOS, iPhone simulator, and iPad simulator smoke scripts still pass end-to-end after the auth wiring landed
 - open risks or blockers:
   - the current app surface now supports live Google calendar enumeration and a managed verification write/delete, but the full multi-account mirror engine is still future work
   - local macOS live auth is currently blocked on this machine by the OS auth-session handoff: `SafariLaunchAgent` starts the Google flow and then logs `User cancelled request with flags: 3` plus `Could not activate app with pid ...`, so the browser/authentication UI never surfaces and the real connect flow cannot finish here yet
+  - signed local macOS builds work again after repairing Xcode account state, but the browser/auth-session handoff can still fail independently of signing
   - custom Google native client IDs still require a build that already includes the matching reversed callback scheme, so arbitrary runtime swaps remain intentionally blocked

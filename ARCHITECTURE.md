@@ -72,9 +72,10 @@ Current live slice:
 - `Calendar Busy Sync/Calendar Busy Sync/App/Providers/Apple/`
 - `AppleCalendarService` owns EventKit authorization, writable Apple-calendar discovery, and managed busy-slot create/delete for Apple / iCloud calendars on the current device
 - `Calendar Busy Sync/Calendar Busy Sync/App/Providers/Google/`
-- `GoogleSignInService` owns restore/sign-in/disconnect and platform presenter lookup
+- `GoogleAccountStore` owns secure persistence of multiple Google sessions using archived `GIDGoogleUser` payloads
+- `GoogleSignInService` owns restore/sign-in/disconnect, archived-session reauthorization, and platform presenter lookup
 - `GoogleOAuthConfigurationResolver` enforces the current build's callback-scheme compatibility for custom native client IDs
-- `GoogleCalendarService` owns writable-calendar discovery plus managed busy-slot create/delete through direct Calendar REST calls with the current Google access token
+- `GoogleCalendarService` owns writable-calendar discovery plus managed busy-slot create/delete through direct Calendar REST calls with the selected account's Google access token
 
 ### Tests and fixtures
 

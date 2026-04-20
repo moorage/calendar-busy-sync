@@ -30,11 +30,11 @@ People with multiple jobs, gigs, or companies often keep separate calendars per 
 
 ## Current implementation slice
 
-- the app can restore a previously connected Google account on launch
-- the settings surface can connect or disconnect Google through the current default OAuth app
+- the app can restore multiple previously connected Google accounts on launch from a secure store
+- the settings surface can add another Google account, remove one account without disturbing the rest of the roster, and mark one account as the primary live-verification context
 - the harness syncs the default Google plist from `.env` into source-controlled app files before build/test runs
-- the app can load writable calendars from the connected Google account and persist the selected destination calendar
-- the settings surface can create and delete a managed private busy-slot event in the selected Google calendar to verify write access
+- the app can load writable calendars from each connected Google account and persist one selected destination calendar per account
+- the settings surface can create and delete a managed private busy-slot event in the selected Google calendar for any connected account to verify write access
 - the app can request Apple calendar access through EventKit, load writable Apple / iCloud calendars from the current device, persist the selected destination calendar, and create/delete a managed verification busy slot there
 - the macOS live smoke path can auto-select a calendar by name and attempt the create/delete verification loop, but the final interactive Google auth handoff still depends on local Apple signing/account state
 
@@ -59,7 +59,7 @@ People with multiple jobs, gigs, or companies often keep separate calendars per 
 - a free/available event does not create any mirrored busy slot
 - disconnecting an account removes its calendars from future sync planning
 - the configuration UI makes the selected source and destination calendars legible before sync runs
-- Google auth state is visible in the settings shell with explicit connect/disconnect controls and clear custom-client validation
+- Google auth state is visible in the settings shell with explicit add/remove account controls, per-account calendar selection, and clear custom-client validation
 
 ## Open decisions
 

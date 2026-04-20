@@ -12,11 +12,10 @@ struct ContentView: View {
                             syncSettingsSection
                             appleConnectionSection
                             appleCalendarsSection
-                            googleConnectionSection
-                            googleCalendarsSection
+                            googleAccountsSection
                             advancedSection
                             auditTrailSection
-                            accountsSection(state: state)
+                            accountsSection
                             previewSection(state: state)
                             statusSection(state: state)
                         }
@@ -106,6 +105,14 @@ struct ContentView: View {
                     .disabled(model.isAppleCalendarOperationInFlight)
                     .accessibilityIdentifier(AccessibilityIDs.appleCalendarDisconnectButton)
                 }
+
+                if model.canOpenAppleCalendarSettings {
+                    Button("Open Calendar Settings") {
+                        model.openAppleCalendarSettings()
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier(AccessibilityIDs.appleCalendarOpenSettingsButton)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -113,9 +120,9 @@ struct ContentView: View {
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
-    private var googleConnectionSection: some View {
+    private var googleAccountsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Google Account")
+            Text("Google Accounts")
                 .font(.headline)
 
             HStack(alignment: .firstTextBaseline) {
@@ -130,20 +137,9 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
 
-            if let account = model.googleConnectedAccount {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(account.displayName)
-                        .font(.subheadline.weight(.semibold))
-                    Text(model.googleConnectionDetail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier(AccessibilityIDs.googleAuthConnectedAccountLabel)
-                }
-            } else {
-                Text(model.googleConnectionDetail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            Text(model.googleConnectionDetail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             if let resolutionMessage = model.googleOAuthResolutionMessage {
                 Text(resolutionMessage)
@@ -168,16 +164,43 @@ struct ContentView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(!model.canStartGoogleSignIn)
                 .accessibilityIdentifier(AccessibilityIDs.googleAuthConnectButton)
+                if let status = model.liveGoogleSmokeStatusLabel {
+                    Text(status)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier(AccessibilityIDs.googleCalendarLiveSmokeStatusLabel)
+                }
+            }
 
-                if model.googleConnectedAccount != nil {
-                    Button("Disconnect Google") {
-                        Task {
-                            await model.disconnectGoogleAccount()
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(model.isGoogleAuthInFlight)
-                    .accessibilityIdentifier(AccessibilityIDs.googleAuthDisconnectButton)
+            if !model.googleAccountCards.isEmpty {
+                HStack(spacing: 10) {
+                    googleOverviewChip(title: "Connected", value: "\(model.googleAccountCards.count)")
+                    googleOverviewChip(title: "Ready", value: "\(model.googleReadyAccountCount)")
+                    googleOverviewChip(title: "Needs setup", value: "\(model.googleNeedsAttentionCount)")
+                }
+            }
+
+            Text(model.googleCalendarStatusLabel)
+                .font(.subheadline.weight(.semibold))
+                .accessibilityIdentifier(AccessibilityIDs.googleCalendarStatusLabel)
+
+            Text(model.googleCalendarDetail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if let smokeSummary = model.liveGoogleSmokeSummary {
+                Text(smokeSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if model.googleAccountCards.isEmpty {
+                Text("Add a Google account to choose a writable destination calendar and verify event writes.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(model.googleAccountCards) { card in
+                    googleAccountCard(card)
                 }
             }
         }
@@ -304,107 +327,150 @@ struct ContentView: View {
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
-    private var googleCalendarsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Google Calendars")
-                .font(.headline)
-
+    private func googleAccountCard(_ card: GoogleAccountCardModel) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
-                Text(model.googleCalendarStatusLabel)
-                    .font(.subheadline.weight(.semibold))
-                    .accessibilityIdentifier(AccessibilityIDs.googleCalendarStatusLabel)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        Text(card.account.displayName)
+                            .font(.subheadline.weight(.semibold))
+
+                        if card.isActive {
+                            googleBadge("Primary")
+                        }
+
+                        if card.account.usesCustomOAuthApp {
+                            googleBadge("Custom OAuth")
+                        }
+                    }
+                    .accessibilityIdentifier(AccessibilityIDs.googleAccountCard(card.id))
+
+                    Text(card.metadataLine)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
                 Spacer()
 
-                if let status = model.liveGoogleSmokeStatusLabel {
-                    Text(status)
+                VStack(alignment: .trailing, spacing: 6) {
+                    Text(card.statusLabel)
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.secondary)
-                        .accessibilityIdentifier(AccessibilityIDs.googleCalendarLiveSmokeStatusLabel)
+
+                    if !card.isActive {
+                        Button("Make Primary") {
+                            model.setActiveGoogleAccount(card.id)
+                        }
+                        .buttonStyle(.borderless)
+                        .font(.caption.weight(.medium))
+                        .accessibilityIdentifier(AccessibilityIDs.googleAccountPrimaryButton(card.id))
+                    }
                 }
             }
 
-            Text(model.googleCalendarDetail)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Text(card.detail)
+                .font(.subheadline)
 
-            if let smokeSummary = model.liveGoogleSmokeSummary {
-                Text(smokeSummary)
-                    .font(.caption)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Destination calendar")
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-            }
 
-            if let googleCalendarMessage = model.googleCalendarMessage {
-                Text(googleCalendarMessage)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier(AccessibilityIDs.googleCalendarMessageLabel)
-            }
-
-            if model.googleConnectedAccount != nil {
-                HStack(spacing: 12) {
-                    Button("Refresh Calendars") {
-                        Task {
-                            await model.refreshGoogleCalendars()
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!model.canRefreshGoogleCalendars)
-                    .accessibilityIdentifier(AccessibilityIDs.googleCalendarRefreshButton)
-
-                    Button("Create Test Busy Slot") {
-                        Task {
-                            await model.createManagedBusyEvent()
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!model.canCreateManagedBusyEvent)
-                    .accessibilityIdentifier(AccessibilityIDs.googleCalendarCreateButton)
-
-                    Button("Delete Test Busy Slot") {
-                        Task {
-                            await model.deleteManagedBusyEvent()
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!model.canDeleteManagedBusyEvent)
-                    .accessibilityIdentifier(AccessibilityIDs.googleCalendarDeleteButton)
-                }
-
-                if model.googleCalendars.isEmpty {
-                    Text("No writable Google calendars are loaded yet.")
+                if card.calendars.isEmpty {
+                    Text("No writable Google calendars are loaded yet for this account.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
                     Picker(
                         "Write busy slots to",
                         selection: Binding(
-                            get: { model.selectedGoogleCalendarID },
-                            set: { model.selectedGoogleCalendarID = $0 }
+                            get: { model.selectedGoogleCalendarID(for: card.id) },
+                            set: { model.setSelectedGoogleCalendarID($0, for: card.id) }
                         )
                     ) {
-                        ForEach(model.googleCalendars) { calendar in
+                        ForEach(card.calendars) { calendar in
                             Text(calendar.displayName).tag(calendar.id)
                         }
                     }
-                    .accessibilityIdentifier(AccessibilityIDs.googleCalendarPicker)
+                    .accessibilityIdentifier(AccessibilityIDs.googleCalendarPicker(card.id))
                 }
+            }
 
-                if let lastManagedEvent = model.lastManagedGoogleEvent {
-                    Text("\(lastManagedEvent.summary) • \(lastManagedEvent.windowDescription)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier(AccessibilityIDs.googleCalendarLastEventLabel)
-                }
-            } else {
-                Text("Connect Google to choose a writable calendar and verify event writes.")
+            if let message = card.message {
+                Text(message)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .accessibilityIdentifier(AccessibilityIDs.googleCalendarMessageLabel(card.id))
+            }
+
+            if let lastManagedEvent = card.lastManagedEvent {
+                Text("\(lastManagedEvent.summary) • \(lastManagedEvent.windowDescription)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier(AccessibilityIDs.googleCalendarLastEventLabel(card.id))
+            }
+
+            HStack(spacing: 12) {
+                Button("Refresh Calendars") {
+                    Task {
+                        await model.refreshGoogleCalendars(for: card.id)
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(!card.canRefreshCalendars)
+                .accessibilityIdentifier(AccessibilityIDs.googleCalendarRefreshButton(card.id))
+
+                Button("Create Test Busy Slot") {
+                    Task {
+                        await model.createManagedBusyEvent(for: card.id)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!card.canCreateManagedBusyEvent)
+                .accessibilityIdentifier(AccessibilityIDs.googleCalendarCreateButton(card.id))
+
+                Button("Delete Test Busy Slot") {
+                    Task {
+                        await model.deleteManagedBusyEvent(for: card.id)
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(!card.canDeleteManagedBusyEvent)
+                .accessibilityIdentifier(AccessibilityIDs.googleCalendarDeleteButton(card.id))
+
+                Spacer()
+
+                Button("Remove Account") {
+                    model.removeGoogleAccount(card.id)
+                }
+                .buttonStyle(.bordered)
+                .disabled(model.isGoogleAuthInFlight)
+                .accessibilityIdentifier(AccessibilityIDs.googleAuthDisconnectButton(card.id))
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(14)
+        .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private func googleOverviewChip(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func googleBadge(_ title: String) -> some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.accentColor.opacity(0.12), in: Capsule())
     }
 
     private var auditTrailSection: some View {
@@ -441,30 +507,56 @@ struct ContentView: View {
         .accessibilityIdentifier(AccessibilityIDs.auditTrailList)
     }
 
-    private func accountsSection(state: ScenarioState) -> some View {
+    private var accountsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Connected Accounts")
                 .font(.headline)
 
-            ForEach(state.scenario.accounts) { account in
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(account.displayName)
-                        .font(.subheadline.weight(.semibold))
-                        .accessibilityIdentifier(AccessibilityIDs.accountRow(account.id))
+            if model.connectedAccountsForDisplay.isEmpty {
+                Text("No connected accounts are listed yet.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(model.connectedAccountsForDisplay) { account in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(account.displayName)
+                                .font(.subheadline.weight(.semibold))
+                                .accessibilityIdentifier(AccessibilityIDs.accountRow(account.id))
 
-                    ForEach(account.selectedCalendars) { calendar in
-                        HStack {
-                            Text(calendar.name)
                             Spacer()
-                            Text(calendar.role.badgeLabel)
+
+                            Text(account.providerLabel)
+                                .font(.caption.weight(.medium))
                                 .foregroundStyle(.secondary)
                         }
-                        .font(.caption)
-                        .accessibilityIdentifier(AccessibilityIDs.calendarRow(calendar.id))
+
+                        if let detail = account.detail {
+                            Text(detail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        if account.selectedCalendars.isEmpty {
+                            Text("No calendar selected yet")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(account.selectedCalendars) { calendar in
+                                HStack {
+                                    Text(calendar.name)
+                                    Spacer()
+                                    Text(calendar.role.badgeLabel)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .font(.caption)
+                                .accessibilityIdentifier(AccessibilityIDs.calendarRow(calendar.id))
+                            }
+                        }
                     }
+                    .padding(12)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
-                .padding(12)
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
         }
         .accessibilityElement(children: .contain)
