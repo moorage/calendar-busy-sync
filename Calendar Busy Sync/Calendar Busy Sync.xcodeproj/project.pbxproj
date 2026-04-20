@@ -402,7 +402,9 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
-				CODE_SIGN_ENTITLEMENTS = Calendar_Busy_Sync.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = Calendar_Busy_Sync.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = Calendar_Busy_Sync.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = Calendar_Busy_Sync-macOS.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = GG34PA8F4A;
 				ENABLE_PREVIEWS = YES;
@@ -445,7 +447,9 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
-				CODE_SIGN_ENTITLEMENTS = Calendar_Busy_Sync.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = Calendar_Busy_Sync.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = Calendar_Busy_Sync.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = Calendar_Busy_Sync-macOS.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = GG34PA8F4A;
 				ENABLE_PREVIEWS = YES;

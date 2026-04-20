@@ -37,5 +37,22 @@
 	<string>Calendar Busy Sync needs calendar access to read busy events from the calendars you select and write opaque Busy holds to your other selected calendars.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Calendar Busy Sync needs calendar access to read busy events from the calendars you select and write opaque Busy holds to your other selected calendars.</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
+	<key>UILaunchScreen</key>
+	<dict/>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
 </dict>
 </plist>

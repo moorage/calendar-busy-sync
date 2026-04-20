@@ -90,6 +90,20 @@ def write_info_plist(client_config: dict[str, str]) -> None:
         "GIDClientID": client_config["CLIENT_ID"],
         "NSCalendarsUsageDescription": calendar_usage_message,
         "NSCalendarsFullAccessUsageDescription": calendar_usage_message,
+        "LSApplicationCategoryType": "public.app-category.productivity",
+        # iPad uploads require a launch-screen declaration and full multitasking orientations.
+        "UILaunchScreen": {},
+        "UISupportedInterfaceOrientations": [
+            "UIInterfaceOrientationPortrait",
+            "UIInterfaceOrientationLandscapeLeft",
+            "UIInterfaceOrientationLandscapeRight",
+        ],
+        "UISupportedInterfaceOrientations~ipad": [
+            "UIInterfaceOrientationPortrait",
+            "UIInterfaceOrientationPortraitUpsideDown",
+            "UIInterfaceOrientationLandscapeLeft",
+            "UIInterfaceOrientationLandscapeRight",
+        ],
     }
 
     APP_INFO_PLIST.parent.mkdir(parents=True, exist_ok=True)

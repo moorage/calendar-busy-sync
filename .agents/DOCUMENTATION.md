@@ -63,6 +63,8 @@
   - Apple calendar sharing now uses a portable `SharedAppleCalendarReference` instead of trusting device-local EventKit identifiers, so a selected iCloud calendar can resolve across macOS and iOS/iPadOS installs
   - the Advanced section now explicitly tells the user that settings sync through iCloud when available while sign-in and permissions remain local to each device
   - the iCloud KVS entitlement build path is now verified on both unsigned and signed macOS builds; the signed app still provisions with `Mac Team Provisioning Profile: com.matthewpaulmoore.Calendar-Busy-Sync`
+  - `scripts/sync-google-client-config.py` now also writes the iOS launch-screen placeholder plus iPhone/iPad multitasking orientations into the generated `Info.plist`, which fixes App Store Connect upload validation for the universal iOS build
+  - Mac App Store packaging now has a dedicated `Calendar_Busy_Sync-macOS.entitlements` file with sandbox, network-client, and calendar entitlements, while the generated `Info.plist` once again carries `LSApplicationCategoryType` so macOS uploads are not blocked by the plist generator
   - macOS, iPhone simulator, and iPad simulator smoke scripts still pass end-to-end after the auth wiring landed
 - open risks or blockers:
   - custom Google native client IDs still require a build that already includes the matching reversed callback scheme, so arbitrary runtime swaps remain intentionally blocked
