@@ -17,7 +17,11 @@ struct Calendar_Busy_SyncApp: App {
         launchOptions = resolvedLaunchOptions
         _model = StateObject(wrappedValue: appModel)
         #if os(macOS)
-        _macShellModel = StateObject(wrappedValue: MacUtilityShellModel())
+        _macShellModel = StateObject(
+            wrappedValue: MacUtilityShellModel(
+                managesDockVisibility: resolvedRuntimeMode == .standard
+            )
+        )
         #endif
         Task { @MainActor in
             await appModel.prepareIfNeeded()
@@ -44,7 +48,7 @@ struct Calendar_Busy_SyncApp: App {
         WindowGroup("Calendar Busy Sync", id: AppSceneIDs.settings) {
             settingsRootView
                 .background(
-                    MacWindowVisibilityObserver { isVisible in
+                    MacWindowVisibilityObserver(sceneID: AppSceneIDs.settings) { isVisible in
                         macShellModel.setWindowOpen(isVisible, for: AppSceneIDs.settings)
                     }
                 )
@@ -60,7 +64,7 @@ struct Calendar_Busy_SyncApp: App {
         WindowGroup("Audit Trail", id: AppSceneIDs.auditTrail) {
             auditTrailRootView
                 .background(
-                    MacWindowVisibilityObserver { isVisible in
+                    MacWindowVisibilityObserver(sceneID: AppSceneIDs.auditTrail) { isVisible in
                         macShellModel.setWindowOpen(isVisible, for: AppSceneIDs.auditTrail)
                     }
                 )

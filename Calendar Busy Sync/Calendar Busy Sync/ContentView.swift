@@ -100,7 +100,7 @@ struct ContentView: View {
                 }
             }
 
-            if model.googleAccountCards.isEmpty {
+            if model.googleAccountRosterRows.isEmpty {
                 sectionDivider
                 sectionRow {
                     HStack(spacing: 10) {
@@ -113,9 +113,9 @@ struct ContentView: View {
                     .font(.caption)
                 }
             } else {
-                ForEach(model.googleAccountCards) { card in
+                ForEach(model.googleAccountRosterRows) { row in
                     sectionDivider
-                    googleAccountRow(card)
+                    googleAccountRow(row)
                 }
             }
         }
@@ -296,7 +296,21 @@ struct ContentView: View {
         }
     }
 
-    private func googleAccountRow(_ card: GoogleAccountCardModel) -> some View {
+    @ViewBuilder
+    private func googleAccountRow(_ row: GoogleAccountRosterRowModel) -> some View {
+        switch row.kind {
+        case .connected:
+            if let localCard = row.localCard {
+                connectedGoogleAccountRow(localCard)
+            }
+        case .needsLocalConnection:
+            sharedGoogleAccountConnectRow(row)
+        case .removedFromShared:
+            removedSharedGoogleAccountRow(row)
+        }
+    }
+
+    private func connectedGoogleAccountRow(_ card: GoogleAccountCardModel) -> some View {
         VStack(alignment: .leading, spacing: 10) {
                 adaptiveTrailingRow(label: {
                     accountIdentityRow(
@@ -381,6 +395,77 @@ struct ContentView: View {
                     accessibilityID: AccessibilityIDs.googleCalendarMessageLabel(card.id)
                 )
             }
+        }
+    }
+
+    private func sharedGoogleAccountConnectRow(_ row: GoogleAccountRosterRowModel) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            adaptiveTrailingRow(label: {
+                accountIdentityRow(
+                    title: row.displayName,
+                    subtitle: row.email
+                )
+                .accessibilityIdentifier(AccessibilityIDs.googleAccountCard(row.stableAccountID))
+            }, trailing: {
+                Button {
+                    Task {
+                        await model.connectSharedGoogleAccount(row.stableAccountID)
+                    }
+                } label: {
+                    Label("Connect Here", systemImage: "link.badge.plus")
+                }
+                .buttonStyle(.bordered)
+                .disabled(!model.canStartGoogleSignIn)
+                .accessibilityIdentifier(AccessibilityIDs.googleAuthConnectSharedButton(row.stableAccountID))
+            })
+            .font(.caption)
+
+            adaptiveTrailingRow(label: {
+                HStack(spacing: 8) {
+                    Label("Calendar", systemImage: "calendar")
+                        .foregroundStyle(.secondary)
+                    Text(row.selectedCalendarDisplayName ?? "Will use the shared calendar selection after sign-in.")
+                        .foregroundStyle(.secondary)
+                }
+            }, trailing: {
+                Text("Shared setup")
+                    .foregroundStyle(.secondary)
+            })
+            .font(.caption)
+
+            infoMessageRow(
+                "This Google account was configured on another device. Connect it here to reuse the same calendar settings on this device.",
+                timestamp: nil,
+                accessibilityID: AccessibilityIDs.googleCalendarMessageLabel(row.stableAccountID)
+            )
+        }
+    }
+
+    private func removedSharedGoogleAccountRow(_ row: GoogleAccountRosterRowModel) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            adaptiveTrailingRow(label: {
+                accountIdentityRow(
+                    title: row.displayName,
+                    subtitle: row.email
+                )
+                .accessibilityIdentifier(AccessibilityIDs.googleAccountCard(row.stableAccountID))
+            }, trailing: {
+                Button(role: .destructive) {
+                    model.removeGoogleAccount(row.stableAccountID)
+                } label: {
+                    Label("Remove Here", systemImage: "trash")
+                }
+                .buttonStyle(.bordered)
+                .disabled(model.isGoogleAuthInFlight)
+                .accessibilityIdentifier(AccessibilityIDs.googleAuthRemoveSharedButton(row.stableAccountID))
+            })
+            .font(.caption)
+
+            infoMessageRow(
+                "This account was removed from shared settings on another device. Remove it here to keep this device aligned.",
+                timestamp: nil,
+                accessibilityID: AccessibilityIDs.googleCalendarMessageLabel(row.stableAccountID)
+            )
         }
     }
 
@@ -480,9 +565,17 @@ struct ContentView: View {
 
     private var statusLine: some View {
         HStack(spacing: 14) {
-            Label(model.currentActivitySummary, systemImage: model.currentActivityIconName)
-                .font(.caption.weight(.medium))
-                .lineLimit(1)
+            HStack(spacing: 6) {
+                Image(systemName: model.currentActivityIconName)
+                Text(model.currentActivitySummary)
+                    .fontWeight(.medium)
+                if let timestampSuffix = model.currentActivityTimestampSuffix {
+                    Text(timestampSuffix)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .font(.caption)
+            .lineLimit(1)
                 .accessibilityIdentifier(AccessibilityIDs.syncStatusDetail)
 
             Spacer(minLength: 8)

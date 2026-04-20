@@ -38,7 +38,9 @@ Stable identifiers should include:
 - `google-auth.message`
 - `google-auth.resolution-warning`
 - `google-auth.connect`
+- `google-auth.connect-shared.<id>`
 - `google-auth.disconnect.<id>`
+- `google-auth.remove-shared.<id>`
 - `google-calendar.status`
 - `google-account.card.<id>`
 - `google-calendar.message.<id>`

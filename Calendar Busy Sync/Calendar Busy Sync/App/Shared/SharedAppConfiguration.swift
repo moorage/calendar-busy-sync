@@ -23,9 +23,65 @@ struct SharedAppConfiguration: Codable, Equatable {
     let customGoogleOAuthServerClientID: String
     let googleSelectedCalendarIDs: [String: String]
     let activeGoogleAccountID: String?
+    let googleAccountDescriptors: [SharedGoogleAccountDescriptor]
 
     var auditTrailLogLength: AuditTrailLogLength {
         AuditTrailLogLength(rawValue: auditTrailLogLengthRawValue) ?? .last1000
+    }
+
+    init(
+        updatedAt: Date,
+        pollIntervalMinutes: Int,
+        auditTrailLogLengthRawValue: String,
+        isAppleCalendarEnabled: Bool,
+        selectedAppleCalendarReference: SharedAppleCalendarReference?,
+        usesCustomGoogleOAuthApp: Bool,
+        customGoogleOAuthClientID: String,
+        customGoogleOAuthServerClientID: String,
+        googleSelectedCalendarIDs: [String: String],
+        activeGoogleAccountID: String?,
+        googleAccountDescriptors: [SharedGoogleAccountDescriptor] = []
+    ) {
+        self.updatedAt = updatedAt
+        self.pollIntervalMinutes = pollIntervalMinutes
+        self.auditTrailLogLengthRawValue = auditTrailLogLengthRawValue
+        self.isAppleCalendarEnabled = isAppleCalendarEnabled
+        self.selectedAppleCalendarReference = selectedAppleCalendarReference
+        self.usesCustomGoogleOAuthApp = usesCustomGoogleOAuthApp
+        self.customGoogleOAuthClientID = customGoogleOAuthClientID
+        self.customGoogleOAuthServerClientID = customGoogleOAuthServerClientID
+        self.googleSelectedCalendarIDs = googleSelectedCalendarIDs
+        self.activeGoogleAccountID = activeGoogleAccountID
+        self.googleAccountDescriptors = googleAccountDescriptors
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case updatedAt
+        case pollIntervalMinutes
+        case auditTrailLogLengthRawValue
+        case isAppleCalendarEnabled
+        case selectedAppleCalendarReference
+        case usesCustomGoogleOAuthApp
+        case customGoogleOAuthClientID
+        case customGoogleOAuthServerClientID
+        case googleSelectedCalendarIDs
+        case activeGoogleAccountID
+        case googleAccountDescriptors
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        pollIntervalMinutes = try container.decode(Int.self, forKey: .pollIntervalMinutes)
+        auditTrailLogLengthRawValue = try container.decode(String.self, forKey: .auditTrailLogLengthRawValue)
+        isAppleCalendarEnabled = try container.decode(Bool.self, forKey: .isAppleCalendarEnabled)
+        selectedAppleCalendarReference = try container.decodeIfPresent(SharedAppleCalendarReference.self, forKey: .selectedAppleCalendarReference)
+        usesCustomGoogleOAuthApp = try container.decode(Bool.self, forKey: .usesCustomGoogleOAuthApp)
+        customGoogleOAuthClientID = try container.decode(String.self, forKey: .customGoogleOAuthClientID)
+        customGoogleOAuthServerClientID = try container.decode(String.self, forKey: .customGoogleOAuthServerClientID)
+        googleSelectedCalendarIDs = try container.decode([String: String].self, forKey: .googleSelectedCalendarIDs)
+        activeGoogleAccountID = try container.decodeIfPresent(String.self, forKey: .activeGoogleAccountID)
+        googleAccountDescriptors = try container.decodeIfPresent([SharedGoogleAccountDescriptor].self, forKey: .googleAccountDescriptors) ?? []
     }
 }
 

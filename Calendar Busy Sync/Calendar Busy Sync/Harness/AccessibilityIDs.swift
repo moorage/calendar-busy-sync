@@ -44,6 +44,14 @@ enum AccessibilityIDs {
         "google-auth.disconnect.\(sanitized(id))"
     }
 
+    static func googleAuthConnectSharedButton(_ id: String) -> String {
+        "google-auth.connect-shared.\(sanitized(id))"
+    }
+
+    static func googleAuthRemoveSharedButton(_ id: String) -> String {
+        "google-auth.remove-shared.\(sanitized(id))"
+    }
+
     static func googleCalendarMessageLabel(_ id: String) -> String {
         "google-calendar.message.\(sanitized(id))"
     }

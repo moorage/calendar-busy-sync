@@ -13,6 +13,9 @@ This work is macOS-specific. iPhone and iPad keep the existing app shell. The sy
 - [x] 2026-04-19T23:34Z update tests/docs/contracts and rerun focused validation; `build --platform macos`, `test-ui-macos --smoke`, ExecPlan validation, and docs validation passed
 - [x] 2026-04-19T23:37Z restore unit-test compile health for the new shell model tests so the hosted macOS unit target at least builds cleanly again
 - [x] 2026-04-20T01:30Z resolve the hosted macOS unit-test runner failure path by checking in an explicit shared scheme, skipping initial-window suppression during hosted XCTest startup, and updating the shell/status/planner tests so `./scripts/test-unit` now completes successfully
+- [x] 2026-04-20T23:55Z keep menu-bar-opened windows in the foreground and switch Dock presence from "never shown" to "shown only while Settings or Logs is open", with matching shell-model regression coverage and doc updates
+- [x] 2026-04-20T20:31Z rerun focused validation for the foreground/Dock change: `build --platform macos`, `test-ui-macos --smoke`, ExecPlan validation, and docs validation passed
+- [x] 2026-04-20T20:39Z fix the hosted macOS unit-runner regression by disabling Dock-visibility policy changes in `hostedTests` runtime mode while keeping foreground activation behavior intact; `./scripts/test-unit` passes again and `test-ui-macos --smoke` still passes in standard mode
 
 ## Surprises & Discoveries
 
@@ -23,6 +26,8 @@ This work is macOS-specific. iPhone and iPad keep the existing app shell. The sy
 - 2026-04-19: after the menu-bar shell landed, the unit target briefly failed to compile because a test fixture still used the old `GoogleAccountCardModel` initializer; fixing that exposed the deeper hosted-runner issue instead of leaving a fresh compile regression behind.
 - 2026-04-20: the long-standing “host app launches, then XCTest never finishes” problem was two issues layered together: Xcode had no stable shared scheme checked in for the unit target, and the new one-time window suppressor needed to stay disabled during hosted XCTest startup.
 - 2026-04-20: `MacUtilityShellModel` teardown is still fragile inside the app-hosted XCTest process on this toolchain, so the shell-model unit tests retain those helper instances for the lifetime of the test bundle instead of exercising XCTest's deallocation checker on them.
+- 2026-04-20: suppressing the Dock icon full-time made Settings feel like it opened behind other apps even when the menu bar action succeeded; the missing piece was to promote the app back to `.regular` before opening the requested scene, then explicitly raise that window once AppKit has attached it.
+- 2026-04-20: the hosted unit-runner regression came from one shell assumption leaking into the test host: forcing the app into accessory/no-Dock mode during `MacUtilityShellModel` initialization is fine for ordinary menu-bar launches, but it destabilizes the app-hosted XCTest environment. Gating Dock-policy changes behind runtime mode restored the host runner without undoing the user-facing shell behavior.
 
 ## Decision Log
 
@@ -30,12 +35,14 @@ This work is macOS-specific. iPhone and iPad keep the existing app shell. The sy
 - 2026-04-19: prefer the modern `MenuBarExtra` + `SMAppService.mainApp` path on macOS 13+ rather than introducing a separate helper target unless implementation proves that a helper is required.
 - 2026-04-19: the main settings UI should remain a normal window that can be opened from the menu bar, rather than trying to cram all configuration into the menu itself.
 - 2026-04-19: Dock suppression should be macOS-only and reversible. The plan must preserve a rollback path to the current Dock-based app behavior if login-item or activation behavior becomes unstable.
+- 2026-04-20: "not a persistent Dock app" means "no Dock icon when no app window is open", not "never show a Dock icon at all"; once Settings or Logs is visible, the app should behave like a normal foreground windowed app until the last window closes again.
 
 ## Outcomes & Retrospective
 
 - the macOS app now boots as an `LSUIElement` menu bar utility instead of a persistent Dock app
 - `MenuBarExtra` exposes `Open Settings`, `Open Logs`, `Sync Now`, `Launch at Login`, and `Quit Calendar Busy Sync`
 - the menu bar icon switches to a filled variant while the Settings window is open so the user can tell the primary window is already visible
+- opening Settings or Logs from the menu bar now promotes the app back into the foreground and shows a Dock icon for as long as either window remains open
 - launch at login uses a typed wrapper over `SMAppService.mainApp`, with inline status messaging when the OS still requires approval
 - a separate helper target was avoided in this slice
 - the hosted macOS unit-test wrapper now finishes cleanly again, so the menu-bar shell is covered by `./scripts/test-unit` instead of relying only on build + UI smoke
@@ -64,7 +71,7 @@ Relevant files and likely touch points:
 Current live state:
 
 - macOS now exposes a `MenuBarExtra` plus on-demand Settings and Audit Trail windows
-- the generated macOS plist includes `LSUIElement`, so the app no longer keeps a persistent Dock icon
+- the generated macOS plist includes `LSUIElement`, so the app starts without a persistent Dock icon and only shows one while an app window is open
 - launch-at-login state is managed through `SMAppService.mainApp`
 - harness `--ui-test-mode 1` launches intentionally keep the Settings window visible even though ordinary utility launches suppress the initial window
 
@@ -74,7 +81,7 @@ Target behavior:
 - selecting the menu bar item lets the user open the settings window and logs window
 - when the main settings window is open, the menu bar item should visibly reflect that state so the user can tell the utility is already showing its primary window
 - the user can toggle launch at login from the app
-- the macOS app does not sit in the Dock during ordinary use
+- the macOS app does not sit in the Dock when no app windows are open, but it does appear in the Dock while Settings or Logs is visible
 - iOS/iPadOS behavior remains unchanged
 
 Assumptions to validate during implementation:
@@ -111,7 +118,7 @@ Assumptions to validate during implementation:
 
 4. Suppress Dock presence:
    - update the macOS app configuration to run without a persistent Dock icon, most likely through `LSUIElement` in `Calendar Busy Sync/Info.plist` or an equivalent macOS-only plist setting
-   - add explicit code to open and foreground the settings/log windows from the menu bar so lack of a Dock icon does not strand the user
+   - add explicit code to open and foreground the settings/log windows from the menu bar, and temporarily restore Dock presence while those windows remain open
    - verify URL handling for Google auth still restores focus correctly when the app is an agent-style menu bar utility
 
 5. Preserve discoverability and recovery:
@@ -123,20 +130,22 @@ Assumptions to validate during implementation:
    - refresh `docs/debug-contracts.md` for any new menu bar or window-opening accessibility contracts
    - update UI smoke to open the settings window in the new macOS lifecycle if needed
    - update `README.md`, `ARCHITECTURE.md`, `.agents/DOCUMENTATION.md`, and `docs/product-specs/calendar-sync.md`
-   - record screencast steps for the new workflow:
-     - launch the app
-     - confirm there is no persistent Dock icon
-     - open the settings window from the menu bar
-     - toggle launch at login
-     - reopen Logs from the menu bar
+- record screencast steps for the new workflow:
+  - launch the app
+  - confirm there is no Dock icon until a window is opened
+  - open the settings window from the menu bar
+  - toggle launch at login
+  - reopen Logs from the menu bar
 
 ## Validation and Acceptance
 
 Acceptance means:
 
-- on macOS, launching the app presents a menu bar item without keeping a normal Dock icon visible
+- on macOS, launching the app presents a menu bar item without keeping a normal Dock icon visible until a real app window opens
 - the menu bar item can open the main settings window and the logs window reliably
 - the menu bar item visibly indicates when the main settings window is already open
+- opening Settings or Logs from the menu bar keeps that window in the foreground instead of dropping it behind other apps
+- the Dock icon appears while Settings or Logs is open and disappears again once the last app window closes
 - the user can enable and disable launch at login from the app, and the state reflects OS registration success
 - `Sync Now` remains reachable without opening the settings window
 - Google auth callbacks and Apple calendar permission flows still work when triggered from the menu bar utility context
@@ -160,8 +169,9 @@ open 'artifacts/DerivedDataSigned/Build/Products/Debug/Calendar Busy Sync.app'
 
 Manual checks:
 
-- confirm no persistent Dock icon while the menu bar item is active
+- confirm there is no Dock icon while no app windows are open
 - confirm `Open Settings` and `Open Logs` foreground the correct windows
+- confirm the Dock icon appears while Settings or Logs is visible and disappears after the last app window closes
 - confirm the menu bar item changes appearance or state while the main settings window is open
 - confirm toggling launch at login succeeds and survives relaunch
 - confirm Google OAuth can still round-trip into the app

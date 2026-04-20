@@ -248,6 +248,200 @@ final class Calendar_Busy_SyncTests: XCTestCase {
         XCTAssertNil(sharedStore.loadConfiguration())
     }
 
+    @MainActor
+    func testSharedAppConfigurationDecodesLegacyPayloadWithoutGoogleAccountDescriptors() throws {
+        let payload = """
+        {
+          "updatedAt": "2026-04-20T12:00:00Z",
+          "pollIntervalMinutes": 2,
+          "auditTrailLogLengthRawValue": "unlimited",
+          "isAppleCalendarEnabled": false,
+          "usesCustomGoogleOAuthApp": false,
+          "customGoogleOAuthClientID": "",
+          "customGoogleOAuthServerClientID": "",
+          "googleSelectedCalendarIDs": {
+            "google-account": "calendar-id"
+          },
+          "activeGoogleAccountID": "google-account"
+        }
+        """
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let configuration = try decoder.decode(
+            SharedAppConfiguration.self,
+            from: Data(payload.utf8)
+        )
+
+        XCTAssertEqual(configuration.googleSelectedCalendarIDs["google-account"], "calendar-id")
+        XCTAssertTrue(configuration.googleAccountDescriptors.isEmpty)
+    }
+
+    @MainActor
+    func testGoogleAccountRosterBuilderBuildsSharedPendingAndRemovedRows() {
+        let localCard = GoogleAccountCardModel(
+            account: GoogleConnectedAccount(
+                id: "local-only",
+                email: "local@example.com",
+                displayName: "Local Only",
+                grantedScopes: ["calendar.events"],
+                usesCustomOAuthApp: false,
+                serverAuthCodeAvailable: false
+            ),
+            calendars: [],
+            selectedCalendarID: "",
+            message: nil,
+            messageTimestampLabel: nil,
+            lastManagedEvent: nil,
+            isOperationInFlight: false
+        )
+        let sharedDescriptor = SharedGoogleAccountDescriptor(
+            id: "shared-1",
+            email: "shared@example.com",
+            displayName: "Shared Account",
+            usesCustomOAuthApp: false,
+            selectedCalendarID: "shared-calendar",
+            selectedCalendarDisplayName: "Shared Calendar"
+        )
+
+        let rows = GoogleAccountRosterBuilder.build(
+            localCards: [localCard],
+            sharedDescriptors: [sharedDescriptor],
+            isSharedConfigurationEnabled: true
+        )
+
+        XCTAssertEqual(rows.count, 2)
+        XCTAssertEqual(rows[0].kind, .needsLocalConnection)
+        XCTAssertEqual(rows[0].displayName, "Shared Account")
+        XCTAssertEqual(rows[0].selectedCalendarDisplayName, "Shared Calendar")
+        XCTAssertEqual(rows[1].kind, .removedFromShared)
+        XCTAssertEqual(rows[1].displayName, "Local Only")
+    }
+
+    @MainActor
+    func testGoogleAccountRosterBuilderMatchesSharedDescriptorByEmail() {
+        let calendar = GoogleCalendarSummary(
+            id: "calendar-id",
+            summary: "Work",
+            accessRole: .owner,
+            primary: false,
+            timeZone: nil
+        )
+        let localCard = GoogleAccountCardModel(
+            account: GoogleConnectedAccount(
+                id: "local-id",
+                email: "shared@example.com",
+                displayName: "Shared Local",
+                grantedScopes: ["calendar.events"],
+                usesCustomOAuthApp: false,
+                serverAuthCodeAvailable: false
+            ),
+            calendars: [calendar],
+            selectedCalendarID: "calendar-id",
+            message: nil,
+            messageTimestampLabel: nil,
+            lastManagedEvent: nil,
+            isOperationInFlight: false
+        )
+        let sharedDescriptor = SharedGoogleAccountDescriptor(
+            id: "shared-id",
+            email: "shared@example.com",
+            displayName: "Shared Remote",
+            usesCustomOAuthApp: false,
+            selectedCalendarID: "calendar-id",
+            selectedCalendarDisplayName: "Work"
+        )
+
+        let rows = GoogleAccountRosterBuilder.build(
+            localCards: [localCard],
+            sharedDescriptors: [sharedDescriptor],
+            isSharedConfigurationEnabled: true
+        )
+
+        XCTAssertEqual(rows.count, 1)
+        switch rows[0].kind {
+        case .connected:
+            break
+        default:
+            XCTFail("Expected the shared/local email match to produce a connected row.")
+        }
+        XCTAssertEqual(rows[0].stableAccountID, "local-id")
+        XCTAssertEqual(rows[0].selectedCalendarDisplayName, "Work")
+        XCTAssertTrue(rows[0].isConnectedLocally)
+    }
+
+    @MainActor
+    func testGoogleSharedAccountHandoffMatchesDescriptorByEmailAndMigratesCalendarSelection() {
+        let connectedAccount = StoredGoogleAccount(
+            id: "new-account-id",
+            email: "shared@example.com",
+            displayName: "Shared Account",
+            grantedScopes: ["calendar.events"],
+            usesCustomOAuthApp: false,
+            archivedUserData: Data("shared".utf8)
+        )
+        let descriptor = SharedGoogleAccountDescriptor(
+            id: "old-account-id",
+            email: "shared@example.com",
+            displayName: "Shared Account",
+            usesCustomOAuthApp: false,
+            selectedCalendarID: "shared-calendar",
+            selectedCalendarDisplayName: "Shared Calendar"
+        )
+
+        let migrated = GoogleSharedAccountHandoff.migratedSelectedCalendarIDs(
+            currentSelectedCalendarIDs: ["old-account-id": "shared-calendar"],
+            connectedAccount: connectedAccount,
+            sharedDescriptors: [descriptor]
+        )
+
+        XCTAssertNil(migrated["old-account-id"])
+        XCTAssertEqual(migrated["new-account-id"], "shared-calendar")
+    }
+
+    @MainActor
+    func testGoogleSharedAccountHandoffReconcilesDescriptorsUsingLocalSelectionsAndCalendarNames() {
+        let localAccount = StoredGoogleAccount(
+            id: "local-id",
+            email: "shared@example.com",
+            displayName: "Shared Local",
+            grantedScopes: ["calendar.events"],
+            usesCustomOAuthApp: true,
+            archivedUserData: Data("shared".utf8)
+        )
+        let existingDescriptor = SharedGoogleAccountDescriptor(
+            id: "remote-id",
+            email: "shared@example.com",
+            displayName: "Shared Remote",
+            usesCustomOAuthApp: false,
+            selectedCalendarID: "old-calendar",
+            selectedCalendarDisplayName: "Old Calendar"
+        )
+        let localCalendar = GoogleCalendarSummary(
+            id: "new-calendar",
+            summary: "Production",
+            accessRole: .owner,
+            primary: false,
+            timeZone: nil
+        )
+
+        let reconciled = GoogleSharedAccountHandoff.reconciledDescriptors(
+            currentDescriptors: [existingDescriptor],
+            localAccounts: [localAccount],
+            googleSelectedCalendarIDs: ["local-id": "new-calendar"],
+            googleCalendarsByAccountID: ["local-id": [localCalendar]]
+        )
+
+        XCTAssertEqual(reconciled.count, 1)
+        XCTAssertEqual(reconciled[0].id, "local-id")
+        XCTAssertEqual(reconciled[0].email, "shared@example.com")
+        XCTAssertEqual(reconciled[0].displayName, "Shared Local")
+        XCTAssertTrue(reconciled[0].usesCustomOAuthApp)
+        XCTAssertEqual(reconciled[0].selectedCalendarID, "new-calendar")
+        XCTAssertEqual(reconciled[0].selectedCalendarDisplayName, "Production")
+    }
+
     func testLaunchOptionsParseScenarioArguments() {
         let stateURL = URL(fileURLWithPath: "/tmp/state.json")
         let perfURL = URL(fileURLWithPath: "/tmp/perf.json")
@@ -525,6 +719,85 @@ final class Calendar_Busy_SyncTests: XCTestCase {
         XCTAssertTrue(shellModel.shouldSuppressInitialSettingsWindow(uiTestMode: false))
         XCTAssertFalse(shellModel.shouldSuppressInitialSettingsWindow(uiTestMode: false))
         XCTAssertFalse(shellModel.shouldSuppressInitialSettingsWindow(uiTestMode: true))
+    }
+
+    @MainActor
+    func testMacUtilityShellModelShowsDockIconOnlyWhileWindowsRemainOpen() {
+        let applicationController = MockMacApplicationController()
+        let shellModel = MacUtilityShellModel(
+            launchAtLoginService: MockLaunchAtLoginService(status: .notRegistered),
+            applicationController: applicationController
+        )
+        retainForHostedXCTest(shellModel)
+
+        XCTAssertEqual(applicationController.dockVisibilityCalls, [false])
+
+        shellModel.setWindowOpen(true, for: AppSceneIDs.settings)
+        XCTAssertEqual(applicationController.dockVisibilityCalls.last, true)
+
+        shellModel.setWindowOpen(true, for: AppSceneIDs.auditTrail)
+        XCTAssertEqual(applicationController.dockVisibilityCalls.last, true)
+
+        shellModel.setWindowOpen(false, for: AppSceneIDs.settings)
+        XCTAssertEqual(applicationController.dockVisibilityCalls.last, true)
+
+        shellModel.setWindowOpen(false, for: AppSceneIDs.auditTrail)
+        XCTAssertEqual(applicationController.dockVisibilityCalls.last, false)
+    }
+
+    @MainActor
+    func testMacUtilityShellModelPresentSceneRaisesTargetWindowAndMakesDockVisible() async {
+        let applicationController = MockMacApplicationController()
+        let shellModel = MacUtilityShellModel(
+            launchAtLoginService: MockLaunchAtLoginService(status: .notRegistered),
+            applicationController: applicationController
+        )
+        retainForHostedXCTest(shellModel)
+
+        var openedSceneID: String?
+        shellModel.presentScene(AppSceneIDs.settings) { sceneID in
+            openedSceneID = sceneID
+            XCTAssertEqual(applicationController.dockVisibilityCalls.last, true)
+        }
+
+        XCTAssertEqual(openedSceneID, AppSceneIDs.settings)
+
+        let expectation = expectation(description: "presentScene raises the requested window")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            if applicationController.activationCalls >= 1,
+               applicationController.broughtForwardSceneIDs.contains(AppSceneIDs.settings) {
+                expectation.fulfill()
+            }
+        }
+
+        await fulfillment(of: [expectation], timeout: 1.0)
+    }
+
+    @MainActor
+    func testMacUtilityShellModelCanDisableDockVisibilityManagementForHostedTests() async {
+        let applicationController = MockMacApplicationController()
+        let shellModel = MacUtilityShellModel(
+            launchAtLoginService: MockLaunchAtLoginService(status: .notRegistered),
+            applicationController: applicationController,
+            managesDockVisibility: false
+        )
+        retainForHostedXCTest(shellModel)
+
+        XCTAssertTrue(applicationController.dockVisibilityCalls.isEmpty)
+
+        shellModel.setWindowOpen(true, for: AppSceneIDs.settings)
+        shellModel.presentScene(AppSceneIDs.settings) { _ in }
+
+        let expectation = expectation(description: "hosted shell still raises the target scene")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            if applicationController.activationCalls >= 1,
+               applicationController.broughtForwardSceneIDs.contains(AppSceneIDs.settings) {
+                expectation.fulfill()
+            }
+        }
+
+        await fulfillment(of: [expectation], timeout: 1.0)
+        XCTAssertTrue(applicationController.dockVisibilityCalls.isEmpty)
     }
 
     @MainActor
@@ -1638,6 +1911,25 @@ private final class MockLaunchAtLoginService: MacLaunchAtLoginControlling {
 
     func setEnabled(_ enabled: Bool) throws {
         status = enabled ? .enabled : .notRegistered
+    }
+}
+
+@MainActor
+private final class MockMacApplicationController: MacApplicationControlling {
+    private(set) var activationCalls = 0
+    private(set) var dockVisibilityCalls: [Bool] = []
+    private(set) var broughtForwardSceneIDs: [String] = []
+
+    func activate(ignoringOtherApps: Bool) {
+        activationCalls += 1
+    }
+
+    func setDockVisible(_ isVisible: Bool) {
+        dockVisibilityCalls.append(isVisible)
+    }
+
+    func bringWindowToFront(sceneID: String) {
+        broughtForwardSceneIDs.append(sceneID)
     }
 }
 #endif

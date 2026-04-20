@@ -68,6 +68,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var lastManagedGoogleEventsByAccountID: [String: GoogleManagedEventRecord] = [:]
     @Published private(set) var googleOperationAccountIDs: Set<String> = []
     @Published private(set) var activeGoogleAccountID: String?
+    @Published private(set) var sharedGoogleAccountDescriptors: [SharedGoogleAccountDescriptor] = []
     @Published private(set) var liveGoogleSmokeStatus: LiveGoogleSmokeStatus = .idle
     @Published private(set) var isSyncInFlight = false
     @Published private(set) var lastBusyMirrorSyncSummary: BusyMirrorSyncSummary?
@@ -160,6 +161,7 @@ final class AppModel: ObservableObject {
         static let customGoogleOAuthServerClientID = "settings.googleOAuth.serverClientID"
         static let selectedGoogleCalendarIDs = "settings.googleCalendar.selectedCalendarIDs"
         static let activeGoogleAccountID = "settings.googleCalendar.activeAccountID"
+        static let sharedGoogleAccountDescriptors = "settings.googleCalendar.sharedAccountDescriptors"
     }
 
     init(
@@ -202,6 +204,7 @@ final class AppModel: ObservableObject {
         self.customGoogleOAuthServerClientID = userDefaults.string(forKey: SettingKey.customGoogleOAuthServerClientID) ?? ""
         self.googleSelectedCalendarIDs = Self.loadGoogleSelectedCalendarIDs(from: userDefaults)
         self.activeGoogleAccountID = userDefaults.string(forKey: SettingKey.activeGoogleAccountID)
+        self.sharedGoogleAccountDescriptors = Self.loadSharedGoogleAccountDescriptors(from: userDefaults)
         if self.liveGoogleDebugConfiguration.isEnabled {
             self.liveGoogleSmokeStatus = .awaitingAuthentication
         }
@@ -338,7 +341,29 @@ final class AppModel: ObservableObject {
             return "Last sync completed with failures"
         }
 
-        return "Busy mirroring is up to date"
+        return "Syncing completed across \(selectedParticipantCount) calendars."
+    }
+
+    var currentActivityTimestampSuffix: String? {
+        if isSyncInFlight || isGoogleAuthInFlight || !googleOperationAccountIDs.isEmpty || isAppleCalendarOperationInFlight {
+            return nil
+        }
+
+        switch liveGoogleSmokeStatus {
+        case .idle:
+            break
+        case .awaitingAuthentication, .running, .passed, .failed:
+            return nil
+        }
+
+        guard let lastBusyMirrorSyncSummary,
+              lastBusyMirrorSyncSummary.failedCount == 0,
+              lastBusyMirrorSyncSummary.participantCount >= 2
+        else {
+            return nil
+        }
+
+        return Self.messageTimestampLabel(for: lastBusyMirrorSyncSummary.completedAt)
     }
 
     var currentActivityIconName: String {
@@ -609,6 +634,14 @@ final class AppModel: ObservableObject {
         googleStoredAccounts.map(\.connectedAccount)
     }
 
+    var googleAccountRosterRows: [GoogleAccountRosterRowModel] {
+        GoogleAccountRosterBuilder.build(
+            localCards: googleAccountCards,
+            sharedDescriptors: sharedGoogleAccountDescriptors,
+            isSharedConfigurationEnabled: isSharedConfigurationEnabled
+        )
+    }
+
     var googleAccountCards: [GoogleAccountCardModel] {
         googleStoredAccounts.sorted {
             $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
@@ -628,11 +661,11 @@ final class AppModel: ObservableObject {
     }
 
     var googleReadyAccountCount: Int {
-        googleAccountCards.filter { !$0.needsAttention }.count
+        googleAccountRosterRows.filter { $0.countsTowardSetup && !$0.needsAttention }.count
     }
 
     var googleNeedsAttentionCount: Int {
-        googleAccountCards.filter(\.needsAttention).count
+        googleAccountRosterRows.filter { $0.countsTowardSetup && $0.needsAttention }.count
     }
 
     var googleConnectionStatusLabel: String {
@@ -653,6 +686,16 @@ final class AppModel: ObservableObject {
     }
 
     var googleConnectionDetail: String {
+        let pendingLocalConnectionCount = googleAccountRosterRows.filter {
+            $0.kind == .needsLocalConnection
+        }.count
+
+        if pendingLocalConnectionCount > 0 {
+            return pendingLocalConnectionCount == 1
+                ? "1 shared Google account still needs local sign-in on this device."
+                : "\(pendingLocalConnectionCount) shared Google accounts still need local sign-in on this device."
+        }
+
         if !googleStoredAccounts.isEmpty {
             return "Add another Google account or manage each participating calendar below."
         }
@@ -703,13 +746,15 @@ final class AppModel: ObservableObject {
     }
 
     var googleCalendarDetail: String {
-        if googleStoredAccounts.isEmpty {
+        let setupRows = googleAccountRosterRows.filter(\.countsTowardSetup)
+
+        if googleStoredAccounts.isEmpty && setupRows.isEmpty {
             return "Connect Google to load writable calendars from each signed-in account."
         }
 
-        let readyCount = googleAccountCards.filter { $0.selectedCalendar != nil }.count
-        let total = googleAccountCards.count
-        return "\(readyCount) of \(total) Google accounts have a participating calendar selected."
+        let readyCount = setupRows.filter { !$0.needsAttention }.count
+        let total = setupRows.count
+        return "\(readyCount) of \(total) Google accounts are ready on this device."
     }
 
     var liveGoogleSmokeStatusLabel: String? {
@@ -994,7 +1039,7 @@ final class AppModel: ObservableObject {
                         ? "Only one calendar is selected, so no new mirrored busy holds are needed."
                         : "Only one calendar is selected. Removed stale mirrored busy holds from the remaining calendar."
                 } else {
-                    syncMessage = "Busy mirroring is up to date across \(summary.participantCount) selected calendars."
+                    syncMessage = "Syncing completed across \(summary.participantCount) calendars."
                 }
             } else {
                 syncMessage = "Busy mirroring completed with \(summary.failedCount) failed write(s)."
@@ -1015,6 +1060,19 @@ final class AppModel: ObservableObject {
     }
 
     func connectGoogleAccount() async {
+        await connectGoogleAccount(sharedDescriptor: nil)
+    }
+
+    func connectSharedGoogleAccount(_ descriptorID: String) async {
+        guard let descriptor = sharedGoogleAccountDescriptors.first(where: { $0.id == descriptorID }) else {
+            googleAuthMessage = "That shared Google account is no longer available."
+            return
+        }
+
+        await connectGoogleAccount(sharedDescriptor: descriptor)
+    }
+
+    private func connectGoogleAccount(sharedDescriptor: SharedGoogleAccountDescriptor?) async {
         guard !isGoogleAuthInFlight else { return }
         if let blockingReason = googleSignInEnvironment.blockingReason {
             googleAuthMessage = blockingReason
@@ -1030,21 +1088,36 @@ final class AppModel: ObservableObject {
         do {
             let storedAccount = try await GoogleSignInService.signIn(
                 using: googleOAuthResolution,
-                hint: liveGoogleDebugConfiguration.preferredAccountEmail
+                hint: sharedDescriptor?.email ?? liveGoogleDebugConfiguration.preferredAccountEmail
             )
+            if let sharedDescriptor,
+               storedAccount.email.compare(sharedDescriptor.email, options: .caseInsensitive) != .orderedSame {
+                GoogleSignInService.clearSavedSession()
+                googleAuthMessage = "Google authorization completed as \(storedAccount.email), but this shared account expects \(sharedDescriptor.email)."
+                return
+            }
             if let mismatchMessage = liveGoogleEmailMismatchMessage(for: storedAccount) {
                 GoogleSignInService.clearSavedSession()
                 googleAuthMessage = mismatchMessage
                 return
             }
             let accounts = try googleAccountStore.upsertAccount(storedAccount)
+            googleSelectedCalendarIDs = GoogleSharedAccountHandoff.migratedSelectedCalendarIDs(
+                currentSelectedCalendarIDs: googleSelectedCalendarIDs,
+                connectedAccount: storedAccount,
+                sharedDescriptors: sharedGoogleAccountDescriptors
+            )
             updateGoogleStoredAccounts(accounts)
             activeGoogleAccountID = storedAccount.id
+            reconcileSharedGoogleAccountDescriptorsWithLocalAccounts()
             persistSettings()
             googleAuthMessage = storedAccount.connectedAccount.serverAuthCodeAvailable
                 ? "Google authorization succeeded. A server auth code was issued for backend exchange."
                 : "Google authorization succeeded. Added \(storedAccount.displayName)."
-            await refreshGoogleCalendars(for: storedAccount.id)
+            await refreshGoogleCalendars(
+                for: storedAccount.id,
+                preferredCalendarName: sharedDescriptor?.selectedCalendarDisplayName
+            )
             await syncAfterParticipantConfigurationChange()
         } catch let error as GoogleSignInServiceError {
             googleAuthMessage = error.localizedDescription
@@ -1058,6 +1131,7 @@ final class AppModel: ObservableObject {
     func removeGoogleAccount(_ accountID: String) {
         guard !isGoogleAuthInFlight else { return }
         let previousCalendarID = googleSelectedCalendarIDs[accountID] ?? ""
+        let removedAccountEmail = storedGoogleAccount(id: accountID)?.email
         do {
             GoogleSignInService.removeCurrentUserIfMatches(
                 accountID: accountID,
@@ -1066,6 +1140,10 @@ final class AppModel: ObservableObject {
             let accounts = try googleAccountStore.removeAccount(id: accountID)
             googleSelectedCalendarIDs[accountID] = nil
             updateGoogleStoredAccounts(accounts)
+            removeSharedGoogleAccountDescriptor(
+                matchingAccountID: accountID,
+                email: removedAccountEmail
+            )
             if activeGoogleAccountID == accountID {
                 activeGoogleAccountID = accounts.first?.id
             }
@@ -1087,7 +1165,10 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func refreshGoogleCalendars(for accountID: String) async {
+    func refreshGoogleCalendars(
+        for accountID: String,
+        preferredCalendarName: String? = nil
+    ) async {
         guard let storedAccount = storedGoogleAccount(id: accountID) else {
             googleAuthMessage = "That Google account is no longer available in this app."
             return
@@ -1104,16 +1185,19 @@ final class AppModel: ObservableObject {
                 accessToken: authorizedAccount.accessToken
             )
             googleCalendarsByAccountID[accountID] = calendars
-            let preferredCalendarName = accountID == liveGoogleResolvedAccountID
-                ? liveGoogleDebugConfiguration.preferredCalendarName
-                : nil
+            let resolvedPreferredCalendarName = preferredCalendarName
+                ?? sharedGoogleDescriptor(forAccountID: accountID, email: storedAccount.email)?.selectedCalendarDisplayName
+                ?? (accountID == liveGoogleResolvedAccountID
+                    ? liveGoogleDebugConfiguration.preferredCalendarName
+                    : nil)
             let resolvedCalendarID = GoogleCalendarSelectionResolver.resolvedCalendarID(
                 availableCalendars: calendars,
                 persistedCalendarID: googleSelectedCalendarIDs[accountID] ?? "",
-                preferredCalendarName: preferredCalendarName
+                preferredCalendarName: resolvedPreferredCalendarName
             )
             let previousCalendarID = googleSelectedCalendarIDs[accountID] ?? ""
             googleSelectedCalendarIDs[accountID] = resolvedCalendarID
+            reconcileSharedGoogleAccountDescriptorsWithLocalAccounts()
             persistSettings()
             if let selectedGoogleCalendar = calendars.first(where: { $0.id == resolvedCalendarID }) {
                 setGoogleMessage(
@@ -1548,6 +1632,7 @@ final class AppModel: ObservableObject {
         customGoogleOAuthServerClientID = configuration.customGoogleOAuthServerClientID
         googleSelectedCalendarIDs = configuration.googleSelectedCalendarIDs
         activeGoogleAccountID = configuration.activeGoogleAccountID
+        sharedGoogleAccountDescriptors = configuration.googleAccountDescriptors
         selectedAppleCalendarID = isAppleCalendarEnabled
             ? AppleCalendarSelectionResolver.resolvedCalendarID(
                 availableCalendars: appleCalendars,
@@ -1638,7 +1723,8 @@ final class AppModel: ObservableObject {
             customGoogleOAuthClientID: customGoogleOAuthClientID,
             customGoogleOAuthServerClientID: customGoogleOAuthServerClientID,
             googleSelectedCalendarIDs: googleSelectedCalendarIDs,
-            activeGoogleAccountID: activeGoogleAccountID
+            activeGoogleAccountID: activeGoogleAccountID,
+            googleAccountDescriptors: sharedGoogleAccountDescriptors
         )
     }
 
@@ -1661,6 +1747,11 @@ final class AppModel: ObservableObject {
         userDefaults.set(customGoogleOAuthServerClientID, forKey: SettingKey.customGoogleOAuthServerClientID)
         userDefaults.set(googleSelectedCalendarIDs, forKey: SettingKey.selectedGoogleCalendarIDs)
         userDefaults.set(activeGoogleAccountID, forKey: SettingKey.activeGoogleAccountID)
+        if let descriptorData = Self.encodeSharedGoogleAccountDescriptors(sharedGoogleAccountDescriptors) {
+            userDefaults.set(descriptorData, forKey: SettingKey.sharedGoogleAccountDescriptors)
+        } else {
+            userDefaults.removeObject(forKey: SettingKey.sharedGoogleAccountDescriptors)
+        }
         userDefaults.set(updatedAt, forKey: SettingKey.lastModifiedAt)
 
         if let referenceData = Self.encodeAppleCalendarReference(currentAppleCalendarReference) {
@@ -1676,6 +1767,7 @@ final class AppModel: ObservableObject {
         do {
             let storedAccounts = try googleAccountStore.loadAccounts()
             updateGoogleStoredAccounts(storedAccounts)
+            reconcileSharedGoogleAccountDescriptorsWithLocalAccounts()
             if !storedAccounts.isEmpty {
                 if activeGoogleAccountID == nil || !storedAccounts.contains(where: { $0.id == activeGoogleAccountID }) {
                     activeGoogleAccountID = storedAccounts.first?.id
@@ -1806,6 +1898,7 @@ final class AppModel: ObservableObject {
         let previousCalendarID = googleSelectedCalendarIDs[accountID] ?? ""
         googleSelectedCalendarIDs[accountID] = calendarID
         activeGoogleAccountID = accountID
+        reconcileSharedGoogleAccountDescriptorsWithLocalAccounts()
         persistSettings()
 
         guard hasPrepared, previousCalendarID != calendarID else { return }
@@ -1839,6 +1932,38 @@ final class AppModel: ObservableObject {
     private func replaceStoredGoogleAccount(_ account: StoredGoogleAccount) throws {
         let accounts = try googleAccountStore.upsertAccount(account)
         updateGoogleStoredAccounts(accounts)
+        reconcileSharedGoogleAccountDescriptorsWithLocalAccounts()
+    }
+
+    private func sharedGoogleDescriptor(
+        forAccountID accountID: String,
+        email: String
+    ) -> SharedGoogleAccountDescriptor? {
+        GoogleSharedAccountHandoff.matchingDescriptor(
+            forAccountID: accountID,
+            email: email,
+            descriptors: sharedGoogleAccountDescriptors
+        )
+    }
+
+    private func reconcileSharedGoogleAccountDescriptorsWithLocalAccounts() {
+        sharedGoogleAccountDescriptors = GoogleSharedAccountHandoff.reconciledDescriptors(
+            currentDescriptors: sharedGoogleAccountDescriptors,
+            localAccounts: googleStoredAccounts,
+            googleSelectedCalendarIDs: googleSelectedCalendarIDs,
+            googleCalendarsByAccountID: googleCalendarsByAccountID
+        )
+    }
+
+    private func removeSharedGoogleAccountDescriptor(
+        matchingAccountID accountID: String,
+        email: String?
+    ) {
+        let normalizedEmail = email?.lowercased()
+        sharedGoogleAccountDescriptors.removeAll { descriptor in
+            descriptor.id == accountID
+                || (normalizedEmail != nil && descriptor.email.lowercased() == normalizedEmail)
+        }
     }
 
     private func googleAuthorizationFailureMessage(for error: Error) -> String {
@@ -2300,6 +2425,14 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private static func loadSharedGoogleAccountDescriptors(from userDefaults: UserDefaults) -> [SharedGoogleAccountDescriptor] {
+        guard let data = userDefaults.data(forKey: SettingKey.sharedGoogleAccountDescriptors) else {
+            return []
+        }
+
+        return (try? JSONDecoder().decode([SharedGoogleAccountDescriptor].self, from: data)) ?? []
+    }
+
     private static func loadSettingsMutationDate(from userDefaults: UserDefaults) -> Date {
         userDefaults.object(forKey: SettingKey.lastModifiedAt) as? Date ?? .distantPast
     }
@@ -2318,6 +2451,16 @@ final class AppModel: ObservableObject {
         }
 
         return try? JSONEncoder().encode(reference)
+    }
+
+    private static func encodeSharedGoogleAccountDescriptors(
+        _ descriptors: [SharedGoogleAccountDescriptor]
+    ) -> Data? {
+        guard !descriptors.isEmpty else {
+            return nil
+        }
+
+        return try? JSONEncoder().encode(descriptors)
     }
 
     private static let syncTimestampFormatter: DateFormatter = {

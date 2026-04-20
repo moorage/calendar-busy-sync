@@ -22,7 +22,7 @@ Purpose:
 
 - host the app on macOS, iPhone, and iPad
 - expose shared navigation, account configuration, advanced OAuth settings, a dedicated audit-trail scene, and compact sync-status surfaces through platform-specific host adapters
-- on macOS, present the product as a menu bar utility with launch-at-login control, on-demand windows, and no persistent Dock icon
+- on macOS, present the product as a menu bar utility with launch-at-login control, on-demand windows, explicit foregrounding for those windows, and a Dock icon that appears only while at least one app window is open
 
 Expected primary code area:
 
@@ -42,6 +42,7 @@ Stable concepts:
 - `DefaultGoogleOAuthConfiguration`
 - `ResolvedGoogleOAuthConfiguration`
 - `GoogleConnectedAccount`
+- `SharedGoogleAccountDescriptor`
 - `SharedAppConfiguration`
 - `SharedAppleCalendarReference`
 - `HarnessLaunchOptions`
@@ -116,17 +117,18 @@ Primary code areas:
 - AppKit usage stays behind `#if os(macOS)` adapters
 - UIKit usage stays behind `#if os(iOS)` adapters
 - macOS-only polling controls stay behind platform-specific UI because iOS does not guarantee a fixed background schedule
-- macOS menu bar lifecycle, window-visibility tracking, and launch-at-login logic stay behind `Calendar Busy Sync/Calendar Busy Sync/App/Platform/macOS/`
+- macOS menu bar lifecycle, window-visibility tracking, conditional Dock visibility, and launch-at-login logic stay behind `Calendar Busy Sync/Calendar Busy Sync/App/Platform/macOS/`
 - provider SDK or HTTP payload handling stays inside provider adapters
 - shell scripts call shared helpers in `scripts/lib/`
 - Google client plist sync happens in `scripts/sync-google-client-config.py` before build/test commands
 - cross-device settings sync lives in `Calendar Busy Sync/Calendar Busy Sync/App/Shared/SharedAppConfiguration.swift` and uses `NSUbiquitousKeyValueStore` only for non-secret preferences
+- cross-device Google-account handoff also lives in `Calendar Busy Sync/Calendar Busy Sync/App/Shared/` through a shared descriptor layer that carries non-secret account identity plus selected-calendar metadata, while actual Google credentials remain device-local in the keychain
 - accessibility-driven live smoke helpers live in `scripts/lib/ax-query.swift` and are used by the macOS Google E2E script
 - docs verification and repo-map generation use only standard Python 3 library modules
 - automatic reconciliation uses a bounded scan window with limited lookback plus the next 60 days so repeated sync passes remain idempotent without scanning unbounded history, while desired mirror writes themselves are clipped to present-and-future time only
 - reconciliation is exact-slot aware: an identical busy block that already exists in a selected destination calendar suppresses a new mirror create, while identity matching still lets moved source events update their existing managed mirrors instead of delete/recreate churn
 - Apple / iCloud mirror identity recovery now uses a hybrid boundary: an on-event `calendarbusysync://mirror/<token>` URL marker plus app-local token persistence, with migration of older note-heavy mirror events and cleanup of orphaned markers
-- shared configuration is privacy-scoped: only non-secret settings roam through iCloud, while Google keychain payloads, archived Google user state, Apple permission state, and mirror token maps remain local; the per-device opt-out switch itself is stored only in local `UserDefaults`
+- shared configuration is privacy-scoped: only non-secret settings roam through iCloud, including shared Google account descriptors and selected-calendar metadata, while Google keychain payloads, archived Google user state, Apple permission state, and mirror token maps remain local; the per-device opt-out switch itself is stored only in local `UserDefaults`
 
 ## Cross-cutting concerns
 

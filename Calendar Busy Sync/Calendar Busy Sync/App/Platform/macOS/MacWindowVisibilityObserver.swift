@@ -3,6 +3,7 @@ import AppKit
 import SwiftUI
 
 struct MacWindowVisibilityObserver: NSViewRepresentable {
+    let sceneID: String
     let onVisibilityChange: (Bool) -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -16,6 +17,7 @@ struct MacWindowVisibilityObserver: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: TrackingView, context: Context) {
+        context.coordinator.sceneID = sceneID
         context.coordinator.onVisibilityChange = onVisibilityChange
         context.coordinator.attach(to: nsView.window)
     }
@@ -30,6 +32,7 @@ struct MacWindowVisibilityObserver: NSViewRepresentable {
     }
 
     final class Coordinator {
+        var sceneID = ""
         var onVisibilityChange: (Bool) -> Void
         private weak var window: NSWindow?
         private var observers: [NSObjectProtocol] = []
@@ -54,6 +57,7 @@ struct MacWindowVisibilityObserver: NSViewRepresentable {
                 return
             }
 
+            window.identifier = NSUserInterfaceItemIdentifier(sceneID)
             onVisibilityChange(window.isVisible)
 
             let center = NotificationCenter.default

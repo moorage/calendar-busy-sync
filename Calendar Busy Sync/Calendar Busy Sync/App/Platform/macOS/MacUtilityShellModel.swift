@@ -11,13 +11,24 @@ final class MacUtilityShellModel: ObservableObject {
     private(set) var launchAtLoginStatusMessage: String?
 
     private let launchAtLoginService: any MacLaunchAtLoginControlling
+    private let applicationController: any MacApplicationControlling
+    private let managesDockVisibility: Bool
     private var hasConsumedInitialSettingsWindowSuppression = false
 
-    init(launchAtLoginService: (any MacLaunchAtLoginControlling)? = nil) {
+    init(
+        launchAtLoginService: (any MacLaunchAtLoginControlling)? = nil,
+        applicationController: (any MacApplicationControlling)? = nil,
+        managesDockVisibility: Bool = true
+    ) {
         let resolvedService = launchAtLoginService ?? MacLaunchAtLoginService()
         self.launchAtLoginService = resolvedService
+        self.applicationController = applicationController ?? MacApplicationController()
+        self.managesDockVisibility = managesDockVisibility
         self.launchAtLoginEnabled = resolvedService.status == .enabled
         self.launchAtLoginStatusMessage = Self.statusMessage(for: resolvedService.status)
+        if managesDockVisibility {
+            self.applicationController.setDockVisible(false)
+        }
     }
 
     var menuBarIconName: String {
@@ -54,6 +65,8 @@ final class MacUtilityShellModel: ObservableObject {
         default:
             break
         }
+
+        reconcileDockVisibility()
     }
 
     func setLaunchAtLoginEnabled(_ enabled: Bool) {
@@ -93,7 +106,39 @@ final class MacUtilityShellModel: ObservableObject {
     }
 
     func activateApp() {
-        NSApplication.shared.activate(ignoringOtherApps: true)
+        applicationController.activate(ignoringOtherApps: true)
+    }
+
+    func presentScene(_ sceneID: String, openWindow: (String) -> Void) {
+        if managesDockVisibility {
+            applicationController.setDockVisible(true)
+        }
+        openWindow(sceneID)
+
+        DispatchQueue.main.async { [weak self] in
+            self?.bringSceneForward(sceneID)
+        }
+    }
+
+    private func bringSceneForward(_ sceneID: String) {
+        if managesDockVisibility {
+            applicationController.setDockVisible(true)
+        }
+        applicationController.activate(ignoringOtherApps: true)
+        applicationController.bringWindowToFront(sceneID: sceneID)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            self?.applicationController.activate(ignoringOtherApps: true)
+            self?.applicationController.bringWindowToFront(sceneID: sceneID)
+        }
+    }
+
+    private func reconcileDockVisibility() {
+        guard managesDockVisibility else {
+            return
+        }
+
+        applicationController.setDockVisible(isSettingsWindowOpen || isAuditTrailWindowOpen)
     }
 
     private static func statusMessage(for status: SMAppService.Status) -> String? {

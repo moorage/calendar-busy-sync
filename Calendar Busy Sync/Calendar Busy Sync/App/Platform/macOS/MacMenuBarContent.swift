@@ -78,8 +78,9 @@ struct MacMenuBarContent: View {
     }
 
     private func openScene(_ sceneID: String) {
-        openWindow(id: sceneID)
-        shellModel.activateApp()
+        shellModel.presentScene(sceneID) { targetSceneID in
+            openWindow(id: targetSceneID)
+        }
     }
 }
 #endif

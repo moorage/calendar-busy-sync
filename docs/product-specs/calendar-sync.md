@@ -24,11 +24,12 @@ People with multiple jobs, gigs, or companies often keep separate calendars per 
 - if a selected destination calendar already has a busy event with the exact same start, end, and all-day state, the app must not create a second busy hold for that slot
 - Apple / iCloud mirrors should not expose raw source identifiers in visible notes; their recoverable identity should stay opaque to the user while still letting the app update or delete them later
 - non-secret configuration should sync across the app's macOS and iOS/iPadOS installs through iCloud when the same Apple ID is signed in, while provider auth tokens and device permission state remain local
+- the shared iCloud settings payload should remember which Google account and selected destination calendar participate, so another device can offer a convenient local connect/remove handoff without syncing credentials
 
 ## Settings surfaces
 
 - the main app shell should prioritize account management over a dense operational dashboard and keep low-frequency controls compact
-- on macOS, the primary shell should live in the menu bar, not as a persistent Dock app
+- on macOS, the primary shell should live in the menu bar, with a Dock icon shown only while one of the app's windows is open
 - audit trail should live in a separate window or dedicated surface instead of occupying the primary settings flow
 - primary settings include connected Google accounts, Apple / iCloud calendar access on the current device, selected participating calendars, and the default shared Google OAuth configuration
 - the persistent footer should expose current activity, pending work, failure count, a `Logs` launcher, and a `Sync Now` action
@@ -47,7 +48,9 @@ People with multiple jobs, gigs, or companies often keep separate calendars per 
 - the app can load writable calendars from each connected Google account and persist one selected participating calendar per account
 - the app can request Apple calendar access through EventKit, load writable Apple / iCloud calendars from the current device, and persist the selected participating calendar
 - the app can share non-secret configuration through iCloud key-value storage, including selected calendars and advanced preferences, while keeping Google account payloads and Apple permission state device-local
+- the app can share a non-secret Google account descriptor roster through iCloud, letting another device show shared Google accounts that need local sign-in or local cleanup while preserving the selected calendar choice when possible
 - each device can disable shared iCloud configuration locally without changing the shared-setting behavior of the user's other devices
+- Google account handoff remains per-device: shared settings can tell a device which account/calendar should participate, but the device must still authorize the Google account locally before it can sync
 - the app now reconciles the selected calendars as one participant set: accepted busy source events become opaque `Busy` holds on all the others, and moved/deleted/free/non-accepted source events update or delete the mirrored holds on the next pass
 - reconciliation is exact-slot aware, so pre-existing busy occupancy and redundant app-managed duplicates suppress extra mirror writes instead of stacking duplicate busy events into the same slot
 - Apple / iCloud mirrors now keep only a short note sentence visible to the user and move their recoverable identity into a URL marker plus app-local token mapping, with automatic migration of older note-heavy mirrors
@@ -55,7 +58,7 @@ People with multiple jobs, gigs, or companies often keep separate calendars per 
 - deselecting or disconnecting a participant calendar triggers cleanup of app-managed mirror events that were written into that calendar
 - provider write-verification helpers may remain available for harness/debug automation, but they should not occupy the primary user-facing settings shell
 - the macOS live smoke path now uses the `.env` test account plus calendar name to constrain Google auth, auto-select the target writable calendar, and complete the managed create/delete verification loop on a signed local build
-- the macOS build now runs as an agent-style utility with `LSUIElement`, a `MenuBarExtra`, a launch-at-login wrapper over `SMAppService.mainApp`, and explicit window-visibility tracking so the menu bar icon can reflect whether Settings is already open
+- the macOS build now runs as an agent-style utility with `LSUIElement`, a `MenuBarExtra`, a launch-at-login wrapper over `SMAppService.mainApp`, explicit window-visibility tracking so the menu bar icon can reflect whether Settings is already open, and conditional Dock visibility plus foreground restoration so Settings and Logs behave like normal app windows once opened
 
 ## Defaults
 

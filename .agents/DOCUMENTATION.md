@@ -1,6 +1,7 @@
 # Running implementation notes
 
 - active ExecPlans:
+  - `docs/exec-plans/active/2026-04-20-google-account-handoff-icloud.md`
   - `docs/exec-plans/active/2026-04-20-shared-configuration-icloud.md`
   - `docs/exec-plans/active/2026-04-19-google-sign-in-wiring.md`
   - `docs/exec-plans/active/2026-04-19-google-calendar-live-integration-e2e.md`
@@ -12,7 +13,7 @@
   - `docs/exec-plans/completed/2026-04-18-initial-apple-app-and-smoke-path.md`
   - `docs/exec-plans/completed/2026-04-18-apple-codex-harness-bootstrap.md`
 - current milestone:
-  - the repo now has live Google Sign-In wiring, a secure multi-account Google roster with per-account calendar selection, a live Apple / iCloud calendar slice backed by EventKit, a first full-mesh mirror-reconciliation engine, a settings-first shell with a separate audit-trail window plus a persistent bottom status line, a macOS menu bar utility shell with launch-at-login support and no persistent Dock icon, and iCloud-backed shared configuration for non-secret settings
+  - the repo now has live Google Sign-In wiring, a secure multi-account Google roster with per-account calendar selection, a live Apple / iCloud calendar slice backed by EventKit, a first full-mesh mirror-reconciliation engine, a settings-first shell with a separate audit-trail window plus a persistent bottom status line, a macOS menu bar utility shell with launch-at-login support and a Dock icon that appears only while Settings or Logs is open, and iCloud-backed shared configuration for non-secret settings plus shared Google-account handoff metadata
 - Apple identifiers:
   - bundle identifier: `com.matthewpaulmoore.Calendar-Busy-Sync`
   - Apple bundle ID resource ID: `7NFDF46V3H`
@@ -46,6 +47,16 @@
   - `./scripts/archive-appstore --platform ios` (automatic archive + App Store export path exercised end to end; export summary confirms Apple Distribution signing and an iOS Team Store provisioning profile)
   - `./scripts/upload-appstore --platform ios --skip-build` (uploaded the verified `.ipa` to App Store Connect successfully; delivery UUID `abab0ada-9bb3-4fc4-a975-1904de595cfa`)
   - `python3 scripts/check_execplan.py docs/exec-plans/active/2026-04-20-shared-configuration-icloud.md`
+  - `python3 scripts/check_execplan.py docs/exec-plans/active/2026-04-20-google-account-handoff-icloud.md`
+  - `./scripts/build --platform ios --device-class both` (shared Google-account handoff simulator build validation)
+  - `./scripts/test-ui-ios --device both --smoke` (shared Google-account handoff iPhone/iPad smoke validation)
+  - `./scripts/build --platform macos` (menu-bar foregrounding and conditional Dock visibility compile check)
+  - `./scripts/test-unit` (menu-bar foregrounding and conditional Dock visibility shell-model coverage)
+  - `./scripts/test-ui-macos --smoke` (menu-bar foregrounding and conditional Dock visibility smoke check)
+  - `python3 scripts/check_execplan.py docs/exec-plans/active/2026-04-19-menu-bar-login-item-utility.md` (post-Dock-behavior update)
+  - `python3 scripts/knowledge/check_docs.py` (post-Dock-behavior update)
+  - `./scripts/test-unit` (hosted XCTest runner revalidation after gating Dock visibility changes out of hosted-test runtime)
+  - `./scripts/test-ui-macos --smoke` (standard-runtime revalidation after hosted-test Dock fix)
 - evidence gathered:
   - `scripts/sync-google-client-config.py` now turns `.env` + `GOOGLE_CLIENT_PLIST_PATH` into the checked-in app plist inputs used by build/test commands
   - `Calendar Busy Sync/Calendar Busy Sync.xcodeproj` now links `GoogleSignIn-iOS`, uses a generated project-root `Info.plist`, and includes a macOS keychain access-group entitlement
@@ -63,10 +74,12 @@
   - the main window is now organized as a compact Apple-settings-style form with rounded gray panels, branded Google/iCloud badges, refresh controls beside each calendar row, timestamped provider footnotes, and a bottom status line with `Logs`, `Sync Now`, current activity, pending work, and failures
   - the Google roster no longer exposes an account-level `Primary` action because full-mesh mirroring does not have a primary-account concept
   - mirrored busy-slot writes are now future-only; the planner clips ongoing source events at `now` while the bounded reconciliation scan still looks back far enough to clean stale managed mirrors
-  - the macOS app now runs as an `LSUIElement` menu bar utility with `MenuBarExtra`, launch-at-login control through `SMAppService.mainApp`, a visible open-window icon state when Settings is already on screen, and AppKit-backed suppression of the initial Settings window outside harness UI-test launches
+  - the macOS app now runs as an `LSUIElement` menu bar utility with `MenuBarExtra`, launch-at-login control through `SMAppService.mainApp`, a visible open-window icon state when Settings is already on screen, AppKit-backed suppression of the initial Settings window outside harness UI-test launches, and conditional Dock visibility plus explicit bring-to-front behavior so menu-bar-opened windows stay foregrounded
   - the hosted macOS unit-test runner now completes again: the repo has an explicit shared Xcode scheme for the app-hosted unit target, hosted XCTest launch detection avoids the one-time window suppressor during test startup, and the shell/status/planner tests were updated so `./scripts/test-unit` finishes green instead of stalling after host-app launch
   - non-secret app configuration now syncs through iCloud key-value storage: `SharedAppConfiguration` carries selected calendars and advanced preferences, launch chooses the newer state between local `UserDefaults` and iCloud, and live remote changes update `AppModel` without syncing Google keychain payloads or Apple permission state
   - the shared-settings kill switch is now device-local: Advanced can disable iCloud settings sync on one install without pushing that opt-out to the user's other devices
+  - shared iCloud settings now carry a non-secret Google account descriptor roster, so another device can see which Google account and destination calendar were chosen elsewhere and render `Connect Here` / `Remove Here` handoff rows without syncing any Google credentials
+  - shared Google-account handoff now preserves the chosen destination calendar through iCloud by syncing both the stable calendar ID and a human-readable calendar name, then using the shared email as the cross-device reconnect hint when a local Google account ID differs
   - Apple calendar sharing now uses a portable `SharedAppleCalendarReference` instead of trusting device-local EventKit identifiers, so a selected iCloud calendar can resolve across macOS and iOS/iPadOS installs
   - the Advanced section now explicitly tells the user that settings sync through iCloud when available while sign-in and permissions remain local to each device
   - the iCloud KVS entitlement build path is now verified on both unsigned and signed macOS builds; the signed app still provisions with `Mac Team Provisioning Profile: com.matthewpaulmoore.Calendar-Busy-Sync`
@@ -80,4 +93,5 @@
 - open risks or blockers:
   - custom Google native client IDs still require a build that already includes the matching reversed callback scheme, so arbitrary runtime swaps remain intentionally blocked
   - one concurrent validation attempt (`./scripts/build --platform macos` in parallel with `./scripts/test-unit`) retriggered the known hosted XCTest/DerivedData contention pattern; rerunning sequentially passed, so future validation for this repo should continue to avoid parallel `xcodebuild` commands that share `artifacts/DerivedData`
+  - the hosted macOS `./scripts/test-unit` path is stable again after keeping Dock-visibility policy changes out of `hostedTests` runtime mode while preserving foreground activation behavior there
   - the new iCloud configuration path is fully exercised in unit tests and simulator builds, but true cross-device sync still requires signed builds with the same Apple ID plus the iCloud entitlement active in provisioning
