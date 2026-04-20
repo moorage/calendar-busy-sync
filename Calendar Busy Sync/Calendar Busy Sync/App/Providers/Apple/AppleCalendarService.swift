@@ -46,15 +46,18 @@ enum AppleCalendarServiceError: LocalizedError, Equatable {
 @MainActor
 final class AppleCalendarService: AppleCalendarProviding {
     private let eventStore: EKEventStore
+    private let mirrorIdentityStore: AppleMirrorIdentityStoring
     private let now: () -> Date
     private let timeZone: () -> TimeZone
 
     init(
         eventStore: EKEventStore = EKEventStore(),
+        mirrorIdentityStore: AppleMirrorIdentityStoring = AppleMirrorIdentityStore(),
         now: @escaping () -> Date = Date.init,
         timeZone: @escaping () -> TimeZone = { .current }
     ) {
         self.eventStore = eventStore
+        self.mirrorIdentityStore = mirrorIdentityStore
         self.now = now
         self.timeZone = timeZone
     }
@@ -162,7 +165,7 @@ final class AppleCalendarService: AppleCalendarProviding {
         }
 
         return try events(in: calendar, window: window).compactMap { event in
-            guard !ManagedAppleMirrorNotes.isManagedMirror(event.notes) else {
+            guard try !isManagedMirrorEvent(event) else {
                 return nil
             }
             guard event.isEligibleSourceEvent else {
@@ -191,21 +194,27 @@ final class AppleCalendarService: AppleCalendarProviding {
         }
 
         return try events(in: calendar, window: window).compactMap { event in
-            guard let sourceKey = ManagedAppleMirrorNotes.sourceKey(from: event.notes) else {
+            let resolution = try resolveManagedMirror(for: event)
+
+            switch resolution {
+            case let .resolved(sourceKey, _):
+                return ExistingBusyMirrorEvent(
+                    identity: BusyMirrorIdentity(
+                        sourceKey: sourceKey,
+                        targetParticipantID: participant.id
+                    ),
+                    targetParticipant: participant,
+                    eventID: event.eventIdentifier,
+                    startDate: event.startDate,
+                    endDate: event.endDate,
+                    isAllDay: event.isAllDay
+                )
+            case let .orphaned(token):
+                try removeOrphanedManagedMirrorEvent(event, token: token)
+                return nil
+            case .none:
                 return nil
             }
-
-            return ExistingBusyMirrorEvent(
-                identity: BusyMirrorIdentity(
-                    sourceKey: sourceKey,
-                    targetParticipantID: participant.id
-                ),
-                targetParticipant: participant,
-                eventID: event.eventIdentifier,
-                startDate: event.startDate,
-                endDate: event.endDate,
-                isAllDay: event.isAllDay
-            )
         }
     }
 
@@ -218,10 +227,12 @@ final class AppleCalendarService: AppleCalendarProviding {
 
         let event = EKEvent(eventStore: eventStore)
         event.calendar = writableCalendar
-        applyManagedMirror(desiredMirror, to: event)
+        let token = AppleManagedMirrorMarker.makeToken()
+        applyManagedMirror(desiredMirror, to: event, token: token)
 
         do {
             try eventStore.save(event, span: .thisEvent, commit: true)
+            try mirrorIdentityStore.setSourceKey(desiredMirror.identity.sourceKey, for: token)
         } catch {
             throw AppleCalendarServiceError.requestFailed(
                 "Apple Calendar could not create a mirrored busy slot during sync."
@@ -236,10 +247,12 @@ final class AppleCalendarService: AppleCalendarProviding {
             throw AppleCalendarServiceError.managedEventMissing
         }
 
-        applyManagedMirror(desiredMirror, to: event)
+        let token = AppleManagedMirrorMarker(url: event.url)?.token ?? AppleManagedMirrorMarker.makeToken()
+        applyManagedMirror(desiredMirror, to: event, token: token)
 
         do {
             try eventStore.save(event, span: .thisEvent, commit: true)
+            try mirrorIdentityStore.setSourceKey(desiredMirror.identity.sourceKey, for: token)
         } catch {
             throw AppleCalendarServiceError.requestFailed(
                 "Apple Calendar could not update a mirrored busy slot during sync."
@@ -256,6 +269,9 @@ final class AppleCalendarService: AppleCalendarProviding {
 
         do {
             try eventStore.remove(event, span: .thisEvent, commit: true)
+            if let token = AppleManagedMirrorMarker(url: event.url)?.token {
+                try mirrorIdentityStore.removeSourceKey(for: token)
+            }
         } catch {
             throw AppleCalendarServiceError.requestFailed(
                 "Apple Calendar could not delete a stale mirrored busy slot during sync."
@@ -307,13 +323,75 @@ final class AppleCalendarService: AppleCalendarProviding {
         return eventStore.events(matching: predicate)
     }
 
-    private func applyManagedMirror(_ desiredMirror: DesiredBusyMirrorEvent, to event: EKEvent) {
+    private func applyManagedMirror(_ desiredMirror: DesiredBusyMirrorEvent, to event: EKEvent, token: String) {
         event.title = "Busy"
-        event.notes = ManagedAppleMirrorNotes.notes(for: desiredMirror.identity)
+        event.notes = ManagedAppleMirrorNotes.userVisibleNote
+        event.url = AppleManagedMirrorMarker(token: token).url
         event.startDate = desiredMirror.startDate
         event.endDate = desiredMirror.endDate
         event.availability = .busy
         event.isAllDay = desiredMirror.isAllDay
+    }
+
+    private func isManagedMirrorEvent(_ event: EKEvent) throws -> Bool {
+        switch try resolveManagedMirror(for: event) {
+        case .none:
+            return false
+        case .resolved, .orphaned:
+            return true
+        }
+    }
+
+    private func resolveManagedMirror(for event: EKEvent) throws -> AppleManagedMirrorResolution {
+        if let marker = AppleManagedMirrorMarker(url: event.url) {
+            if let sourceKey = try mirrorIdentityStore.sourceKey(for: marker.token) {
+                return .resolved(sourceKey: sourceKey, token: marker.token)
+            }
+
+            if let legacySourceKey = ManagedAppleMirrorNotes.legacySourceKey(from: event.notes) {
+                try migrateManagedMirror(event, token: marker.token, sourceKey: legacySourceKey)
+                return .resolved(sourceKey: legacySourceKey, token: marker.token)
+            }
+
+            return .orphaned(token: marker.token)
+        }
+
+        guard let legacySourceKey = ManagedAppleMirrorNotes.legacySourceKey(from: event.notes) else {
+            return .none
+        }
+
+        let token = AppleManagedMirrorMarker.makeToken()
+        try migrateManagedMirror(event, token: token, sourceKey: legacySourceKey)
+        return .resolved(sourceKey: legacySourceKey, token: token)
+    }
+
+    private func migrateManagedMirror(
+        _ event: EKEvent,
+        token: String,
+        sourceKey: BusyMirrorSourceKey
+    ) throws {
+        event.notes = ManagedAppleMirrorNotes.userVisibleNote
+        event.url = AppleManagedMirrorMarker(token: token).url
+
+        do {
+            try eventStore.save(event, span: .thisEvent, commit: true)
+            try mirrorIdentityStore.setSourceKey(sourceKey, for: token)
+        } catch {
+            throw AppleCalendarServiceError.requestFailed(
+                "Apple Calendar could not migrate an existing mirrored busy slot to the compact metadata format."
+            )
+        }
+    }
+
+    private func removeOrphanedManagedMirrorEvent(_ event: EKEvent, token: String) throws {
+        do {
+            try eventStore.remove(event, span: .thisEvent, commit: true)
+            try mirrorIdentityStore.removeSourceKey(for: token)
+        } catch {
+            throw AppleCalendarServiceError.requestFailed(
+                "Apple Calendar could not remove an orphaned mirrored busy slot after local metadata was lost."
+            )
+        }
     }
 
     private static func authorizationState(from status: EKAuthorizationStatus) -> AppleCalendarAuthorizationState {
@@ -380,28 +458,15 @@ final class AppleCalendarService: AppleCalendarProviding {
 }
 
 private enum ManagedAppleMirrorNotes {
+    static let userVisibleNote = "Managed by Calendar Busy Sync mirror reconciliation."
+
     private static let managedPrefix = "calendarBusySyncManaged=true"
     private static let kindPrefix = "calendarBusySyncKind=mirror"
     private static let sourceProviderPrefix = "calendarBusySyncSourceProvider="
     private static let sourceCalendarPrefix = "calendarBusySyncSourceCalendarID="
     private static let sourceEventPrefix = "calendarBusySyncSourceEventID="
 
-    static func notes(for identity: BusyMirrorIdentity) -> String {
-        [
-            "Managed by Calendar Busy Sync mirror reconciliation.",
-            managedPrefix,
-            kindPrefix,
-            "\(sourceProviderPrefix)\(identity.sourceKey.provider.rawValue)",
-            "\(sourceCalendarPrefix)\(identity.sourceKey.calendarID)",
-            "\(sourceEventPrefix)\(identity.sourceKey.eventID)",
-        ].joined(separator: "\n")
-    }
-
-    static func isManagedMirror(_ notes: String?) -> Bool {
-        sourceKey(from: notes) != nil
-    }
-
-    static func sourceKey(from notes: String?) -> BusyMirrorSourceKey? {
+    static func legacySourceKey(from notes: String?) -> BusyMirrorSourceKey? {
         guard let notes else {
             return nil
         }
@@ -443,6 +508,12 @@ private enum ManagedAppleMirrorNotes {
             eventID: eventID
         )
     }
+}
+
+private enum AppleManagedMirrorResolution {
+    case none
+    case resolved(sourceKey: BusyMirrorSourceKey, token: String)
+    case orphaned(token: String)
 }
 
 private extension EKEvent {

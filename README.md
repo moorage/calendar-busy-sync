@@ -91,6 +91,7 @@ Capture a deterministic checkpoint:
 - full-mesh mirroring is live for the selected calendars: only accepted busy commitments become an opaque `Busy` hold on every other selected calendar, and moved or deleted source events reconcile on the next sync pass
 - invited events mirror only when the current user has responded `Yes`; tentative, declined, and pending/no-response events do not create mirror writes
 - sync writes are future-only: past source time is never mirrored, and an already-in-progress source event is clipped so the mirrored busy hold starts at the current time
+- Apple / iCloud mirrors now keep only a short human-readable note and store their recoverable identity behind a `calendarbusysync://mirror/<token>` URL marker plus app-local token mapping; older note-heavy mirrors migrate forward automatically and orphaned tokens are removed instead of duplicating busy holds
 - the reconciliation scan still uses a bounded lookback plus the next 60 days so the app can clean up stale managed mirrors and catch in-progress events without scanning unbounded history
 - the app now blocks macOS Google sign-in from unsigned local harness launches and tells the user to switch to a signed Xcode run when keychain-backed auth cannot work
 - the macOS live Google smoke script now builds a signed app, targets `TEST_GOOGLE_USER` plus `TEST_GOOGLE_CALENDAR_NAME` from `.env`, and fails clearly when local Apple signing/account state prevents the OS/browser auth surface from opening

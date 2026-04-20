@@ -29,12 +29,19 @@
   - `python3 scripts/check_execplan.py docs/exec-plans/active/2026-04-19-settings-shell-ia-refresh.md`
   - `python3 scripts/check_execplan.py docs/exec-plans/active/2026-04-19-menu-bar-login-item-utility.md`
   - `python3 scripts/knowledge/check_docs.py`
+  - `./scripts/build --platform macos` (Apple mirror metadata migration compile check)
+  - `./scripts/test-unit` (Apple mirror metadata migration sequential validation)
+  - `python3 scripts/check_execplan.py docs/exec-plans/active/2026-04-19-busy-slot-mirroring-core.md` (post-migration rerun)
+  - `python3 scripts/knowledge/check_docs.py` (post-migration rerun)
 - evidence gathered:
   - `scripts/sync-google-client-config.py` now turns `.env` + `GOOGLE_CLIENT_PLIST_PATH` into the checked-in app plist inputs used by build/test commands
   - `Calendar Busy Sync/Calendar Busy Sync.xcodeproj` now links `GoogleSignIn-iOS`, uses a generated project-root `Info.plist`, and includes a macOS keychain access-group entitlement
   - the app now restores only the app-owned Google account roster on launch, clears stale GoogleSignIn SDK session state before interactive sign-in, exposes an add/manage/remove account roster plus per-account writable Google calendar selection and managed event create/delete in settings, and keeps custom native OAuth app overrides behind callback-scheme validation
   - the app now exposes a live Apple / iCloud calendar workflow through EventKit, including in-app connect/disconnect semantics and writable-calendar selection for the settings-first shell
   - the app now treats every selected calendar as both source and destination, embeds mirror identity metadata in Google extended properties and Apple notes, and reconciles the participant set on demand plus on a macOS timer
+  - Apple / iCloud mirror metadata no longer has to stay in visible raw note lines: new mirrors use a `calendarbusysync://mirror/<token>` URL marker plus an app-local token map, old note-heavy mirrors migrate forward automatically, and orphaned tokenized mirrors are removed before they can duplicate busy holds
+  - Apple mirror token persistence lives in `AppleMirrorIdentityStore`, backed by `UserDefaults`, and the unit suite now covers URL-marker round-tripping plus token-map persistence/removal
+  - kept local Xcode app icon changes that surfaced during validation: `Calendar Busy Sync/Calendar Busy Sync.xcodeproj/project.pbxproj` now sets `ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon`, and `Calendar Busy Sync/Calendar Busy Sync/Assets.xcassets/AppIcon.appiconset/` remains in the worktree by user request
   - participant changes now trigger immediate reconciliation, and deselecting or disconnecting a calendar performs best-effort cleanup of stale app-managed mirror events from the old destination calendar
   - source-event eligibility now requires both busy availability and an accepted commitment: self-owned/no-attendee busy events still mirror, while invited events mirror only after the current user responds `Yes`
   - the app now detects unsigned macOS launches before starting Google auth and shows explicit signed-build guidance instead of surfacing a late generic keychain failure
@@ -47,3 +54,4 @@
   - macOS, iPhone simulator, and iPad simulator smoke scripts still pass end-to-end after the auth wiring landed
 - open risks or blockers:
   - custom Google native client IDs still require a build that already includes the matching reversed callback scheme, so arbitrary runtime swaps remain intentionally blocked
+  - one concurrent validation attempt (`./scripts/build --platform macos` in parallel with `./scripts/test-unit`) retriggered the known hosted XCTest/DerivedData contention pattern; rerunning sequentially passed, so future validation for this repo should continue to avoid parallel `xcodebuild` commands that share `artifacts/DerivedData`

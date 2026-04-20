@@ -21,6 +21,7 @@ People with multiple jobs, gigs, or companies often keep separate calendars per 
 - free/available events do not create mirrored holds
 - tentative, declined, and no-response invited events do not create mirrored holds
 - moving, deleting, cancelling, or changing a source event to free/available must update or remove the mirrored holds on the next reconciliation pass
+- Apple / iCloud mirrors should not expose raw source identifiers in visible notes; their recoverable identity should stay opaque to the user while still letting the app update or delete them later
 
 ## Settings surfaces
 
@@ -44,6 +45,7 @@ People with multiple jobs, gigs, or companies often keep separate calendars per 
 - the app can load writable calendars from each connected Google account and persist one selected participating calendar per account
 - the app can request Apple calendar access through EventKit, load writable Apple / iCloud calendars from the current device, and persist the selected participating calendar
 - the app now reconciles the selected calendars as one participant set: accepted busy source events become opaque `Busy` holds on all the others, and moved/deleted/free/non-accepted source events update or delete the mirrored holds on the next pass
+- Apple / iCloud mirrors now keep only a short note sentence visible to the user and move their recoverable identity into a URL marker plus app-local token mapping, with automatic migration of older note-heavy mirrors
 - mirrored busy writes are future-only: past time is never written, and an ongoing source event is mirrored only from "now" through its end
 - deselecting or disconnecting a participant calendar triggers cleanup of app-managed mirror events that were written into that calendar
 - provider write-verification helpers may remain available for harness/debug automation, but they should not occupy the primary user-facing settings shell

@@ -73,6 +73,7 @@ Current live slice:
 
 - `Calendar Busy Sync/Calendar Busy Sync/App/Providers/Apple/`
 - `AppleCalendarService` owns EventKit authorization, writable Apple-calendar discovery, source-event listing, and managed mirror create/update/delete for Apple / iCloud calendars on the current device
+- `AppleMirrorIdentityStore` owns the local token-to-source mapping that backs Apple / iCloud mirror reconciliation without exposing raw source identifiers in visible notes
 - `Calendar Busy Sync/Calendar Busy Sync/App/Providers/Google/`
 - `GoogleAccountStore` owns secure persistence of multiple Google sessions using archived `GIDGoogleUser` payloads
 - `GoogleSignInService` owns restore/sign-in/disconnect, archived-session reauthorization, and platform presenter lookup
@@ -120,6 +121,7 @@ Primary code areas:
 - accessibility-driven live smoke helpers live in `scripts/lib/ax-query.swift` and are used by the macOS Google E2E script
 - docs verification and repo-map generation use only standard Python 3 library modules
 - automatic reconciliation uses a bounded scan window with limited lookback plus the next 60 days so repeated sync passes remain idempotent without scanning unbounded history, while desired mirror writes themselves are clipped to present-and-future time only
+- Apple / iCloud mirror identity recovery now uses a hybrid boundary: an on-event `calendarbusysync://mirror/<token>` URL marker plus app-local token persistence, with migration of older note-heavy mirror events and cleanup of orphaned markers
 
 ## Cross-cutting concerns
 

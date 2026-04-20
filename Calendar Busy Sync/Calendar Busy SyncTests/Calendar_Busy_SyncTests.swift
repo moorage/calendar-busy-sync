@@ -13,6 +13,44 @@ final class Calendar_Busy_SyncTests: XCTestCase {
         XCTAssertEqual(AuditTrailLogLength.defaultValue(for: .ios), .last1000)
     }
 
+    func testAppleManagedMirrorMarkerRoundTripsURLToken() {
+        let marker = AppleManagedMirrorMarker(token: "mirror-token")
+
+        XCTAssertEqual(marker.url.absoluteString, "calendarbusysync://mirror/mirror-token")
+        XCTAssertEqual(AppleManagedMirrorMarker(url: marker.url)?.token, "mirror-token")
+        XCTAssertNil(AppleManagedMirrorMarker(url: URL(string: "https://example.com")))
+    }
+
+    func testAppleMirrorIdentityStorePersistsAndRemovesSourceKeys() throws {
+        let suiteName = "CalendarBusySyncTests.\(#function)"
+        guard let userDefaults = UserDefaults(suiteName: suiteName) else {
+            return XCTFail("Could not create isolated UserDefaults suite for Apple mirror metadata tests.")
+        }
+        defer {
+            userDefaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = AppleMirrorIdentityStore(
+            userDefaults: userDefaults,
+            storageKey: "apple-mirror-test-store"
+        )
+        let sourceKey = BusyMirrorSourceKey(
+            provider: .google,
+            calendarID: "calendar-id",
+            eventID: "event-id"
+        )
+
+        XCTAssertNil(try store.sourceKey(for: "mirror-token"))
+
+        try store.setSourceKey(sourceKey, for: "mirror-token")
+
+        XCTAssertEqual(try store.sourceKey(for: "mirror-token"), sourceKey)
+
+        try store.removeSourceKey(for: "mirror-token")
+
+        XCTAssertNil(try store.sourceKey(for: "mirror-token"))
+    }
+
     func testLaunchOptionsParseScenarioArguments() {
         let stateURL = URL(fileURLWithPath: "/tmp/state.json")
         let perfURL = URL(fileURLWithPath: "/tmp/perf.json")
