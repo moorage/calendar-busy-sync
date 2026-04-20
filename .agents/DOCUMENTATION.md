@@ -1,6 +1,7 @@
 # Running implementation notes
 
 - active ExecPlans:
+  - `docs/exec-plans/active/2026-04-20-macos-app-store-submission.md`
   - `docs/exec-plans/active/2026-04-20-google-account-handoff-icloud.md`
   - `docs/exec-plans/active/2026-04-20-shared-configuration-icloud.md`
   - `docs/exec-plans/active/2026-04-19-google-sign-in-wiring.md`
@@ -57,6 +58,10 @@
   - `python3 scripts/knowledge/check_docs.py` (post-Dock-behavior update)
   - `./scripts/test-unit` (hosted XCTest runner revalidation after gating Dock visibility changes out of hosted-test runtime)
   - `./scripts/test-ui-macos --smoke` (standard-runtime revalidation after hosted-test Dock fix)
+  - `./scripts/capture-appstore-screenshots-macos` (generated deterministic 2880x1800 App Store macOS screenshots)
+  - `./scripts/archive-appstore --platform macos` (2026-04-20 submission pass: archive succeeded for version `1.0` build `2`, export failed because no local `Mac Installer Distribution` certificate is installed)
+  - `python3 scripts/prepare-appstore-macos-submission.py --screenshot-dir artifacts/appstore/macos-screenshots` (uploaded the macOS screenshot set and filled in App Store Connect metadata even without a matching build)
+  - `./scripts/test-unit` (2026-04-20 submission pass rerun: test target compiles again after restoring a defaultable `HarnessLaunchOptions` initializer, but the hosted macOS run hangs after launching the app host and had to be killed manually)
 - evidence gathered:
   - `scripts/sync-google-client-config.py` now turns `.env` + `GOOGLE_CLIENT_PLIST_PATH` into the checked-in app plist inputs used by build/test commands
   - `Calendar Busy Sync/Calendar Busy Sync.xcodeproj` now links `GoogleSignIn-iOS`, uses a generated project-root `Info.plist`, and includes a macOS keychain access-group entitlement
@@ -89,9 +94,12 @@
   - forcing the Sous Chef Studio distribution cert directly onto the current signed macOS debug build is not a drop-in replacement for the working local OAuth/iCloud path; the iCloud-enabled debug target still relies on team-managed development signing, so the harness documents that split instead of pretending one cert fits both flows
   - the working macOS App Store path is now explicit and verified: automatic archive succeeds, App Store export re-signs the output onto Apple Distribution, `DistributionSummary.plist` matches the configured distribution certificate SHA-1, and the export reports a `Mac Team Store Provisioning Profile` for `com.matthewpaulmoore.Calendar-Busy-Sync`
   - the iOS App Store path now uses the same exact-cert verification and has a dedicated `scripts/upload-appstore` command that uploads the verified `.ipa` to App Store Connect using the `.env` API key credentials
+  - the macOS App Store submission path now has deterministic screenshot generation via app-side rendering (`--app-store-screenshot` plus `--app-store-screenshot-output`) and a dedicated `scripts/prepare-appstore-macos-submission.py` helper that populated `PRODUCTIVITY`, `4+`, support/marketing/privacy URLs, and a 3-image `APP_DESKTOP` screenshot set on the existing macOS App Store version
+  - the screenshot renderer must run from an unsigned macOS build because the signed App Store-sandboxed app cannot write release PNGs back into the repo `artifacts/` tree
   - macOS, iPhone simulator, and iPad simulator smoke scripts still pass end-to-end after the auth wiring landed
 - open risks or blockers:
   - custom Google native client IDs still require a build that already includes the matching reversed callback scheme, so arbitrary runtime swaps remain intentionally blocked
   - one concurrent validation attempt (`./scripts/build --platform macos` in parallel with `./scripts/test-unit`) retriggered the known hosted XCTest/DerivedData contention pattern; rerunning sequentially passed, so future validation for this repo should continue to avoid parallel `xcodebuild` commands that share `artifacts/DerivedData`
-  - the hosted macOS `./scripts/test-unit` path is stable again after keeping Dock-visibility policy changes out of `hostedTests` runtime mode while preserving foreground activation behavior there
+  - the hosted macOS `./scripts/test-unit` path regressed during the submission pass: the test target now compiles, but the hosted XCTest run still hangs after launching the app host and needs another dedicated fix
   - the new iCloud configuration path is fully exercised in unit tests and simulator builds, but true cross-device sync still requires signed builds with the same Apple ID plus the iCloud entitlement active in provisioning
+  - macOS App Store export/upload is currently blocked on local Apple account material, not repo code: this Mac lacks a `Mac Installer Distribution` certificate, so `xcodebuild -exportArchive` cannot produce the App Store `.pkg` for the new `1.0` build

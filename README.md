@@ -61,9 +61,15 @@ Create an App Store archive with the configured Sous Chef Studio distribution id
 ./scripts/archive-appstore --platform macos
 ./scripts/archive-appstore --platform ios
 ./scripts/upload-appstore --platform ios
+./scripts/capture-appstore-screenshots-macos
+python3 scripts/prepare-appstore-macos-submission.py --screenshot-dir artifacts/appstore/macos-screenshots
 ```
 
 The App Store packaging flow now uses the provisioning mode Xcode actually accepts for this target: automatic archive plus App Store export. On macOS, that export is verified to land on `Apple Distribution` with the exact certificate SHA-1 from `.env` plus a `Mac Team Store Provisioning Profile` for `com.matthewpaulmoore.Calendar-Busy-Sync`, while the signed macOS debug flow used for local OAuth and iCloud checks still stays on team-managed development signing.
+
+The macOS submission helper path now also includes deterministic App Store screenshot generation and App Store Connect metadata prep. `./scripts/capture-appstore-screenshots-macos` builds an unsigned macOS app specifically so the screenshot renderer can write PNGs into `artifacts/appstore/macos-screenshots/`, and `scripts/prepare-appstore-macos-submission.py` uploads those screenshots while filling in the macOS version URLs, primary category, and age rating.
+
+One Apple-account prerequisite still sits outside the repo: exporting the macOS App Store `.pkg` requires a local `Mac Installer Distribution` certificate. If that certificate is missing from the keychain, `./scripts/archive-appstore --platform macos` can still archive the app but the export/upload step will stop before a new App Store Connect build appears.
 
 For iOS, the same export summary verification now runs before upload. `scripts/upload-appstore` uses the `.env` App Store Connect API key values (`ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_PATH`) and uploads the newest exported `.ipa` unless you pass `--package` explicitly.
 
@@ -118,4 +124,5 @@ Capture a deterministic checkpoint:
 - the app now blocks macOS Google sign-in from unsigned local harness launches and tells the user to switch to a signed Xcode run when keychain-backed auth cannot work
 - the macOS live Google smoke script now builds a signed app, targets `TEST_GOOGLE_USER` plus `TEST_GOOGLE_CALENDAR_NAME` from `.env`, and fails clearly when local Apple signing/account state prevents the OS/browser auth surface from opening
 - App Store archive work now has an explicit repo script and a single `.env` signing source of truth for team/distribution identity instead of ad hoc terminal flags
+- macOS App Store prep now also has a deterministic screenshot path plus an App Store Connect metadata/screenshot script, but a local `Mac Installer Distribution` certificate is still required before a fresh macOS `.pkg` can be exported and uploaded
 - `artifacts/` is runtime-only and ignored by git

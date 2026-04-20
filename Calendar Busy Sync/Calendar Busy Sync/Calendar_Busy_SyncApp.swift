@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(macOS)
+import Darwin
+#endif
 
 @main
 struct Calendar_Busy_SyncApp: App {
@@ -24,6 +27,19 @@ struct Calendar_Busy_SyncApp: App {
         )
         #endif
         Task { @MainActor in
+            #if os(macOS)
+            if let screenshotMode = resolvedLaunchOptions.appStoreScreenshotMode,
+               let outputURL = resolvedLaunchOptions.appStoreScreenshotOutputURL {
+                do {
+                    try AppStoreScreenshotRenderer.render(mode: screenshotMode, to: outputURL)
+                    Darwin.exit(0)
+                } catch {
+                    FileHandle.standardError.write(Data("App Store screenshot render failed: \(error)\n".utf8))
+                    Darwin.exit(1)
+                }
+            }
+            #endif
+
             await appModel.prepareIfNeeded()
         }
     }
@@ -45,7 +61,7 @@ struct Calendar_Busy_SyncApp: App {
             Image(systemName: macShellModel.menuBarIconName)
         }
 
-        WindowGroup("Calendar Busy Sync", id: AppSceneIDs.settings) {
+        Window("Calendar Busy Sync", id: AppSceneIDs.settings) {
             settingsRootView
                 .background(
                     MacWindowVisibilityObserver(sceneID: AppSceneIDs.settings) { isVisible in
@@ -61,7 +77,7 @@ struct Calendar_Busy_SyncApp: App {
                 )
         }
 
-        WindowGroup("Audit Trail", id: AppSceneIDs.auditTrail) {
+        Window("Audit Trail", id: AppSceneIDs.auditTrail) {
             auditTrailRootView
                 .background(
                     MacWindowVisibilityObserver(sceneID: AppSceneIDs.auditTrail) { isVisible in
@@ -70,6 +86,7 @@ struct Calendar_Busy_SyncApp: App {
                 )
         }
     }
+
     #endif
 
     @SceneBuilder
@@ -84,19 +101,31 @@ struct Calendar_Busy_SyncApp: App {
     }
 
     private var settingsRootView: some View {
-        ContentView(model: model)
-            .task {
-                await model.prepareIfNeeded()
+        Group {
+            if let screenshotMode = launchOptions.appStoreScreenshotMode {
+                AppStoreScreenshotView(mode: screenshotMode)
+            } else {
+                ContentView(model: model)
+                    .task {
+                        await model.prepareIfNeeded()
+                    }
+                    .onOpenURL { url in
+                        model.handleIncomingURL(url)
+                        #if os(macOS)
+                        macShellModel.activateApp()
+                        #endif
+                    }
             }
-            .onOpenURL { url in
-                model.handleIncomingURL(url)
-                #if os(macOS)
-                macShellModel.activateApp()
-                #endif
-            }
+        }
     }
 
     private var auditTrailRootView: some View {
-        AuditTrailView(model: model)
+        Group {
+            if let screenshotMode = launchOptions.appStoreScreenshotMode {
+                AppStoreScreenshotView(mode: screenshotMode)
+            } else {
+                AuditTrailView(model: model)
+            }
+        }
     }
 }

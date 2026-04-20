@@ -1,0 +1,48 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+source "$(cd "$(dirname "$0")" && pwd)/lib/xcode-env.sh"
+
+ensure_dirs
+sync_google_client_config
+require_project
+
+APP_NAME="${APP_PRODUCT_NAME}"
+APP_PATH="$(app_bundle_path)"
+APP_BINARY_PATH="${APP_PATH}/Contents/MacOS/${APP_PRODUCT_NAME}"
+OUTPUT_DIR="${ARTIFACTS_DIR}/appstore/macos-screenshots"
+mkdir -p "${OUTPUT_DIR}"
+
+xcodebuild \
+  -project "${PROJECT_PATH}" \
+  -scheme "${SCHEME_NAME}" \
+  -configuration Debug \
+  -derivedDataPath "${DERIVED_DATA_DIR}" \
+  -destination "${MAC_DESTINATION}" \
+  CODE_SIGNING_ALLOWED=NO \
+  CODE_SIGNING_REQUIRED=NO \
+  CODE_SIGN_IDENTITY="" \
+  build >/dev/null
+
+capture_mode() {
+  local mode="$1"
+  local destination="$2"
+
+  pkill -f "${APP_PATH}/Contents/MacOS/${APP_NAME}" >/dev/null 2>&1 || true
+  "${APP_BINARY_PATH}" \
+    --ui-test-mode 1 \
+    --app-store-screenshot "${mode}" \
+    --app-store-screenshot-output "${destination}"
+
+  if [[ ! -s "${destination}" ]]; then
+    echo "expected screenshot output at ${destination}" >&2
+    exit 1
+  fi
+}
+
+capture_mode overview "${OUTPUT_DIR}/01-overview.png"
+capture_mode mirrors "${OUTPUT_DIR}/02-mirror-preview.png"
+capture_mode logs "${OUTPUT_DIR}/03-logs.png"
+
+printf 'captured screenshots in %s\n' "${OUTPUT_DIR}"

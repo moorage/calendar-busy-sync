@@ -14,6 +14,8 @@ Supported debug launch arguments:
 - `--screenshot-path <path>`
 - `--harness-command-dir <path>`
 - `--ui-test-mode 1`
+- `--app-store-screenshot overview|mirrors|logs`
+- `--app-store-screenshot-output <path>`
 - `--platform-target macos|ios`
 - `--device-class mac|iphone|ipad`
 
@@ -111,3 +113,4 @@ Planned stable harness commands include:
 - `scripts/lib/ax-query.swift` must support both value reads and `AXPress` actions so the live macOS Google smoke runner does not rely on brittle screen-coordinate clicks
 - provider info rows now render as indented timestamped footnotes, so automation should anchor on the stable control IDs instead of matching those human-readable timestamps
 - the macOS menu bar icon should shift to its “window open” state whenever the Settings window is visible, even though harness smoke continues to assert only the window-level controls
+- App Store screenshot launches should render the requested view directly to the supplied PNG path and exit nonzero if the renderer cannot write the file

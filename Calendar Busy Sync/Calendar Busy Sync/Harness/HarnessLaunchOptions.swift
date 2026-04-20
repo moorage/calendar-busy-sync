@@ -15,6 +15,12 @@ enum HarnessDeviceClass: String, Codable {
     case ipad
 }
 
+enum AppStoreScreenshotMode: String, Codable {
+    case overview
+    case mirrors
+    case logs
+}
+
 struct HarnessLaunchOptions {
     let scenarioRoot: URL?
     let scenarioName: String?
@@ -24,8 +30,38 @@ struct HarnessLaunchOptions {
     let screenshotPathURL: URL?
     let commandDirectoryURL: URL?
     let uiTestMode: Bool
+    let appStoreScreenshotMode: AppStoreScreenshotMode?
+    let appStoreScreenshotOutputURL: URL?
     let platformTarget: HarnessPlatformTarget
     let deviceClass: HarnessDeviceClass
+
+    init(
+        scenarioRoot: URL? = nil,
+        scenarioName: String? = nil,
+        windowSize: CGSize? = nil,
+        dumpVisibleStateURL: URL? = nil,
+        dumpPerfStateURL: URL? = nil,
+        screenshotPathURL: URL? = nil,
+        commandDirectoryURL: URL? = nil,
+        uiTestMode: Bool = false,
+        appStoreScreenshotMode: AppStoreScreenshotMode? = nil,
+        appStoreScreenshotOutputURL: URL? = nil,
+        platformTarget: HarnessPlatformTarget,
+        deviceClass: HarnessDeviceClass
+    ) {
+        self.scenarioRoot = scenarioRoot
+        self.scenarioName = scenarioName
+        self.windowSize = windowSize
+        self.dumpVisibleStateURL = dumpVisibleStateURL
+        self.dumpPerfStateURL = dumpPerfStateURL
+        self.screenshotPathURL = screenshotPathURL
+        self.commandDirectoryURL = commandDirectoryURL
+        self.uiTestMode = uiTestMode
+        self.appStoreScreenshotMode = appStoreScreenshotMode
+        self.appStoreScreenshotOutputURL = appStoreScreenshotOutputURL
+        self.platformTarget = platformTarget
+        self.deviceClass = deviceClass
+    }
 
     static func fromProcess(arguments: [String] = ProcessInfo.processInfo.arguments) -> HarnessLaunchOptions {
         func value(after flag: String) -> String? {
@@ -58,6 +94,8 @@ struct HarnessLaunchOptions {
             screenshotPathURL: resolveURL(after: "--screenshot-path"),
             commandDirectoryURL: resolveURL(after: "--harness-command-dir"),
             uiTestMode: arguments.contains("--ui-test-mode"),
+            appStoreScreenshotMode: AppStoreScreenshotMode(rawValue: value(after: "--app-store-screenshot") ?? ""),
+            appStoreScreenshotOutputURL: resolveURL(after: "--app-store-screenshot-output"),
             platformTarget: platformTarget,
             deviceClass: deviceClass
         )
