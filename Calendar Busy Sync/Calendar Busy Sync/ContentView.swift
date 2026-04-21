@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @ObservedObject var model: AppModel
     @Environment(\.openWindow) private var openWindow
+    @State private var isMobileStatusSheetPresented = false
 
     var body: some View {
         NavigationStack {
@@ -56,9 +57,10 @@ struct ContentView: View {
                         await model.connectGoogleAccount()
                     }
                 } label: {
-                    Label("Add Google Account", systemImage: "plus")
+                    Label(addGoogleAccountButtonTitle, systemImage: "plus")
                 }
                 .buttonStyle(.bordered)
+                .controlSize(usesCompactMobileLayout ? .small : .regular)
                 .disabled(!model.canStartGoogleSignIn)
                 .accessibilityIdentifier(AccessibilityIDs.googleAuthConnectButton)
             }
@@ -380,8 +382,7 @@ struct ContentView: View {
             if card.calendars.isEmpty {
                 adaptiveTrailingRow(label: {
                     HStack(spacing: 8) {
-                        Label("Calendar", systemImage: "calendar")
-                            .foregroundStyle(.secondary)
+                        calendarLabel
                         Text("No calendars loaded")
                             .accessibilityIdentifier(AccessibilityIDs.googleCalendarStatusLabel)
                     }
@@ -397,12 +398,11 @@ struct ContentView: View {
                     .disabled(!card.canRefreshCalendars)
                     .accessibilityIdentifier(AccessibilityIDs.googleCalendarRefreshButton(card.id))
                 })
-                .font(.caption)
+                .font(calendarControlFont)
             } else {
                 adaptiveTrailingRow(label: {
                     HStack(spacing: 8) {
-                        Label("Calendar", systemImage: "calendar")
-                            .foregroundStyle(.secondary)
+                        calendarLabel
                         Picker(
                             "",
                             selection: Binding(
@@ -430,7 +430,7 @@ struct ContentView: View {
                     .disabled(!card.canRefreshCalendars)
                     .accessibilityIdentifier(AccessibilityIDs.googleCalendarRefreshButton(card.id))
                 })
-                .font(.caption)
+                .font(calendarControlFont)
             }
 
             if let message = card.message {
@@ -467,8 +467,7 @@ struct ContentView: View {
 
             adaptiveTrailingRow(label: {
                 HStack(spacing: 8) {
-                    Label("Calendar", systemImage: "calendar")
-                        .foregroundStyle(.secondary)
+                    calendarLabel
                     Text(row.selectedCalendarDisplayName ?? "Will use the shared calendar selection after sign-in.")
                         .foregroundStyle(.secondary)
                 }
@@ -476,7 +475,7 @@ struct ContentView: View {
                 Text("Shared setup")
                     .foregroundStyle(.secondary)
             })
-            .font(.caption)
+            .font(calendarControlFont)
 
             infoMessageRow(
                 "This Google account was configured on another device. Connect it here to reuse the same calendar settings on this device.",
@@ -519,8 +518,7 @@ struct ContentView: View {
             if model.appleCalendars.isEmpty {
                 adaptiveTrailingRow(label: {
                     HStack(spacing: 8) {
-                        Label("Calendar", systemImage: "calendar")
-                            .foregroundStyle(.secondary)
+                        calendarLabel
                         Text("No calendars loaded")
                             .accessibilityIdentifier(AccessibilityIDs.appleCalendarStatusLabel)
                     }
@@ -536,12 +534,11 @@ struct ContentView: View {
                     .disabled(!model.canRefreshAppleCalendars)
                     .accessibilityIdentifier(AccessibilityIDs.appleCalendarRefreshButton)
                 })
-                .font(.caption)
+                .font(calendarControlFont)
             } else {
                 adaptiveTrailingRow(label: {
                     HStack(spacing: 8) {
-                        Label("Calendar", systemImage: "calendar")
-                            .foregroundStyle(.secondary)
+                        calendarLabel
                         Picker(
                             "",
                             selection: Binding(
@@ -569,7 +566,7 @@ struct ContentView: View {
                     .disabled(!model.canRefreshAppleCalendars)
                     .accessibilityIdentifier(AccessibilityIDs.appleCalendarRefreshButton)
                 })
-                .font(.caption)
+                .font(calendarControlFont)
             }
         }
     }
@@ -625,44 +622,53 @@ struct ContentView: View {
 
             Spacer(minLength: 8)
 
-            Label(model.pendingActivityLabel, systemImage: "clock.badge.exclamationmark")
+            if usesCompactMobileLayout {
+                mobileStatusOverflowButton
+            } else {
+                Label(model.pendingActivityLabel, systemImage: "clock.badge.exclamationmark")
+                    .font(.caption)
+                    .accessibilityIdentifier(AccessibilityIDs.syncStatusPendingCount)
+
+                Label(
+                    model.failureCountLabel,
+                    systemImage: model.failureCount == 0 ? "checkmark.circle" : "exclamationmark.triangle.fill"
+                )
                 .font(.caption)
-                .accessibilityIdentifier(AccessibilityIDs.syncStatusPendingCount)
+                .foregroundColor(model.failureCount == 0 ? .secondary : .red)
+                .accessibilityIdentifier(AccessibilityIDs.syncStatusFailedCount)
 
-            Label(
-                model.failureCountLabel,
-                systemImage: model.failureCount == 0 ? "checkmark.circle" : "exclamationmark.triangle.fill"
-            )
-            .font(.caption)
-            .foregroundColor(model.failureCount == 0 ? .secondary : .red)
-            .accessibilityIdentifier(AccessibilityIDs.syncStatusFailedCount)
-
-            Button {
-                openWindow(id: AppSceneIDs.auditTrail)
-            } label: {
-                Label("Logs", systemImage: "clock.arrow.circlepath")
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .accessibilityIdentifier(AccessibilityIDs.auditTrailOpenButton)
-
-            Button {
-                Task {
-                    await model.syncNow()
+                Button {
+                    openWindow(id: AppSceneIDs.auditTrail)
+                } label: {
+                    Label("Logs", systemImage: "clock.arrow.circlepath")
                 }
-            } label: {
-                Label("Sync Now", systemImage: "arrow.clockwise")
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .accessibilityIdentifier(AccessibilityIDs.auditTrailOpenButton)
+
+                Button {
+                    Task {
+                        await model.syncNow()
+                    }
+                } label: {
+                    Label("Sync Now", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(!model.canSyncNow)
+                .accessibilityIdentifier(AccessibilityIDs.syncNowButton)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-            .disabled(!model.canSyncNow)
-            .accessibilityIdentifier(AccessibilityIDs.syncNowButton)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 10)
         .background(.thinMaterial)
         .overlay(alignment: .top) {
             Divider()
+        }
+        .sheet(isPresented: $isMobileStatusSheetPresented) {
+            #if os(iOS)
+            mobileStatusSheet
+            #endif
         }
     }
 
@@ -795,4 +801,119 @@ struct ContentView: View {
         Color(uiColor: .separator).opacity(0.35)
         #endif
     }
+
+    private var addGoogleAccountButtonTitle: String {
+        usesCompactMobileLayout ? "Add" : "Add Google Account"
+    }
+
+    private var calendarControlFont: Font {
+        usesCompactMobileLayout ? .caption2 : .caption
+    }
+
+    @ViewBuilder
+    private var calendarLabel: some View {
+        if usesCompactMobileLayout {
+            Image(systemName: "calendar")
+                .foregroundStyle(.secondary)
+        } else {
+            Label("Calendar", systemImage: "calendar")
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var usesCompactMobileLayout: Bool {
+        #if os(iOS)
+        true
+        #else
+        false
+        #endif
+    }
+
+    private var mobileStatusOverflowBadgeText: String? {
+        guard model.failureCount > 0 else {
+            return nil
+        }
+
+        if model.failureCount > 99 {
+            return "99+"
+        }
+
+        return String(model.failureCount)
+    }
+
+    private var mobileStatusOverflowButton: some View {
+        Button {
+            isMobileStatusSheetPresented = true
+        } label: {
+            Image(systemName: "line.3.horizontal")
+                .font(.headline)
+                .frame(width: 30, height: 30)
+                .overlay(alignment: .topTrailing) {
+                    if let badgeText = mobileStatusOverflowBadgeText {
+                        Text(badgeText)
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, badgeText.count > 2 ? 5 : 4)
+                            .padding(.vertical, 2)
+                            .background(.red, in: Capsule())
+                            .offset(x: 8, y: -6)
+                    }
+                }
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .accessibilityIdentifier(AccessibilityIDs.syncStatusOverflowButton)
+    }
+
+    #if os(iOS)
+    private var mobileStatusSheet: some View {
+        NavigationStack {
+            List {
+                Section("Status") {
+                    Label(model.pendingActivityLabel, systemImage: "clock.badge.exclamationmark")
+                        .accessibilityIdentifier(AccessibilityIDs.syncStatusPendingCount)
+
+                    Label(
+                        model.failureCountLabel,
+                        systemImage: model.failureCount == 0 ? "checkmark.circle" : "exclamationmark.triangle.fill"
+                    )
+                    .foregroundColor(model.failureCount == 0 ? .secondary : .red)
+                    .accessibilityIdentifier(AccessibilityIDs.syncStatusFailedCount)
+                }
+
+                Section("Actions") {
+                    Button {
+                        isMobileStatusSheetPresented = false
+                        openWindow(id: AppSceneIDs.auditTrail)
+                    } label: {
+                        Label("Logs", systemImage: "clock.arrow.circlepath")
+                    }
+                    .accessibilityIdentifier(AccessibilityIDs.auditTrailOpenButton)
+
+                    Button {
+                        isMobileStatusSheetPresented = false
+                        Task {
+                            await model.syncNow()
+                        }
+                    } label: {
+                        Label("Sync Now", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(!model.canSyncNow)
+                    .accessibilityIdentifier(AccessibilityIDs.syncNowButton)
+                }
+            }
+            .accessibilityIdentifier(AccessibilityIDs.syncStatusOverflowSheet)
+            .navigationTitle("Sync")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        isMobileStatusSheetPresented = false
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+    #endif
 }

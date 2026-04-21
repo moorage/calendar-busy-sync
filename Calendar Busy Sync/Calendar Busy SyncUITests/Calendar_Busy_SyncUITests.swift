@@ -16,14 +16,25 @@ final class Calendar_Busy_SyncUITests: XCTestCase {
         ]
         app.launch()
 
-        XCTAssertTrue(app.buttons["sync-status.sync-now"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["audit-trail.open"].exists)
         XCTAssertTrue(app.buttons["google-auth.connect"].exists)
         XCTAssertTrue(app.switches["settings.advanced.google-oauth.use-custom"].exists)
         XCTAssertTrue(app.otherElements["mirror-preview.list"].exists)
         XCTAssertTrue(app.staticTexts["sync-status.detail"].exists)
+
+        #if os(iOS)
+        XCTAssertTrue(app.buttons["sync-status.overflow"].waitForExistence(timeout: 5))
+        app.buttons["sync-status.overflow"].tap()
+        XCTAssertTrue(app.otherElements["sync-status.overflow-sheet"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["sync-status.sync-now"].exists)
+        XCTAssertTrue(app.buttons["audit-trail.open"].exists)
         XCTAssertTrue(app.staticTexts["sync-status.pending-count"].exists)
         XCTAssertTrue(app.staticTexts["sync-status.failed-count"].exists)
+        #else
+        XCTAssertTrue(app.buttons["sync-status.sync-now"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["audit-trail.open"].exists)
+        XCTAssertTrue(app.staticTexts["sync-status.pending-count"].exists)
+        XCTAssertTrue(app.staticTexts["sync-status.failed-count"].exists)
+        #endif
     }
 
     private func repoRootURL() -> URL {

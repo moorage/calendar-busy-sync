@@ -60,6 +60,8 @@ Stable identifiers should include:
 - `sync-status.pending-count`
 - `sync-status.failed-count`
 - `sync-status.detail`
+- `sync-status.overflow`
+- `sync-status.overflow-sheet`
 - `sync-status.sync-now`
 - `mirror-preview.list`
 - `mirror-preview.row.<id>`
@@ -106,6 +108,7 @@ Planned stable harness commands include:
 
 - polling interval controls are exposed on macOS only
 - iPhone and iPad builds still emit the same harness snapshots, but background sync cadence is not a user-configurable setting there
+- on iPhone and iPad, pending work, failure counts, `Logs`, and `Sync Now` move behind the footer overflow sheet exposed at `sync-status.overflow`
 - normal iOS launches now schedule a best-effort `BGAppRefreshTask`; harness `--ui-test-mode 1` and `--app-store-screenshot ...` launches must suppress that scheduling path
 - debug iOS verification can also drive the same path through `CALENDAR_BUSY_SYNC_RUN_IOS_BG_REFRESH_NOW=1`, which the simulator helper injects as `SIMCTL_CHILD_CALENDAR_BUSY_SYNC_RUN_IOS_BG_REFRESH_NOW=1`
 - the Google Sign-In callback URL is handled through the app lifecycle, but harness smoke launches stay scenario-backed and do not initiate interactive auth

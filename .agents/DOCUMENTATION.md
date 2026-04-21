@@ -60,6 +60,9 @@
   - `./scripts/build --platform macos` (menu-bar foregrounding and conditional Dock visibility compile check)
   - `./scripts/test-unit` (menu-bar foregrounding and conditional Dock visibility shell-model coverage)
   - `./scripts/test-ui-macos --smoke` (menu-bar foregrounding and conditional Dock visibility smoke check)
+  - `./scripts/test-unit` (mobile settings-shell compaction compile and smoke coverage after moving footer actions into an iOS overflow sheet)
+  - `./scripts/test-ui-macos --smoke` (desktop footer revalidation after the mobile-only footer split)
+  - `./scripts/test-ui-ios --device both --smoke` (iPhone/iPad footer overflow-sheet smoke validation)
   - `python3 scripts/check_execplan.py docs/exec-plans/active/2026-04-19-menu-bar-login-item-utility.md` (post-Dock-behavior update)
   - `python3 scripts/knowledge/check_docs.py` (post-Dock-behavior update)
   - `./scripts/test-unit` (hosted XCTest runner revalidation after gating Dock visibility changes out of hosted-test runtime)
@@ -113,6 +116,7 @@
   - the repo now has a matching iOS submission path: simulator-driven screenshot capture for `APP_IPHONE_67` and `APP_IPAD_PRO_3GEN_129`, a dedicated `scripts/prepare-appstore-ios-submission.py` helper that reuses the shared App Store Connect client/review-detail logic, and a valid attached iOS `1.0 (2)` build on the App Store Connect iOS version
   - iPhone and iPad now schedule a best-effort `BGAppRefreshTask` request from the SwiftUI scene lifecycle, the generated `Info.plist` carries the required background-refresh identifiers/modes, and Advanced now shows the current mobile background-refresh state without pretending iOS offers a fixed polling interval
   - debug iOS builds now also expose a `Run Refresh Path Now` Advanced control, and `scripts/trigger-ios-background-refresh` launches the simulator with `SIMCTL_CHILD_CALENDAR_BUSY_SYNC_RUN_IOS_BG_REFRESH_NOW=1` so manual verification uses the exact same app-side refresh path
+  - iPhone and iPad now use a tighter settings layout: the Google add button shrinks to `+ Add`, calendar picker rows collapse to an icon-only `calendar` label with a smaller picker font, and the crowded footer actions move behind a hamburger-sheet affordance that badges the current failure count
   - macOS, iPhone simulator, and iPad simulator smoke scripts still pass end-to-end after the auth wiring landed
 - open risks or blockers:
   - custom Google native client IDs still require a build that already includes the matching reversed callback scheme, so arbitrary runtime swaps remain intentionally blocked
