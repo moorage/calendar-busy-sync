@@ -53,34 +53,40 @@ struct MacWindowVisibilityObserver: NSViewRepresentable {
             self.window = window
 
             guard let window else {
-                onVisibilityChange(false)
+                notifyVisibilityChange(false)
                 return
             }
 
             window.identifier = NSUserInterfaceItemIdentifier(sceneID)
-            onVisibilityChange(window.isVisible)
+            notifyVisibilityChange(window.isVisible)
 
             let center = NotificationCenter.default
             observers.append(
                 center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in
-                    self?.onVisibilityChange(true)
+                    self?.notifyVisibilityChange(true)
                 }
             )
             observers.append(
                 center.addObserver(forName: NSWindow.didDeminiaturizeNotification, object: window, queue: .main) { [weak self] _ in
-                    self?.onVisibilityChange(true)
+                    self?.notifyVisibilityChange(true)
                 }
             )
             observers.append(
                 center.addObserver(forName: NSWindow.didMiniaturizeNotification, object: window, queue: .main) { [weak self] _ in
-                    self?.onVisibilityChange(false)
+                    self?.notifyVisibilityChange(false)
                 }
             )
             observers.append(
                 center.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
-                    self?.onVisibilityChange(false)
+                    self?.notifyVisibilityChange(false)
                 }
             )
+        }
+
+        private func notifyVisibilityChange(_ isVisible: Bool) {
+            DispatchQueue.main.async { [onVisibilityChange] in
+                onVisibilityChange(isVisible)
+            }
         }
     }
 }

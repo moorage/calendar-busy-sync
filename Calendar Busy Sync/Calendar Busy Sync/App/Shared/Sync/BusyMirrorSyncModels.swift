@@ -147,6 +147,49 @@ struct BusyMirrorSyncSummary: Equatable {
     }
 }
 
+enum BusyMirrorSyncAuditFormatter {
+    static func failureMessage(for operation: BusyMirrorOperation, error: Error) -> String {
+        "\(operationSummary(for: operation)): \(error.localizedDescription)"
+    }
+
+    static func operationSummary(for operation: BusyMirrorOperation) -> String {
+        switch operation {
+        case let .create(desiredMirror):
+            return "Create in \(desiredMirror.targetParticipant.displayName) for \(windowDescription(startDate: desiredMirror.startDate, endDate: desiredMirror.endDate, isAllDay: desiredMirror.isAllDay))"
+        case let .update(existingMirror, desiredMirror):
+            return "Update in \(existingMirror.targetParticipant.displayName) from \(windowDescription(startDate: existingMirror.startDate, endDate: existingMirror.endDate, isAllDay: existingMirror.isAllDay)) to \(windowDescription(startDate: desiredMirror.startDate, endDate: desiredMirror.endDate, isAllDay: desiredMirror.isAllDay))"
+        case let .delete(existingMirror):
+            return "Delete from \(existingMirror.targetParticipant.displayName) for \(windowDescription(startDate: existingMirror.startDate, endDate: existingMirror.endDate, isAllDay: existingMirror.isAllDay))"
+        }
+    }
+
+    private static func windowDescription(
+        startDate: Date,
+        endDate: Date,
+        isAllDay: Bool
+    ) -> String {
+        if isAllDay {
+            return allDayFormatter.string(from: startDate)
+        }
+
+        return dateIntervalFormatter.string(from: startDate, to: endDate)
+    }
+
+    private static let dateIntervalFormatter: DateIntervalFormatter = {
+        let formatter = DateIntervalFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }()
+
+    private static let allDayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter
+    }()
+}
+
 enum BusyMirrorSyncWindow {
     static func defaultWindow(now: Date = Date()) -> DateInterval {
         DateInterval(

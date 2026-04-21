@@ -1,6 +1,7 @@
 import Foundation
 
 enum AccessibilityIDs {
+    static let auditTrailScreen = "audit-trail.screen"
     static let auditTrailList = "audit-trail.list"
     static let auditTrailOpenButton = "audit-trail.open"
     static let menuBarOpenSettingsButton = "menu-bar.open-settings"
@@ -28,6 +29,9 @@ enum AccessibilityIDs {
     static let googleCalendarStatusLabel = "google-calendar.status"
     static let googleCalendarLiveSmokeStatusLabel = "google-calendar.live-smoke-status"
     static let sharedConfigurationToggle = "settings.advanced.shared-configuration.enabled"
+    static let sharedConfigurationStatusLabel = "settings.advanced.shared-configuration.status"
+    static let sharedConfigurationDetailLabel = "settings.advanced.shared-configuration.detail"
+    static let sharedConfigurationSyncNowButton = "settings.advanced.shared-configuration.sync-now"
     static let iosBackgroundRefreshStatusLabel = "settings.advanced.ios-background-refresh.status"
     static let iosBackgroundRefreshDetailLabel = "settings.advanced.ios-background-refresh.detail"
     static let iosBackgroundRefreshRunNowButton = "settings.advanced.ios-background-refresh.run-now"

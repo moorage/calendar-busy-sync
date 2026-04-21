@@ -1,5 +1,63 @@
 import Foundation
 
+enum SharedConfigurationSyncState: Equatable {
+    case disabled
+    case unavailable
+    case idle
+    case syncing
+    case succeeded(message: String, at: Date)
+    case failed(message: String, at: Date)
+
+    var statusLabel: String {
+        switch self {
+        case .disabled:
+            return "Off"
+        case .unavailable:
+            return "Unavailable"
+        case .idle:
+            return "Ready"
+        case .syncing:
+            return "Syncing…"
+        case .succeeded:
+            return "Updated"
+        case .failed:
+            return "Failed"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .disabled:
+            return "Shared settings are off on this device. Calendar choices and advanced preferences stay local here."
+        case .unavailable:
+            return "iCloud is unavailable right now, so this device will keep local settings until iCloud returns."
+        case .idle:
+            return "Shared settings are enabled. Start an iCloud sync to compare this device with the shared configuration now."
+        case let .succeeded(message, _), let .failed(message, _):
+            return message
+        case .syncing:
+            return "Starting an iCloud shared-settings sync request now."
+        }
+    }
+
+    var updatedAt: Date? {
+        switch self {
+        case let .succeeded(_, at), let .failed(_, at):
+            return at
+        case .disabled, .unavailable, .idle, .syncing:
+            return nil
+        }
+    }
+
+    var isFailure: Bool {
+        if case .failed = self {
+            return true
+        }
+
+        return false
+    }
+}
+
 struct SharedAppleCalendarReference: Codable, Equatable {
     let title: String
     let sourceTitle: String
@@ -90,6 +148,8 @@ protocol SharedAppConfigurationStoring: AnyObject {
     func loadConfiguration() -> SharedAppConfiguration?
     func saveConfiguration(_ configuration: SharedAppConfiguration)
     func startObserving(_ onChange: @escaping @MainActor (SharedAppConfiguration) -> Void)
+    @discardableResult
+    func requestSync() -> Bool
 }
 
 final class ICloudSharedAppConfigurationStore: SharedAppConfigurationStoring {
@@ -166,5 +226,14 @@ final class ICloudSharedAppConfigurationStore: SharedAppConfigurationStoring {
                 onChange(configuration)
             }
         }
+    }
+
+    @discardableResult
+    func requestSync() -> Bool {
+        guard isAvailable else {
+            return false
+        }
+
+        return store.synchronize()
     }
 }

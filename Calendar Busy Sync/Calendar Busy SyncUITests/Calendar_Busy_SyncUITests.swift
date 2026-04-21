@@ -18,6 +18,8 @@ final class Calendar_Busy_SyncUITests: XCTestCase {
 
         XCTAssertTrue(app.buttons["google-auth.connect"].exists)
         XCTAssertTrue(app.switches["settings.advanced.google-oauth.use-custom"].exists)
+        XCTAssertTrue(app.staticTexts["settings.advanced.shared-configuration.status"].exists)
+        XCTAssertTrue(app.buttons["settings.advanced.shared-configuration.sync-now"].exists)
         XCTAssertTrue(app.otherElements["mirror-preview.list"].exists)
         XCTAssertTrue(app.staticTexts["sync-status.detail"].exists)
 
@@ -29,6 +31,8 @@ final class Calendar_Busy_SyncUITests: XCTestCase {
         XCTAssertTrue(app.buttons["audit-trail.open"].exists)
         XCTAssertTrue(app.staticTexts["sync-status.pending-count"].exists)
         XCTAssertTrue(app.staticTexts["sync-status.failed-count"].exists)
+        app.buttons["audit-trail.open"].tap()
+        XCTAssertTrue(app.otherElements["audit-trail.screen"].waitForExistence(timeout: 5))
         #else
         XCTAssertTrue(app.buttons["sync-status.sync-now"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["audit-trail.open"].exists)

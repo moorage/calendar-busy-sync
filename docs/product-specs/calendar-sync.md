@@ -39,6 +39,7 @@ People with multiple jobs, gigs, or companies often keep separate calendars per 
 - iPhone and iPad should still submit a best-effort background refresh request so iOS can opportunistically reconcile mirrored busy holds when the app is not foregrounded
 - the current iOS background-refresh request should ask for no earlier than 15 minutes later, while explicitly treating that as an OS hint rather than a promise
 - advanced settings include audit trail event log retention, macOS polling cadence, the option to disable shared iCloud settings on the current device, and the option to use a custom Google OAuth app instead of the product default
+- when shared iCloud settings are enabled, Advanced should show whether the last shared-settings sync is ready, running, updated, unavailable, or failed, and it should expose a manual sync trigger directly under the iCloud toggle
 - advanced custom OAuth mode should allow the user to supply their own Google client identifiers so they can authorize against their own Google Cloud project
 - custom native Google client IDs are only valid when the build already includes the matching reversed-client-ID callback scheme; otherwise the UI must block the flow and explain that a rebuild is required
 
@@ -50,6 +51,7 @@ People with multiple jobs, gigs, or companies often keep separate calendars per 
 - the app can load writable calendars from each connected Google account and persist one selected participating calendar per account
 - the app can request Apple calendar access through EventKit, load writable Apple / iCloud calendars from the current device, and persist the selected participating calendar
 - the app can share non-secret configuration through iCloud key-value storage, including selected calendars and advanced preferences, while keeping Google account payloads and Apple permission state device-local
+- the app now exposes explicit iCloud shared-settings runtime status plus a manual sync action, and the Logs surface records real iCloud sync attempts/results instead of categorized overview rows
 - the app can share a non-secret Google account descriptor roster through iCloud, letting another device show shared Google accounts that need local sign-in or local cleanup while preserving the selected calendar choice when possible
 - each device can disable shared iCloud configuration locally without changing the shared-setting behavior of the user's other devices
 - Google account handoff remains per-device: shared settings can tell a device which account/calendar should participate, but the device must still authorize the Google account locally before it can sync

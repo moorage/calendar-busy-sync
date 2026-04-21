@@ -21,7 +21,7 @@ struct ContentView: View {
                         }
                         .padding(.horizontal, 24)
                         .padding(.top, 20)
-                        .padding(.bottom, 28)
+                        .padding(.bottom, scrollContentBottomPadding)
                     }
                 } else if let errorMessage = model.lastErrorMessage {
                     VStack(alignment: .leading, spacing: 12) {
@@ -230,11 +230,53 @@ struct ContentView: View {
             }
 
             sectionDivider
+            sectionRow {
+                adaptiveTrailingRow(label: {
+                    Label("iCloud Settings Sync", systemImage: "arrow.clockwise.icloud")
+                        .foregroundStyle(.secondary)
+                }, trailing: {
+                    Text(model.sharedConfigurationStatusLabel)
+                        .foregroundStyle(model.sharedConfigurationHasFailureStatus ? .red : .secondary)
+                        .accessibilityIdentifier(AccessibilityIDs.sharedConfigurationStatusLabel)
+                })
+                .font(.caption)
+            }
+
+            sectionDivider
             infoMessageRow(
                 model.sharedConfigurationStatusMessage,
-                timestamp: nil,
-                accessibilityID: "settings.advanced.shared-configuration-note"
+                timestamp: model.sharedConfigurationStatusTimestampLabel,
+                tint: model.sharedConfigurationHasFailureStatus ? .red : .secondary,
+                accessibilityID: AccessibilityIDs.sharedConfigurationDetailLabel
             )
+
+            if model.isSharedConfigurationEnabled {
+                sectionDivider
+                sectionRow {
+                    HStack(spacing: 10) {
+                        Button {
+                            Task {
+                                await model.syncSharedConfigurationNow()
+                            }
+                        } label: {
+                            Label("Sync iCloud Settings Now", systemImage: "arrow.clockwise.icloud")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!model.canManuallySyncSharedConfiguration)
+                        .accessibilityIdentifier(AccessibilityIDs.sharedConfigurationSyncNowButton)
+
+                        Spacer()
+                    }
+                    .font(.caption)
+                }
+
+                sectionDivider
+                infoMessageRow(
+                    model.sharedConfigurationScopeMessage,
+                    timestamp: nil,
+                    accessibilityID: "settings.advanced.shared-configuration-scope"
+                )
+            }
 
             #if os(iOS)
             sectionDivider
@@ -337,6 +379,10 @@ struct ContentView: View {
                         }
                     }
                     .pickerStyle(.menu)
+                    .frame(
+                        maxWidth: usesCompactMobileLayout ? .infinity : nil,
+                        alignment: .trailing
+                    )
                 })
                 .font(.caption)
             }
@@ -381,8 +427,7 @@ struct ContentView: View {
 
             if card.calendars.isEmpty {
                 adaptiveTrailingRow(label: {
-                    HStack(spacing: 8) {
-                        calendarLabel
+                    calendarLabelRow {
                         Text("No calendars loaded")
                             .accessibilityIdentifier(AccessibilityIDs.googleCalendarStatusLabel)
                     }
@@ -401,8 +446,7 @@ struct ContentView: View {
                 .font(calendarControlFont)
             } else {
                 adaptiveTrailingRow(label: {
-                    HStack(spacing: 8) {
-                        calendarLabel
+                    calendarLabelRow {
                         Picker(
                             "",
                             selection: Binding(
@@ -416,6 +460,7 @@ struct ContentView: View {
                         }
                         .pickerStyle(.menu)
                         .labelsHidden()
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .accessibilityIdentifier(AccessibilityIDs.googleCalendarPicker(card.id))
                     }
                 }, trailing: {
@@ -466,8 +511,7 @@ struct ContentView: View {
             .font(.caption)
 
             adaptiveTrailingRow(label: {
-                HStack(spacing: 8) {
-                    calendarLabel
+                calendarLabelRow {
                     Text(row.selectedCalendarDisplayName ?? "Will use the shared calendar selection after sign-in.")
                         .foregroundStyle(.secondary)
                 }
@@ -517,8 +561,7 @@ struct ContentView: View {
         Group {
             if model.appleCalendars.isEmpty {
                 adaptiveTrailingRow(label: {
-                    HStack(spacing: 8) {
-                        calendarLabel
+                    calendarLabelRow {
                         Text("No calendars loaded")
                             .accessibilityIdentifier(AccessibilityIDs.appleCalendarStatusLabel)
                     }
@@ -537,8 +580,7 @@ struct ContentView: View {
                 .font(calendarControlFont)
             } else {
                 adaptiveTrailingRow(label: {
-                    HStack(spacing: 8) {
-                        calendarLabel
+                    calendarLabelRow {
                         Picker(
                             "",
                             selection: Binding(
@@ -552,6 +594,7 @@ struct ContentView: View {
                         }
                         .pickerStyle(.menu)
                         .labelsHidden()
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .accessibilityIdentifier(AccessibilityIDs.appleCalendarPicker)
                     }
                 }, trailing: {
@@ -806,6 +849,10 @@ struct ContentView: View {
         usesCompactMobileLayout ? "Add" : "Add Google Account"
     }
 
+    private var scrollContentBottomPadding: CGFloat {
+        usesCompactMobileLayout ? 104 : 28
+    }
+
     private var calendarControlFont: Font {
         usesCompactMobileLayout ? .caption2 : .caption
     }
@@ -865,6 +912,16 @@ struct ContentView: View {
         .accessibilityIdentifier(AccessibilityIDs.syncStatusOverflowButton)
     }
 
+    private func calendarLabelRow<Content: View>(
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        HStack(spacing: 8) {
+            calendarLabel
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     #if os(iOS)
     private var mobileStatusSheet: some View {
         NavigationStack {
@@ -882,9 +939,8 @@ struct ContentView: View {
                 }
 
                 Section("Actions") {
-                    Button {
-                        isMobileStatusSheetPresented = false
-                        openWindow(id: AppSceneIDs.auditTrail)
+                    NavigationLink {
+                        AuditTrailView(model: model, embedsNavigationStack: false)
                     } label: {
                         Label("Logs", systemImage: "clock.arrow.circlepath")
                     }

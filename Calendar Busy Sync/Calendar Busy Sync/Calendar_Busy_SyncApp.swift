@@ -30,8 +30,8 @@ struct Calendar_Busy_SyncApp: App {
             )
         )
         #endif
+        #if os(macOS)
         Task { @MainActor in
-            #if os(macOS)
             if let screenshotMode = resolvedLaunchOptions.appStoreScreenshotMode,
                let outputURL = resolvedLaunchOptions.appStoreScreenshotOutputURL {
                 do {
@@ -42,10 +42,10 @@ struct Calendar_Busy_SyncApp: App {
                     Darwin.exit(1)
                 }
             }
-            #endif
 
             await appModel.prepareIfNeeded()
         }
+        #endif
     }
 
     var body: some Scene {

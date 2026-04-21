@@ -13,6 +13,56 @@ final class Calendar_Busy_SyncTests: XCTestCase {
         XCTAssertEqual(AuditTrailLogLength.defaultValue(for: .ios), .last1000)
     }
 
+    @MainActor
+    func testAppModelUsesCooperativeSyncSchedulingOnlyOnIOS() {
+        let iosSuite = "\(#function).ios"
+        let macSuite = "\(#function).mac"
+        let iosDefaults = UserDefaults(suiteName: iosSuite)!
+        let macDefaults = UserDefaults(suiteName: macSuite)!
+        iosDefaults.removePersistentDomain(forName: iosSuite)
+        macDefaults.removePersistentDomain(forName: macSuite)
+        defer {
+            iosDefaults.removePersistentDomain(forName: iosSuite)
+            macDefaults.removePersistentDomain(forName: macSuite)
+        }
+
+        let iosModel = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: false,
+                platformTarget: .ios,
+                deviceClass: .iphone
+            ),
+            userDefaults: iosDefaults,
+            googleAccountStore: MockGoogleAccountStore()
+        )
+        let macModel = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: false,
+                platformTarget: .macos,
+                deviceClass: .mac
+            ),
+            userDefaults: macDefaults,
+            googleAccountStore: MockGoogleAccountStore()
+        )
+
+        XCTAssertTrue(iosModel.usesCooperativeIOSSyncScheduling)
+        XCTAssertFalse(macModel.usesCooperativeIOSSyncScheduling)
+    }
+
     func testAppleManagedMirrorMarkerRoundTripsURLToken() {
         let marker = AppleManagedMirrorMarker(token: "mirror-token")
 
@@ -74,6 +124,28 @@ final class Calendar_Busy_SyncTests: XCTestCase {
         XCTAssertEqual(resolvedID, workCalendar.id)
     }
 
+    func testBusyMirrorSyncAuditFormatterIncludesOperationContextAndError() {
+        let participant = testParticipant(provider: .apple, calendarID: "apple-work", displayName: "iCloud • Work")
+        let desiredMirror = DesiredBusyMirrorEvent(
+            identity: BusyMirrorIdentity(
+                sourceKey: BusyMirrorSourceKey(provider: .google, calendarID: "google-work", eventID: "event-1"),
+                targetParticipantID: participant.id
+            ),
+            targetParticipant: participant,
+            startDate: testDate(hour: 9),
+            endDate: testDate(hour: 10),
+            isAllDay: false
+        )
+
+        let message = BusyMirrorSyncAuditFormatter.failureMessage(
+            for: .create(desiredMirror),
+            error: AppleCalendarServiceError.requestFailed("The destination calendar rejected this write.")
+        )
+
+        XCTAssertTrue(message.contains("Create in iCloud • Work"))
+        XCTAssertTrue(message.contains("The destination calendar rejected this write."))
+    }
+
     @MainActor
     func testAppModelPrefersNewerSharedConfigurationAtLaunch() async {
         let defaults = UserDefaults(suiteName: #function)!
@@ -114,6 +186,11 @@ final class Calendar_Busy_SyncTests: XCTestCase {
             sharedConfigurationStore: sharedStore,
             googleAccountStore: MockGoogleAccountStore()
         )
+
+        XCTAssertEqual(sharedStore.loadCallCount, 0)
+        XCTAssertEqual(model.pollIntervalMinutes, 2)
+
+        await model.prepareIfNeeded()
 
         XCTAssertEqual(model.pollIntervalMinutes, 7)
         XCTAssertEqual(model.auditTrailLogLength, .last5000)
@@ -826,29 +903,88 @@ final class Calendar_Busy_SyncTests: XCTestCase {
         XCTAssertFalse(model.canStartGoogleSignIn)
     }
 
-    func testAuditTrailIncludesCustomGoogleOAuthModeEntry() throws {
-        let state = try ScenarioLoader().load(
-            rootURL: repoRootURL().appendingPathComponent("Fixtures/scenarios", isDirectory: true),
-            scenarioName: "basic-cross-busy.json"
+    @MainActor
+    func testAppModelManualSharedConfigurationSyncReportsMatchingSharedConfiguration() async {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let sharedStore = MockSharedAppConfigurationStore(isAvailable: true)
+
+        let model = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: false,
+                platformTarget: .ios,
+                deviceClass: .iphone
+            ),
+            userDefaults: defaults,
+            sharedConfigurationStore: sharedStore,
+            googleAccountStore: MockGoogleAccountStore()
         )
 
-        let entries = AuditTrailBuilder.entries(
-            for: state,
-            platform: .macos,
-            pollIntervalMinutes: 2,
-            auditTrailLogLength: .unlimited,
-            googleOAuth: GoogleOAuthOverrideConfiguration(
-                usesCustomApp: true,
-                clientID: "custom-client-id",
-                serverClientID: "custom-server-id"
+        await model.prepareIfNeeded()
+        await model.syncSharedConfigurationNow()
+
+        XCTAssertEqual(sharedStore.requestSyncCallCount, 1)
+        XCTAssertEqual(model.sharedConfigurationStatusLabel, "Updated")
+        XCTAssertTrue(model.sharedConfigurationStatusMessage.contains("already matches"))
+        XCTAssertTrue(model.auditTrailEntries.contains(where: {
+            $0.title == "iCloud settings sync" && $0.detail.contains("already matches")
+        }))
+    }
+
+    @MainActor
+    func testAppModelManualSharedConfigurationSyncAppliesNewerRemoteConfiguration() async {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        defaults.set(Date(timeIntervalSince1970: 10), forKey: "settings.lastModifiedAt")
+        let sharedStore = MockSharedAppConfigurationStore(isAvailable: true)
+
+        let model = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: false,
+                platformTarget: .ios,
+                deviceClass: .iphone
+            ),
+            userDefaults: defaults,
+            sharedConfigurationStore: sharedStore,
+            googleAccountStore: MockGoogleAccountStore()
+        )
+
+        sharedStore.setConfiguration(
+            SharedAppConfiguration(
+                updatedAt: Date(timeIntervalSince1970: 40),
+                pollIntervalMinutes: 13,
+                auditTrailLogLengthRawValue: AuditTrailLogLength.last5000.rawValue,
+                isAppleCalendarEnabled: false,
+                selectedAppleCalendarReference: nil,
+                usesCustomGoogleOAuthApp: false,
+                customGoogleOAuthClientID: "",
+                customGoogleOAuthServerClientID: "",
+                googleSelectedCalendarIDs: [:],
+                activeGoogleAccountID: nil
             )
         )
 
-        XCTAssertTrue(entries.contains(where: {
-            $0.title == "Google OAuth provider mode" && $0.status == "custom"
-        }))
-        XCTAssertTrue(entries.contains(where: {
-            $0.title == "Polling interval configured" && $0.detail.contains("2 minutes")
+        await model.syncSharedConfigurationNow()
+
+        XCTAssertEqual(model.pollIntervalMinutes, 13)
+        XCTAssertEqual(model.auditTrailLogLength, .last5000)
+        XCTAssertTrue(model.sharedConfigurationStatusMessage.contains("Applied updated shared settings from iCloud"))
+        XCTAssertTrue(model.auditTrailEntries.contains(where: {
+            $0.title == "iCloud settings sync" && $0.detail.contains("Applied updated shared settings from iCloud")
         }))
     }
 
@@ -912,6 +1048,45 @@ final class Calendar_Busy_SyncTests: XCTestCase {
 
         XCTAssertEqual(shellModel.menuBarIconName, "calendar.circle.fill")
         XCTAssertEqual(shellModel.settingsMenuTitle, "Bring Settings Forward")
+    }
+
+    @MainActor
+    func testMacMenuBarSnapshotFreezesCurrentStatusStrings() {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        defer {
+            defaults.removePersistentDomain(forName: #function)
+        }
+
+        let appModel = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: false,
+                platformTarget: .macos,
+                deviceClass: .mac
+            ),
+            userDefaults: defaults,
+            googleAccountStore: MockGoogleAccountStore()
+        )
+        let shellModel = MacUtilityShellModel(
+            launchAtLoginService: MockLaunchAtLoginService(status: .notRegistered)
+        )
+        retainForHostedXCTest(shellModel)
+
+        let snapshot = MenuPresentationSnapshot(appModel: appModel, shellModel: shellModel)
+
+        XCTAssertEqual(snapshot.currentActivitySummary, appModel.currentActivitySummary)
+        XCTAssertEqual(snapshot.currentActivityIconName, appModel.currentActivityIconName)
+        XCTAssertEqual(snapshot.pendingActivityLabel, appModel.pendingActivityLabel)
+        XCTAssertEqual(snapshot.failureCount, appModel.failureCount)
+        XCTAssertEqual(snapshot.settingsMenuTitle, shellModel.settingsMenuTitle)
+        XCTAssertEqual(snapshot.logsMenuTitle, shellModel.logsMenuTitle)
     }
 
     @MainActor
@@ -1017,6 +1192,28 @@ final class Calendar_Busy_SyncTests: XCTestCase {
 
         await fulfillment(of: [expectation], timeout: 1.0)
         XCTAssertTrue(applicationController.dockVisibilityCalls.isEmpty)
+    }
+
+    @MainActor
+    func testMacWindowVisibilityObserverDefersVisibilityCallbackOffViewUpdateTurn() async {
+        var receivedVisibilityChanges: [Bool] = []
+        let coordinator = MacWindowVisibilityObserver.Coordinator { isVisible in
+            receivedVisibilityChanges.append(isVisible)
+        }
+        let window = NSWindow()
+
+        coordinator.attach(to: window)
+
+        XCTAssertTrue(receivedVisibilityChanges.isEmpty)
+
+        let expectation = expectation(description: "visibility callback arrives asynchronously")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            if receivedVisibilityChanges == [window.isVisible] {
+                expectation.fulfill()
+            }
+        }
+
+        await fulfillment(of: [expectation], timeout: 1.0)
     }
 
     @MainActor
@@ -2281,7 +2478,10 @@ private final class MockSharedAppConfigurationStore: SharedAppConfigurationStori
     let isAvailable: Bool
     private var configuration: SharedAppConfiguration?
     private var onChange: (@MainActor (SharedAppConfiguration) -> Void)?
+    private(set) var loadCallCount = 0
     private(set) var saveCallCount = 0
+    private(set) var requestSyncCallCount = 0
+    var requestSyncResult = true
 
     init(
         isAvailable: Bool,
@@ -2292,7 +2492,8 @@ private final class MockSharedAppConfigurationStore: SharedAppConfigurationStori
     }
 
     func loadConfiguration() -> SharedAppConfiguration? {
-        configuration
+        loadCallCount += 1
+        return configuration
     }
 
     func saveConfiguration(_ configuration: SharedAppConfiguration) {
@@ -2300,8 +2501,18 @@ private final class MockSharedAppConfigurationStore: SharedAppConfigurationStori
         self.configuration = configuration
     }
 
+    func setConfiguration(_ configuration: SharedAppConfiguration?) {
+        self.configuration = configuration
+    }
+
     func startObserving(_ onChange: @escaping @MainActor (SharedAppConfiguration) -> Void) {
         self.onChange = onChange
+    }
+
+    @discardableResult
+    func requestSync() -> Bool {
+        requestSyncCallCount += 1
+        return requestSyncResult
     }
 
     @MainActor

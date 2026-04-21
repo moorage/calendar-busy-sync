@@ -123,6 +123,7 @@ Primary code areas:
 - shell scripts call shared helpers in `scripts/lib/`
 - Google client plist sync happens in `scripts/sync-google-client-config.py` before build/test commands
 - cross-device settings sync lives in `Calendar Busy Sync/Calendar Busy Sync/App/Shared/SharedAppConfiguration.swift` and uses `NSUbiquitousKeyValueStore` only for non-secret preferences
+- explicit iCloud shared-settings status and manual sync requests also live in `Calendar Busy Sync/Calendar Busy Sync/App/Shared/SharedAppConfiguration.swift`, while `AppModel` records those outcomes into the runtime audit stream
 - cross-device Google-account handoff also lives in `Calendar Busy Sync/Calendar Busy Sync/App/Shared/` through a shared descriptor layer that carries non-secret account identity plus selected-calendar metadata, while actual Google credentials remain device-local in the keychain
 - accessibility-driven live smoke helpers live in `scripts/lib/ax-query.swift` and are used by the macOS Google E2E script
 - docs verification and repo-map generation use only standard Python 3 library modules
@@ -142,6 +143,7 @@ The harness must be able to:
 - dump machine-readable state and perf snapshots
 - capture app-owned screenshots
 - identify key UI elements through stable accessibility identifiers
+- distinguish runtime iCloud sync success/failure through the Advanced status row and the Logs surface instead of only inferring from current settings values
 
 ### Reliability
 

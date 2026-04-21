@@ -1,6 +1,7 @@
 # Running implementation notes
 
 - active ExecPlans:
+  - `docs/exec-plans/active/2026-04-21-ios-sync-responsiveness.md`
   - `docs/exec-plans/active/2026-04-20-ios-background-refresh.md`
   - `docs/exec-plans/active/2026-04-20-macos-app-store-submission.md`
   - `docs/exec-plans/active/2026-04-20-google-account-handoff-icloud.md`
@@ -51,6 +52,7 @@
   - `./scripts/upload-appstore --platform ios --skip-build` (uploaded the verified `.ipa` to App Store Connect successfully; delivery UUID `abab0ada-9bb3-4fc4-a975-1904de595cfa`)
   - `python3 scripts/check_execplan.py docs/exec-plans/active/2026-04-20-shared-configuration-icloud.md`
   - `python3 scripts/check_execplan.py docs/exec-plans/active/2026-04-20-ios-background-refresh.md`
+  - `python3 scripts/check_execplan.py docs/exec-plans/active/2026-04-21-ios-sync-responsiveness.md`
   - `python3 scripts/check_execplan.py docs/exec-plans/active/2026-04-20-google-account-handoff-icloud.md`
   - `./scripts/build --platform ios --device-class both` (shared Google-account handoff simulator build validation)
   - `./scripts/test-ui-ios --device both --smoke` (shared Google-account handoff iPhone/iPad smoke validation)
@@ -63,6 +65,7 @@
   - `./scripts/test-unit` (mobile settings-shell compaction compile and smoke coverage after moving footer actions into an iOS overflow sheet)
   - `./scripts/test-ui-macos --smoke` (desktop footer revalidation after the mobile-only footer split)
   - `./scripts/test-ui-ios --device both --smoke` (iPhone/iPad footer overflow-sheet smoke validation)
+  - `./scripts/test-ui-ios --device both --smoke` (2026-04-21 iOS sync responsiveness validation after adding cooperative yields in the sync loop)
   - `python3 scripts/check_execplan.py docs/exec-plans/active/2026-04-19-menu-bar-login-item-utility.md` (post-Dock-behavior update)
   - `python3 scripts/knowledge/check_docs.py` (post-Dock-behavior update)
   - `./scripts/test-unit` (hosted XCTest runner revalidation after gating Dock visibility changes out of hosted-test runtime)
@@ -77,6 +80,7 @@
   - `python3 scripts/prepare-appstore-ios-submission.py --iphone-dir artifacts/appstore/ios-screenshots/iphone --ipad-dir artifacts/appstore/ios-screenshots/ipad` (attached build `bc83e9b0-2414-4c24-95cc-32f276317003`, uploaded the iPhone `APP_IPHONE_67` and iPad `APP_IPAD_PRO_3GEN_129` screenshot sets, and created the iOS review-detail record)
   - `python3 scripts/check_execplan.py docs/exec-plans/completed/2026-04-20-ios-app-store-submission.md`
   - `./scripts/test-unit` (2026-04-20 submission pass rerun: test target compiles again after restoring a defaultable `HarnessLaunchOptions` initializer, but the hosted macOS run hangs after launching the app host and had to be killed manually)
+  - `./scripts/test-unit` (2026-04-21 iOS sync responsiveness rerun: build/test host compiled cleanly but the hosted macOS XCTest runner again stalled after launch without a final result)
 - evidence gathered:
   - `scripts/sync-google-client-config.py` now turns `.env` + `GOOGLE_CLIENT_PLIST_PATH` into the checked-in app plist inputs used by build/test commands
   - `Calendar Busy Sync/Calendar Busy Sync.xcodeproj` now links `GoogleSignIn-iOS`, uses a generated project-root `Info.plist`, and includes a macOS keychain access-group entitlement
@@ -117,10 +121,13 @@
   - iPhone and iPad now schedule a best-effort `BGAppRefreshTask` request from the SwiftUI scene lifecycle, the generated `Info.plist` carries the required background-refresh identifiers/modes, and Advanced now shows the current mobile background-refresh state without pretending iOS offers a fixed polling interval
   - debug iOS builds now also expose a `Run Refresh Path Now` Advanced control, and `scripts/trigger-ios-background-refresh` launches the simulator with `SIMCTL_CHILD_CALENDAR_BUSY_SYNC_RUN_IOS_BG_REFRESH_NOW=1` so manual verification uses the exact same app-side refresh path
   - iPhone and iPad now use a tighter settings layout: the Google add button shrinks to `+ Add`, calendar picker rows collapse to an icon-only `calendar` label with a smaller picker font, and the crowded footer actions move behind a hamburger-sheet affordance that badges the current failure count
+  - on iPhone and iPad, tapping `Logs` inside the footer overflow now pushes the audit trail inside that same sheet with a normal back button instead of trying to open a separate scene, and the audit trail view can now render either standalone or embedded in an existing navigation stack
+  - shared iCloud settings now surface a real runtime status row plus a manual `Sync iCloud Settings Now` button in Advanced, and the Logs surface switched from categorized snapshot checkmarks to timestamped runtime events so users can tell whether iCloud sync actually ran or failed
+  - iOS launch no longer runs iCloud shared-settings reconciliation during `AppModel.init` or kicks off `prepareIfNeeded()` from `App.init`; the shared-settings reconcile now happens during the rendered-view prep path so iPhone and iPad reach the first frame without waiting on `NSUbiquitousKeyValueStore.synchronize()`
+  - the iOS settings shell scroll freeze during sync was traced to `AppModel.syncNow()` monopolizing the main actor while it performed synchronous EventKit work; the sync loop now cooperatively yields between participant scans and write operations on iPhone/iPad so scrolling can stay responsive during long reconciliation runs
   - macOS, iPhone simulator, and iPad simulator smoke scripts still pass end-to-end after the auth wiring landed
 - open risks or blockers:
   - custom Google native client IDs still require a build that already includes the matching reversed callback scheme, so arbitrary runtime swaps remain intentionally blocked
   - one concurrent validation attempt (`./scripts/build --platform macos` in parallel with `./scripts/test-unit`) retriggered the known hosted XCTest/DerivedData contention pattern; rerunning sequentially passed, so future validation for this repo should continue to avoid parallel `xcodebuild` commands that share `artifacts/DerivedData`
-  - the hosted macOS `./scripts/test-unit` path regressed during the submission pass: the test target now compiles, but the hosted XCTest run still hangs after launching the app host and needs another dedicated fix
   - the new iCloud configuration path is fully exercised in unit tests and simulator builds, but true cross-device sync still requires signed builds with the same Apple ID plus the iCloud entitlement active in provisioning
   - the remaining macOS App Store submission blocker is review contact data, not packaging: App Store Connect still needs a contact phone number before the review-detail record can be fully automated

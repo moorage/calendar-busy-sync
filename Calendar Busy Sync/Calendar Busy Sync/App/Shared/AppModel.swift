@@ -48,6 +48,13 @@ final class AppModel: ObservableObject {
     @Published private(set) var appleCalendarMessage: String? {
         didSet {
             appleCalendarMessageUpdatedAt = appleCalendarMessage == nil ? nil : Date()
+            if let appleCalendarMessage, appleCalendarMessage != oldValue {
+                appendAuditTrailEntry(
+                    title: "Apple / iCloud calendar",
+                    detail: appleCalendarMessage,
+                    status: isAppleCalendarOperationInFlight ? "working" : appleCalendarAuthorizationState.auditTrailStatus
+                )
+            }
         }
     }
     @Published private(set) var appleCalendarMessageUpdatedAt: Date?
@@ -58,6 +65,13 @@ final class AppModel: ObservableObject {
     @Published private(set) var googleAuthMessage: String? {
         didSet {
             googleAuthMessageUpdatedAt = googleAuthMessage == nil ? nil : Date()
+            if let googleAuthMessage, googleAuthMessage != oldValue {
+                appendAuditTrailEntry(
+                    title: "Google account",
+                    detail: googleAuthMessage,
+                    status: isGoogleAuthInFlight ? "working" : "ready"
+                )
+            }
         }
     }
     @Published private(set) var googleAuthMessageUpdatedAt: Date?
@@ -73,6 +87,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var isSyncInFlight = false
     @Published private(set) var lastBusyMirrorSyncSummary: BusyMirrorSyncSummary?
     @Published private(set) var syncMessage: String?
+    @Published private(set) var sharedConfigurationSyncState: SharedConfigurationSyncState
+    @Published private(set) var runtimeAuditTrailEntries: [AuditTrailEntry] = []
     @Published private(set) var iosBackgroundRefreshState: IOSBackgroundRefreshState
     @Published var pollIntervalMinutes: Int {
         didSet {
@@ -85,6 +101,7 @@ final class AppModel: ObservableObject {
         didSet {
             guard !isApplyingSharedConfiguration else { return }
             persistSettings()
+            trimAuditTrailEntriesIfNeeded()
         }
     }
     @Published var usesCustomGoogleOAuthApp: Bool {
@@ -183,12 +200,15 @@ final class AppModel: ObservableObject {
         liveGoogleDebugConfiguration: LiveGoogleDebugConfiguration? = nil,
         iosBackgroundRefreshDebugConfiguration: IOSBackgroundRefreshDebugConfiguration? = nil
     ) {
+        let resolvedSharedConfigurationStore = sharedConfigurationStore ?? ICloudSharedAppConfigurationStore()
+        let sharedConfigurationEnabled = userDefaults.object(forKey: SettingKey.isSharedConfigurationEnabled) as? Bool ?? true
+
         self.launchOptions = launchOptions
         self.loader = ScenarioLoader()
         self.fileManager = fileManager
         self.launchDate = launchDate
         self.userDefaults = userDefaults
-        self.sharedConfigurationStore = sharedConfigurationStore ?? ICloudSharedAppConfigurationStore()
+        self.sharedConfigurationStore = resolvedSharedConfigurationStore
         self.iosBackgroundRefreshScheduler = iosBackgroundRefreshScheduler ?? SystemIOSBackgroundRefreshScheduler()
         let resolvedAppleCalendarService = appleCalendarService ?? AppleCalendarService()
         self.appleCalendarService = resolvedAppleCalendarService
@@ -205,7 +225,11 @@ final class AppModel: ObservableObject {
         self.selectedAppleCalendarID = userDefaults.string(forKey: SettingKey.selectedAppleCalendarID) ?? ""
         self.persistedAppleCalendarReference = Self.loadAppleCalendarReference(from: userDefaults)
         self.appleCalendarAuthorizationState = resolvedAppleCalendarService.authorizationState()
-        self.isSharedConfigurationEnabled = userDefaults.object(forKey: SettingKey.isSharedConfigurationEnabled) as? Bool ?? true
+        self.isSharedConfigurationEnabled = sharedConfigurationEnabled
+        self.sharedConfigurationSyncState = Self.initialSharedConfigurationSyncState(
+            isSharedConfigurationEnabled: sharedConfigurationEnabled,
+            sharedConfigurationStore: resolvedSharedConfigurationStore
+        )
         self.usesCustomGoogleOAuthApp = userDefaults.object(forKey: SettingKey.usesCustomGoogleOAuthApp) as? Bool ?? false
         self.customGoogleOAuthClientID = userDefaults.string(forKey: SettingKey.customGoogleOAuthClientID) ?? ""
         self.customGoogleOAuthServerClientID = userDefaults.string(forKey: SettingKey.customGoogleOAuthServerClientID) ?? ""
@@ -221,7 +245,6 @@ final class AppModel: ObservableObject {
         }
 
         startObservingSharedConfiguration()
-        reconcileSharedConfigurationAtLaunch()
     }
 
     deinit {
@@ -238,6 +261,17 @@ final class AppModel: ObservableObject {
             let loadedState = try loadInitialState()
             state = loadedState
             lastErrorMessage = nil
+            let readinessDetail: String
+            if launchOptions.scenarioName == nil && launchOptions.scenarioRoot == nil {
+                readinessDetail = "Live settings shell is ready."
+            } else {
+                readinessDetail = "Loaded \(loadedState.connectedAccountCount) accounts and \(loadedState.selectedCalendarCount) selected calendars from the current scenario."
+            }
+            appendAuditTrailEntry(
+                title: "App ready",
+                detail: readinessDetail,
+                status: "ready"
+            )
             let readyDate = Date()
             try HarnessArtifactWriter.writeArtifacts(
                 state: loadedState,
@@ -250,8 +284,14 @@ final class AppModel: ObservableObject {
         } catch {
             state = nil
             lastErrorMessage = error.localizedDescription
+            appendAuditTrailEntry(
+                title: "App startup",
+                detail: error.localizedDescription,
+                status: "failed"
+            )
         }
 
+        reconcileSharedConfigurationAtLaunch()
         refreshGoogleConfiguration()
         refreshAppleCalendarAuthorizationState()
         await restoreAppleCalendarAccessIfNeeded()
@@ -272,6 +312,10 @@ final class AppModel: ObservableObject {
         launchOptions.platformTarget == .ios
             && !launchOptions.uiTestMode
             && launchOptions.appStoreScreenshotMode == nil
+    }
+
+    var usesCooperativeIOSSyncScheduling: Bool {
+        launchOptions.platformTarget == .ios
     }
 
     var syncStatusLabel: String {
@@ -522,16 +566,36 @@ final class AppModel: ObservableObject {
         launchOptions.platformTarget == .macos
     }
 
+    var sharedConfigurationStatusLabel: String {
+        sharedConfigurationSyncState.statusLabel
+    }
+
     var sharedConfigurationStatusMessage: String {
-        if !isSharedConfigurationEnabled {
-            return "Shared settings are off on this device. Calendar choices and advanced preferences stay local here."
+        sharedConfigurationSyncState.detail
+    }
+
+    var sharedConfigurationStatusTimestampLabel: String? {
+        Self.messageTimestampLabel(for: sharedConfigurationSyncState.updatedAt)
+    }
+
+    var sharedConfigurationScopeMessage: String {
+        "Only non-secret settings sync through iCloud. Google sign-in and Apple permissions stay on each device."
+    }
+
+    var sharedConfigurationHasFailureStatus: Bool {
+        sharedConfigurationSyncState.isFailure
+    }
+
+    var canManuallySyncSharedConfiguration: Bool {
+        isSharedConfigurationEnabled && sharedConfigurationStore.isAvailable && !isSharedConfigurationSyncInFlight
+    }
+
+    private var isSharedConfigurationSyncInFlight: Bool {
+        if case .syncing = sharedConfigurationSyncState {
+            return true
         }
 
-        if sharedConfigurationStore.isAvailable {
-            return "Shared settings sync through iCloud when available. Google sign-in and Apple permissions stay on each device."
-        }
-
-        return "Shared settings are enabled, but iCloud is unavailable right now. This device will keep local settings until iCloud returns."
+        return false
     }
 
     var iosBackgroundRefreshStatusLabel: String? {
@@ -832,54 +896,12 @@ final class AppModel: ObservableObject {
         liveGoogleSmokeStatus.summary
     }
 
-    var iosBackgroundRefreshAuditEntry: AuditTrailEntry? {
-        guard launchOptions.platformTarget == .ios,
-              let detail = iosBackgroundRefreshDetail
-        else {
-            return nil
-        }
-
-        let status: String
-        switch iosBackgroundRefreshState {
-        case .unsupported:
-            status = "blocked"
-        case .denied:
-            status = "pending"
-        case .restricted:
-            status = "blocked"
-        case .scheduled:
-            status = "configured"
-        case .failed:
-            status = "failed"
-        }
-
-        return AuditTrailEntry(
-            timestampLabel: "iOS",
-            title: "Background refresh",
-            detail: detail,
-            status: status
-        )
-    }
-
     var auditTrailEntries: [AuditTrailEntry] {
-        var entries = AuditTrailBuilder.entries(
-            for: state,
-            platform: launchOptions.platformTarget,
-            pollIntervalMinutes: pollIntervalMinutes,
-            auditTrailLogLength: auditTrailLogLength,
-            googleOAuth: googleOAuthConfiguration
-        )
-
-        entries.insert(contentsOf: appleCalendarAuditEntries, at: min(2, entries.count))
-        entries.insert(contentsOf: googleCalendarAuditEntries, at: min(2, entries.count))
-        entries.insert(contentsOf: googleAuditEntries, at: min(2, entries.count))
-        entries.insert(contentsOf: syncAuditEntries, at: min(2, entries.count))
-
-        if let limit = auditTrailLogLength.limit, entries.count > limit {
-            return Array(entries.suffix(limit))
+        if let limit = auditTrailLogLength.limit, runtimeAuditTrailEntries.count > limit {
+            return Array(runtimeAuditTrailEntries.prefix(limit))
         }
 
-        return entries
+        return runtimeAuditTrailEntries
     }
 
     func handleIncomingURL(_ url: URL) {
@@ -904,6 +926,77 @@ final class AppModel: ObservableObject {
         guard !Task.isCancelled else { return }
 
         scheduleIOSBackgroundRefreshIfPossible()
+    }
+
+    func syncSharedConfigurationNow() async {
+        guard isSharedConfigurationEnabled else {
+            updateSharedConfigurationSyncState(.disabled, logEvent: false)
+            return
+        }
+
+        guard sharedConfigurationStore.isAvailable else {
+            updateSharedConfigurationSyncState(
+                .unavailable,
+                logEvent: true
+            )
+            return
+        }
+
+        let startedAt = Date()
+        updateSharedConfigurationSyncState(.syncing, logEvent: true)
+
+        guard sharedConfigurationStore.requestSync() else {
+            updateSharedConfigurationSyncState(
+                .failed(
+                    message: "The app could not start an iCloud shared-settings sync request.",
+                    at: startedAt
+                ),
+                logEvent: true
+            )
+            return
+        }
+
+        let localUpdatedAt = lastSettingsMutationAt
+        if let sharedConfiguration = sharedConfigurationStore.loadConfiguration() {
+            if sharedConfiguration.updatedAt > localUpdatedAt {
+                applySharedConfigurationIfNewer(sharedConfiguration)
+                return
+            }
+
+            if sharedConfiguration.updatedAt < localUpdatedAt {
+                sharedConfigurationStore.saveConfiguration(
+                    currentSharedConfiguration(updatedAt: localUpdatedAt)
+                )
+                updateSharedConfigurationSyncState(
+                    .succeeded(
+                        message: "Requested an iCloud update with this device's newer settings.",
+                        at: startedAt
+                    ),
+                    logEvent: true
+                )
+                return
+            }
+
+            updateSharedConfigurationSyncState(
+                .succeeded(
+                    message: "This device already matches the current iCloud shared settings.",
+                    at: startedAt
+                ),
+                logEvent: true
+            )
+            return
+        }
+
+        sharedConfigurationStore.saveConfiguration(
+            currentSharedConfiguration(updatedAt: localUpdatedAt)
+        )
+        updateSharedConfigurationSyncState(
+            .succeeded(
+                message: "No shared iCloud settings were found, so this device requested an initial upload.",
+                at: startedAt
+            ),
+            logEvent: true
+        )
     }
 
     func runIOSBackgroundRefreshVerificationNow() async {
@@ -1036,6 +1129,11 @@ final class AppModel: ObservableObject {
 
         isSyncInFlight = true
         syncMessage = nil
+        appendAuditTrailEntry(
+            title: "Busy mirror sync",
+            detail: "Started reconciling selected calendars.",
+            status: "working"
+        )
 
         defer {
             isSyncInFlight = false
@@ -1055,6 +1153,7 @@ final class AppModel: ObservableObject {
             var existingBusyBlocks: [BusyMirrorTargetBusyBlock] = []
 
             for participant in participantsBundle.participants {
+                await yieldForIOSSyncResponsivenessIfNeeded()
                 switch participant.provider {
                 case .google:
                     guard
@@ -1109,6 +1208,7 @@ final class AppModel: ObservableObject {
                         )
                     )
                 }
+                await yieldForIOSSyncResponsivenessIfNeeded()
             }
 
             let desiredMirrors = BusyMirrorSyncPlanner.desiredMirrors(
@@ -1127,6 +1227,7 @@ final class AppModel: ObservableObject {
             var failureMessages: [String] = []
 
             for operation in operations {
+                await yieldForIOSSyncResponsivenessIfNeeded()
                 do {
                     try await applySyncOperation(operation, participantsBundle: participantsBundle)
                     switch operation {
@@ -1138,8 +1239,10 @@ final class AppModel: ObservableObject {
                         deletedCount += 1
                     }
                 } catch {
-                    failureMessages.append(error.localizedDescription)
+                    let failureMessage = syncFailureMessage(for: operation, error: error)
+                    failureMessages.append(failureMessage)
                 }
+                await yieldForIOSSyncResponsivenessIfNeeded()
             }
 
             let summary = BusyMirrorSyncSummary(
@@ -1165,6 +1268,21 @@ final class AppModel: ObservableObject {
             } else {
                 syncMessage = "Busy mirroring completed with \(summary.failedCount) failed write(s)."
             }
+
+            appendAuditTrailEntry(
+                title: "Busy mirror sync",
+                detail: "Created \(summary.createdCount), updated \(summary.updatedCount), deleted \(summary.deletedCount), failed \(summary.failedCount).",
+                status: failureMessages.isEmpty ? "ready" : "failed",
+                occurredAt: summary.completedAt
+            )
+            for failureMessage in failureMessages {
+                appendAuditTrailEntry(
+                    title: "Busy mirror sync failure",
+                    detail: failureMessage,
+                    status: "failed",
+                    occurredAt: summary.completedAt
+                )
+            }
         } catch {
             lastBusyMirrorSyncSummary = BusyMirrorSyncSummary(
                 participantCount: selectedParticipantCount,
@@ -1177,6 +1295,11 @@ final class AppModel: ObservableObject {
                 failureMessages: [error.localizedDescription]
             )
             syncMessage = error.localizedDescription
+            appendAuditTrailEntry(
+                title: "Busy mirror sync",
+                detail: error.localizedDescription,
+                status: "failed"
+            )
         }
     }
 
@@ -1692,12 +1815,57 @@ final class AppModel: ObservableObject {
             ?? selectedAppleCalendar.flatMap { $0.id == calendarID ? $0 : nil }
     }
 
+    private func yieldForIOSSyncResponsivenessIfNeeded() async {
+        guard usesCooperativeIOSSyncScheduling else {
+            return
+        }
+
+        await Task.yield()
+    }
+
+    private func syncFailureMessage(for operation: BusyMirrorOperation, error: Error) -> String {
+        BusyMirrorSyncAuditFormatter.failureMessage(for: operation, error: error)
+    }
+
     private func loadInitialState() throws -> ScenarioState {
         guard launchOptions.scenarioRoot != nil || launchOptions.scenarioName != nil else {
             return .emptyLiveShell
         }
 
         return try loader.load(using: launchOptions)
+    }
+
+    private func appendAuditTrailEntry(
+        title: String,
+        detail: String,
+        status: String,
+        occurredAt: Date = Date()
+    ) {
+        let entry = AuditTrailEntry(
+            occurredAt: occurredAt,
+            title: title,
+            detail: detail,
+            status: status
+        )
+
+        if let latestEntry = runtimeAuditTrailEntries.first,
+           latestEntry.title == entry.title,
+           latestEntry.detail == entry.detail,
+           latestEntry.status == entry.status
+        {
+            return
+        }
+
+        runtimeAuditTrailEntries.insert(entry, at: 0)
+        trimAuditTrailEntriesIfNeeded()
+    }
+
+    private func trimAuditTrailEntriesIfNeeded() {
+        guard let limit = auditTrailLogLength.limit, runtimeAuditTrailEntries.count > limit else {
+            return
+        }
+
+        runtimeAuditTrailEntries = Array(runtimeAuditTrailEntries.prefix(limit))
     }
 
     private func persistSettings() {
@@ -1741,15 +1909,24 @@ final class AppModel: ObservableObject {
 
     private func reconcileSharedConfigurationAtLaunch() {
         guard isSharedConfigurationEnabled else {
+            updateSharedConfigurationSyncState(.disabled, logEvent: false)
             return
         }
 
         guard sharedConfigurationStore.isAvailable else {
+            updateSharedConfigurationSyncState(.unavailable, logEvent: false)
             return
         }
 
         guard let sharedConfiguration = sharedConfigurationStore.loadConfiguration() else {
             sharedConfigurationStore.saveConfiguration(currentSharedConfiguration(updatedAt: lastSettingsMutationAt))
+            updateSharedConfigurationSyncState(
+                .succeeded(
+                    message: "No shared iCloud settings were found, so this device requested an initial upload.",
+                    at: Date()
+                ),
+                logEvent: true
+            )
             return
         }
 
@@ -1760,7 +1937,17 @@ final class AppModel: ObservableObject {
 
         if sharedConfiguration.updatedAt < lastSettingsMutationAt {
             sharedConfigurationStore.saveConfiguration(currentSharedConfiguration(updatedAt: lastSettingsMutationAt))
+            updateSharedConfigurationSyncState(
+                .succeeded(
+                    message: "Requested an iCloud update with this device's newer settings during launch.",
+                    at: Date()
+                ),
+                logEvent: true
+            )
+            return
         }
+
+        updateSharedConfigurationSyncState(.idle, logEvent: false)
     }
 
     private func applySharedConfigurationIfNewer(_ configuration: SharedAppConfiguration) {
@@ -1800,6 +1987,13 @@ final class AppModel: ObservableObject {
         writeSettingsToUserDefaults(updatedAt: configuration.updatedAt)
         refreshGoogleConfiguration()
         restartSyncLoopIfNeeded()
+        updateSharedConfigurationSyncState(
+            .succeeded(
+                message: "Applied updated shared settings from iCloud.",
+                at: Date()
+            ),
+            logEvent: true
+        )
 
         guard hasPrepared else {
             return
@@ -1879,6 +2073,40 @@ final class AppModel: ObservableObject {
             googleSelectedCalendarIDs: googleSelectedCalendarIDs,
             activeGoogleAccountID: activeGoogleAccountID,
             googleAccountDescriptors: sharedGoogleAccountDescriptors
+        )
+    }
+
+    private func updateSharedConfigurationSyncState(
+        _ newState: SharedConfigurationSyncState,
+        logEvent: Bool
+    ) {
+        sharedConfigurationSyncState = newState
+
+        guard logEvent else {
+            return
+        }
+
+        let status: String
+        switch newState {
+        case .disabled:
+            status = "blocked"
+        case .unavailable:
+            status = "blocked"
+        case .idle:
+            status = "ready"
+        case .syncing:
+            status = "working"
+        case .succeeded:
+            status = "configured"
+        case .failed:
+            status = "failed"
+        }
+
+        appendAuditTrailEntry(
+            title: "iCloud settings sync",
+            detail: newState.detail,
+            status: status,
+            occurredAt: newState.updatedAt ?? Date()
         )
     }
 
@@ -2004,9 +2232,11 @@ final class AppModel: ObservableObject {
         persistSettings()
 
         guard newValue else {
+            updateSharedConfigurationSyncState(.disabled, logEvent: true)
             return
         }
 
+        updateSharedConfigurationSyncState(.idle, logEvent: true)
         reconcileSharedConfigurationAtLaunch()
     }
 
@@ -2038,6 +2268,23 @@ final class AppModel: ObservableObject {
     private func setGoogleMessage(_ message: String?, for accountID: String) {
         googleMessagesByAccountID[accountID] = message
         googleMessageUpdatedAtByAccountID[accountID] = message == nil ? nil : Date()
+
+        guard let message else {
+            return
+        }
+
+        let titlePrefix: String
+        if let account = storedGoogleAccount(id: accountID) {
+            titlePrefix = "Google calendar • \(account.displayName)"
+        } else {
+            titlePrefix = "Google calendar"
+        }
+
+        appendAuditTrailEntry(
+            title: titlePrefix,
+            detail: message,
+            status: googleOperationAccountIDs.contains(accountID) ? "working" : "ready"
+        )
     }
 
     func googleMessageTimestampLabel(for accountID: String) -> String? {
@@ -2350,217 +2597,27 @@ final class AppModel: ObservableObject {
         return calendars.first(where: { $0.id == calendarID })
     }
 
-    private var googleAuditEntries: [AuditTrailEntry] {
-        var entries: [AuditTrailEntry] = []
-
-        entries.append(
-            AuditTrailEntry(
-                timestampLabel: "Google",
-                title: googleStoredAccounts.isEmpty ? "Google account status" : "Google accounts connected",
-                detail: googleStoredAccounts.isEmpty
-                    ? "No Google account is currently connected."
-                    : "\(googleStoredAccounts.count) Google account(s) are connected.",
-                status: googleStoredAccounts.isEmpty ? "signed-out" : "connected"
-            )
-        )
-
-        if let message = googleOAuthResolutionMessage {
-            entries.append(
-                AuditTrailEntry(
-                    timestampLabel: "Google",
-                    title: "Custom OAuth validation",
-                    detail: message,
-                    status: "blocked"
-                )
-            )
-        }
-
-        if let message = googleAuthMessage {
-            entries.append(
-                AuditTrailEntry(
-                    timestampLabel: "Google",
-                    title: "Authorization status",
-                    detail: message,
-                    status: googleStoredAccounts.isEmpty ? "pending" : "ready"
-                )
-            )
-        }
-
-        return entries
-    }
-
-    private var syncAuditEntries: [AuditTrailEntry] {
-        var entries: [AuditTrailEntry] = [
-            AuditTrailEntry(
-                timestampLabel: "Sync",
-                title: "Participant calendars",
-                detail: selectedParticipantCount == 0
-                    ? "Select calendars to manage mirrored busy holds."
-                    : (selectedParticipantCount == 1
-                        ? "One calendar is selected. Existing mirrored holds can be cleaned up, but new mirrors require at least two calendars."
-                        : "\(selectedParticipantCount) calendars participate in full-mesh busy mirroring."),
-                status: selectedParticipantCount == 0 ? "pending" : (selectedParticipantCount == 1 ? "limited" : "ready")
-            )
-        ]
-
-        if let lastBusyMirrorSyncSummary {
-            entries.append(
-                AuditTrailEntry(
-                    timestampLabel: "Sync",
-                    title: "Last reconciliation run",
-                    detail: "Created \(lastBusyMirrorSyncSummary.createdCount), updated \(lastBusyMirrorSyncSummary.updatedCount), deleted \(lastBusyMirrorSyncSummary.deletedCount), failed \(lastBusyMirrorSyncSummary.failedCount).",
-                    status: lastBusyMirrorSyncSummary.status
-                )
-            )
-        }
-
-        if let iosBackgroundRefreshAuditEntry {
-            entries.append(iosBackgroundRefreshAuditEntry)
-        }
-
-        if let syncMessage {
-            entries.append(
-                AuditTrailEntry(
-                    timestampLabel: "Sync",
-                    title: "Sync status",
-                    detail: syncMessage,
-                    status: isSyncInFlight ? "working" : (lastBusyMirrorSyncSummary?.status ?? "pending")
-                )
-            )
-        }
-
-        return entries
-    }
-
-    private var googleCalendarAuditEntries: [AuditTrailEntry] {
-        var entries: [AuditTrailEntry] = []
-
-        entries.append(
-            AuditTrailEntry(
-                timestampLabel: "Calendars",
-                title: "Writable Google calendars",
-                detail: googleStoredAccounts.isEmpty
-                    ? "Connect Google to load writable calendars."
-                    : "\(googleAccountCards.reduce(0) { $0 + $1.calendars.count }) writable calendars loaded across \(googleStoredAccounts.count) account(s).",
-                status: googleStoredAccounts.isEmpty ? "signed-out" : (googleAccountCards.allSatisfy { !$0.calendars.isEmpty } ? "ready" : "pending")
-            )
-        )
-
-        for card in googleAccountCards {
-            if let selectedCalendar = card.selectedCalendar {
-                entries.append(
-                    AuditTrailEntry(
-                        timestampLabel: "Calendars",
-                        title: "Selected Google calendar",
-                        detail: "\(card.account.displayName) • \(selectedCalendar.displayName)",
-                        status: "selected"
-                    )
-                )
-            }
-
-            if let lastManagedGoogleEvent = card.lastManagedEvent {
-                entries.append(
-                    AuditTrailEntry(
-                        timestampLabel: "Write",
-                        title: "Managed busy slot created",
-                        detail: "\(card.account.displayName) • \(lastManagedGoogleEvent.calendarName) • \(lastManagedGoogleEvent.windowDescription)",
-                        status: "created"
-                    )
-                )
-            }
-
-            if let message = card.message {
-                entries.append(
-                    AuditTrailEntry(
-                        timestampLabel: "Write",
-                        title: "Google Calendar status",
-                        detail: "\(card.account.displayName) • \(message)",
-                        status: card.isOperationInFlight ? "working" : "ready"
-                    )
-                )
-            }
-        }
-
-        if let status = liveGoogleSmokeStatus.statusLabel, let summary = liveGoogleSmokeStatus.summary {
-            entries.append(
-                AuditTrailEntry(
-                    timestampLabel: "E2E",
-                    title: "Live Google smoke",
-                    detail: summary,
-                    status: status.lowercased()
-                )
-            )
-        }
-
-        return entries
-    }
-
-    private var appleCalendarAuditEntries: [AuditTrailEntry] {
-        var entries: [AuditTrailEntry] = []
-
-        let status = isAppleCalendarEnabled ? appleConnectionStatusLabel.lowercased() : "signed-out"
-        entries.append(
-            AuditTrailEntry(
-                timestampLabel: "Apple",
-                title: isAppleCalendarEnabled ? "Apple calendar status" : "Apple calendar disconnected",
-                detail: appleConnectionDetail,
-                status: status
-            )
-        )
-
-        entries.append(
-            AuditTrailEntry(
-                timestampLabel: "Calendars",
-                title: "Writable Apple calendars",
-                detail: isAppleCalendarEnabled
-                    ? "\(appleCalendars.count) writable Apple calendars loaded."
-                    : "Connect Apple Calendar to load writable Apple or iCloud calendars.",
-                status: isAppleCalendarEnabled ? (appleCalendars.isEmpty ? "pending" : "ready") : "signed-out"
-            )
-        )
-
-        if let selectedAppleCalendar {
-            entries.append(
-                AuditTrailEntry(
-                    timestampLabel: "Calendars",
-                    title: "Selected Apple calendar",
-                    detail: selectedAppleCalendar.displayName,
-                    status: "selected"
-                )
-            )
-        }
-
-        if let lastManagedAppleEvent {
-            entries.append(
-                AuditTrailEntry(
-                    timestampLabel: "Write",
-                    title: "Managed Apple busy slot created",
-                    detail: "\(lastManagedAppleEvent.calendarName) • \(lastManagedAppleEvent.windowDescription)",
-                    status: "created"
-                )
-            )
-        }
-
-        if let message = appleCalendarMessage {
-            entries.append(
-                AuditTrailEntry(
-                    timestampLabel: "Write",
-                    title: "Apple Calendar status",
-                    detail: message,
-                    status: isAppleCalendarOperationInFlight ? "working" : "ready"
-                )
-            )
-        }
-
-        return entries
-    }
-
     private static func loadPollInterval(from userDefaults: UserDefaults) -> Int {
         let storedValue = userDefaults.integer(forKey: SettingKey.pollIntervalMinutes)
         if storedValue == 0 {
             return AppSettingsDefaults.pollIntervalMinutes
         }
         return max(1, min(60, storedValue))
+    }
+
+    private static func initialSharedConfigurationSyncState(
+        isSharedConfigurationEnabled: Bool,
+        sharedConfigurationStore: any SharedAppConfigurationStoring
+    ) -> SharedConfigurationSyncState {
+        if !isSharedConfigurationEnabled {
+            return .disabled
+        }
+
+        if !sharedConfigurationStore.isAvailable {
+            return .unavailable
+        }
+
+        return .idle
     }
 
     private static func loadAuditTrailLogLength(
@@ -2748,6 +2805,21 @@ enum LiveGoogleAccountResolver {
         }
 
         return accounts.first?.id
+    }
+}
+
+private extension AppleCalendarAuthorizationState {
+    var auditTrailStatus: String {
+        switch self {
+        case .granted:
+            return "ready"
+        case .denied:
+            return "failed"
+        case .restricted:
+            return "blocked"
+        case .notDetermined:
+            return "pending"
+        }
     }
 }
 

@@ -5,31 +5,34 @@ struct MacMenuBarContent: View {
     @ObservedObject var appModel: AppModel
     @ObservedObject var shellModel: MacUtilityShellModel
     @Environment(\.openWindow) private var openWindow
+    @State private var presentedSnapshot: MenuPresentationSnapshot?
 
     var body: some View {
+        let snapshot = presentedSnapshot ?? MenuPresentationSnapshot(appModel: appModel, shellModel: shellModel)
+
         VStack(alignment: .leading, spacing: 10) {
-            Label(appModel.currentActivitySummary, systemImage: appModel.currentActivityIconName)
+            Label(snapshot.currentActivitySummary, systemImage: snapshot.currentActivityIconName)
                 .font(.caption.weight(.medium))
                 .lineLimit(2)
 
-            Label(appModel.pendingActivityLabel, systemImage: "clock.badge.exclamationmark")
+            Label(snapshot.pendingActivityLabel, systemImage: "clock.badge.exclamationmark")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            if appModel.failureCount > 0 {
-                Label(appModel.failureCountLabel, systemImage: "exclamationmark.triangle.fill")
+            if snapshot.failureCount > 0 {
+                Label(snapshot.failureCountLabel, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
                     .foregroundStyle(.red)
             }
 
             Divider()
 
-            Button(shellModel.settingsMenuTitle) {
+            Button(snapshot.settingsMenuTitle) {
                 openScene(AppSceneIDs.settings)
             }
             .accessibilityIdentifier(AccessibilityIDs.menuBarOpenSettingsButton)
 
-            Button(shellModel.logsMenuTitle) {
+            Button(snapshot.logsMenuTitle) {
                 openScene(AppSceneIDs.auditTrail)
             }
             .accessibilityIdentifier(AccessibilityIDs.menuBarOpenLogsButton)
@@ -67,13 +70,15 @@ struct MacMenuBarContent: View {
         }
         .frame(width: 260, alignment: .leading)
         .padding(10)
+        .onAppear {
+            presentedSnapshot = MenuPresentationSnapshot(appModel: appModel, shellModel: shellModel)
+        }
+        .onDisappear {
+            presentedSnapshot = nil
+        }
         .task {
             await appModel.prepareIfNeeded()
             shellModel.refreshLaunchAtLoginState()
-        }
-        .onOpenURL { url in
-            appModel.handleIncomingURL(url)
-            shellModel.activateApp()
         }
     }
 
@@ -81,6 +86,26 @@ struct MacMenuBarContent: View {
         shellModel.presentScene(sceneID) { targetSceneID in
             openWindow(id: targetSceneID)
         }
+    }
+}
+
+private struct MenuPresentationSnapshot: Equatable {
+    let currentActivitySummary: String
+    let currentActivityIconName: String
+    let pendingActivityLabel: String
+    let failureCount: Int
+    let failureCountLabel: String
+    let settingsMenuTitle: String
+    let logsMenuTitle: String
+
+    init(appModel: AppModel, shellModel: MacUtilityShellModel) {
+        currentActivitySummary = appModel.currentActivitySummary
+        currentActivityIconName = appModel.currentActivityIconName
+        pendingActivityLabel = appModel.pendingActivityLabel
+        failureCount = appModel.failureCount
+        failureCountLabel = appModel.failureCountLabel
+        settingsMenuTitle = shellModel.settingsMenuTitle
+        logsMenuTitle = shellModel.logsMenuTitle
     }
 }
 #endif

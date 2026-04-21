@@ -23,6 +23,7 @@ Supported debug launch arguments:
 
 Stable identifiers should include:
 
+- `audit-trail.screen`
 - `audit-trail.list`
 - `audit-trail.open`
 - `menu-bar.open-settings`
@@ -51,6 +52,9 @@ Stable identifiers should include:
 - `google-calendar.live-smoke-status`
 - `settings.sync.poll-interval`
 - `settings.advanced.shared-configuration.enabled`
+- `settings.advanced.shared-configuration.status`
+- `settings.advanced.shared-configuration.detail`
+- `settings.advanced.shared-configuration.sync-now`
 - `settings.advanced.ios-background-refresh.status`
 - `settings.advanced.ios-background-refresh.detail`
 - `settings.advanced.ios-background-refresh.run-now`
@@ -109,6 +113,7 @@ Planned stable harness commands include:
 - polling interval controls are exposed on macOS only
 - iPhone and iPad builds still emit the same harness snapshots, but background sync cadence is not a user-configurable setting there
 - on iPhone and iPad, pending work, failure counts, `Logs`, and `Sync Now` move behind the footer overflow sheet exposed at `sync-status.overflow`
+- the Advanced iCloud settings row now surfaces explicit sync state plus a timestamped detail footnote, and `settings.advanced.shared-configuration.sync-now` is present only while the iCloud-sharing toggle is on
 - normal iOS launches now schedule a best-effort `BGAppRefreshTask`; harness `--ui-test-mode 1` and `--app-store-screenshot ...` launches must suppress that scheduling path
 - debug iOS verification can also drive the same path through `CALENDAR_BUSY_SYNC_RUN_IOS_BG_REFRESH_NOW=1`, which the simulator helper injects as `SIMCTL_CHILD_CALENDAR_BUSY_SYNC_RUN_IOS_BG_REFRESH_NOW=1`
 - the Google Sign-In callback URL is handled through the app lifecycle, but harness smoke launches stay scenario-backed and do not initiate interactive auth
