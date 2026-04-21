@@ -62,10 +62,38 @@ fi
 if [[ -z "${PACKAGE_PATH}" ]]; then
   case "${PLATFORM}" in
     ios)
-      PACKAGE_PATH="$(find "${ARTIFACTS_DIR}/exports" -maxdepth 2 -type f -name '*.ipa' | sort | tail -n 1)"
+      PACKAGE_PATH="$(
+        python3 - "${ARTIFACTS_DIR}/exports" '.ipa' <<'PY'
+import sys
+from pathlib import Path
+
+exports_dir = Path(sys.argv[1])
+extension = sys.argv[2]
+matches = sorted(
+    (path for path in exports_dir.glob(f"**/*{extension}") if path.is_file()),
+    key=lambda path: path.stat().st_mtime,
+)
+if matches:
+    print(matches[-1])
+PY
+      )"
       ;;
     macos)
-      PACKAGE_PATH="$(find "${ARTIFACTS_DIR}/exports" -maxdepth 2 -type f -name '*.pkg' | sort | tail -n 1)"
+      PACKAGE_PATH="$(
+        python3 - "${ARTIFACTS_DIR}/exports" '.pkg' <<'PY'
+import sys
+from pathlib import Path
+
+exports_dir = Path(sys.argv[1])
+extension = sys.argv[2]
+matches = sorted(
+    (path for path in exports_dir.glob(f"**/*{extension}") if path.is_file()),
+    key=lambda path: path.stat().st_mtime,
+)
+if matches:
+    print(matches[-1])
+PY
+      )"
       ;;
     *)
       echo "expected --platform macos|ios" >&2

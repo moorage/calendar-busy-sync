@@ -316,7 +316,7 @@ def attach_build(client: AppStoreConnectClient, version_id: str, build_id: str) 
         "PATCH",
         f"appStoreVersions/{version_id}/relationships/build",
         payload={"data": {"type": "builds", "id": build_id}},
-        expected=(200,),
+        expected=(200, 204),
     )
 
 

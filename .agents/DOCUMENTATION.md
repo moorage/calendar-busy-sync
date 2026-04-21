@@ -59,8 +59,9 @@
   - `./scripts/test-unit` (hosted XCTest runner revalidation after gating Dock visibility changes out of hosted-test runtime)
   - `./scripts/test-ui-macos --smoke` (standard-runtime revalidation after hosted-test Dock fix)
   - `./scripts/capture-appstore-screenshots-macos` (generated deterministic 2880x1800 App Store macOS screenshots)
-  - `./scripts/archive-appstore --platform macos` (2026-04-20 submission pass: archive succeeded for version `1.0` build `2`, export failed because no local `Mac Installer Distribution` certificate is installed)
-  - `python3 scripts/prepare-appstore-macos-submission.py --screenshot-dir artifacts/appstore/macos-screenshots` (uploaded the macOS screenshot set and filled in App Store Connect metadata even without a matching build)
+  - `./scripts/archive-appstore --platform macos` (2026-04-20 submission pass: archive/export now succeeds after creating and importing a `Mac Installer Distribution` certificate for team `GG34PA8F4A`)
+  - `./scripts/upload-appstore --platform macos --package "artifacts/exports/CalendarBusySync-macos-20260420-174222/Calendar Busy Sync.pkg" --wait` (uploaded a valid `1.0 (2)` macOS App Store package; delivery UUID `339b417e-16e4-485d-82ca-eca5874f4c38`)
+  - `python3 scripts/prepare-appstore-macos-submission.py --screenshot-dir artifacts/appstore/macos-screenshots` (uploaded the macOS screenshot set, attached build `339b417e-16e4-485d-82ca-eca5874f4c38`, and re-applied App Store Connect metadata; only review-contact phone remains missing)
   - `./scripts/test-unit` (2026-04-20 submission pass rerun: test target compiles again after restoring a defaultable `HarnessLaunchOptions` initializer, but the hosted macOS run hangs after launching the app host and had to be killed manually)
 - evidence gathered:
   - `scripts/sync-google-client-config.py` now turns `.env` + `GOOGLE_CLIENT_PLIST_PATH` into the checked-in app plist inputs used by build/test commands
@@ -94,7 +95,9 @@
   - forcing the Sous Chef Studio distribution cert directly onto the current signed macOS debug build is not a drop-in replacement for the working local OAuth/iCloud path; the iCloud-enabled debug target still relies on team-managed development signing, so the harness documents that split instead of pretending one cert fits both flows
   - the working macOS App Store path is now explicit and verified: automatic archive succeeds, App Store export re-signs the output onto Apple Distribution, `DistributionSummary.plist` matches the configured distribution certificate SHA-1, and the export reports a `Mac Team Store Provisioning Profile` for `com.matthewpaulmoore.Calendar-Busy-Sync`
   - the iOS App Store path now uses the same exact-cert verification and has a dedicated `scripts/upload-appstore` command that uploads the verified `.ipa` to App Store Connect using the `.env` API key credentials
-  - the macOS App Store submission path now has deterministic screenshot generation via app-side rendering (`--app-store-screenshot` plus `--app-store-screenshot-output`) and a dedicated `scripts/prepare-appstore-macos-submission.py` helper that populated `PRODUCTIVITY`, `4+`, support/marketing/privacy URLs, and a 3-image `APP_DESKTOP` screenshot set on the existing macOS App Store version
+  - the macOS App Store submission path now has deterministic screenshot generation via app-side rendering (`--app-store-screenshot` plus `--app-store-screenshot-output`) and a dedicated `scripts/prepare-appstore-macos-submission.py` helper that populated `PRODUCTIVITY`, `4+`, support/marketing/privacy URLs, a 3-image `APP_DESKTOP` screenshot set, and an attached `1.0 (2)` build on the existing macOS App Store version
+  - `scripts/upload-appstore` originally chose the alphabetically last exported package, which uploaded a stale `auto-macos-test` macOS build; it now picks the newest export by modification time instead
+  - `scripts/prepare-appstore-macos-submission.py` now treats both HTTP `200` and `204` as success when attaching a build to the App Store version relationship, matching App Store Connect's actual response behavior
   - the screenshot renderer must run from an unsigned macOS build because the signed App Store-sandboxed app cannot write release PNGs back into the repo `artifacts/` tree
   - macOS, iPhone simulator, and iPad simulator smoke scripts still pass end-to-end after the auth wiring landed
 - open risks or blockers:
@@ -102,4 +105,4 @@
   - one concurrent validation attempt (`./scripts/build --platform macos` in parallel with `./scripts/test-unit`) retriggered the known hosted XCTest/DerivedData contention pattern; rerunning sequentially passed, so future validation for this repo should continue to avoid parallel `xcodebuild` commands that share `artifacts/DerivedData`
   - the hosted macOS `./scripts/test-unit` path regressed during the submission pass: the test target now compiles, but the hosted XCTest run still hangs after launching the app host and needs another dedicated fix
   - the new iCloud configuration path is fully exercised in unit tests and simulator builds, but true cross-device sync still requires signed builds with the same Apple ID plus the iCloud entitlement active in provisioning
-  - macOS App Store export/upload is currently blocked on local Apple account material, not repo code: this Mac lacks a `Mac Installer Distribution` certificate, so `xcodebuild -exportArchive` cannot produce the App Store `.pkg` for the new `1.0` build
+  - the remaining macOS App Store submission blocker is review contact data, not packaging: App Store Connect still needs a contact phone number before the review-detail record can be fully automated

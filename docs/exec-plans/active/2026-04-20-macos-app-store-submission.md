@@ -9,8 +9,8 @@ Package the current macOS app for App Store submission, upload the newest build,
 - [x] 2026-04-20T22:05Z create a dedicated release ExecPlan for the macOS submission pass so build/upload, screenshots, and App Store Connect state live in one place
 - [x] 2026-04-20T22:10Z inspect the current App Store Connect app/version state for the macOS app record and identify missing submission prerequisites
 - [x] 2026-04-20T22:20Z add missing repo automation for release screenshots and App Store Connect metadata updates
-- [ ] 2026-04-20T22:35Z archive and upload a fresh macOS App Store package built from the current `main` commit
-  blocked: archive succeeds for `1.0 (2)`, but this Mac does not currently have a local `Mac Installer Distribution` certificate, so `xcodebuild -exportArchive` cannot produce the App Store `.pkg` for upload
+- [x] 2026-04-20T22:35Z archive and upload a fresh macOS App Store package built from the current `main` commit
+- [x] 2026-04-21T00:55Z attach the valid `1.0 (2)` macOS build to the App Store Connect submission record after fixing the stale-upload and false-error harness bugs
 - [x] 2026-04-20T22:45Z populate the macOS submission assets and metadata that the current API and credentials can edit, then record remaining manual-only steps
 
 ## Surprises & Discoveries
@@ -18,13 +18,16 @@ Package the current macOS app for App Store submission, upload the newest build,
 - 2026-04-20: the initial screenshot pipeline appeared to succeed while writing nothing because the signed macOS app is sandboxed and could not write PNGs back into the repo `artifacts/` directory; the release capture path needed to use an unsigned app build plus explicit output-file verification
 - 2026-04-20: App Store Connect's current age-rating payload mixes booleans and enum strings; the prep helper had to send `false` for fields like `advertising` and `userGeneratedContent`, while still using `"NONE"` for actual content-rating dimensions
 - 2026-04-20: App Store Connect accepted metadata and screenshots without a matching build, so the submission-prep helper was changed to keep going and report the missing-build condition instead of failing before screenshots upload
-- 2026-04-20: the local Apple-account state is sufficient for archiving the macOS app but not for exporting the App Store package; `xcodebuild -exportArchive` fails with `No signing certificate "Mac Installer Distribution" found`
+- 2026-04-20: the local Apple-account state initially lacked a `Mac Installer Distribution` certificate; creating and importing one through App Store Connect unblocked `xcodebuild -exportArchive`
+- 2026-04-20: `scripts/upload-appstore` originally chose the alphabetically last exported package, which accidentally uploaded a stale `auto-macos-test` build instead of the newest App Store export; the selector now uses modification time
+- 2026-04-20: App Store Connect returns `204 No Content` for a successful build-attachment PATCH, so the submission helper must treat both `200` and `204` as success
 
 ## Decision Log
 
 - 2026-04-20: create one release-specific ExecPlan instead of overloading the signing-source-of-truth plan, because this pass also includes screenshots, version metadata, and submission-state checks
 - 2026-04-20: generate App Store screenshots from an unsigned macOS build instead of the signed debug app, because the signed sandboxed app cannot write rendered PNGs into repo-local artifact paths
 - 2026-04-20: let the App Store submission prep helper continue when no matching macOS build exists so metadata, category, age rating, and screenshots can still be applied before the final upload blocker is removed
+- 2026-04-20: prefer newest-by-modification-time export discovery over lexicographic path ordering in `scripts/upload-appstore`, because repo-local helper exports like `auto-macos-test` can sort after timestamped App Store exports while still being stale
 
 ## Outcomes & Retrospective
 
@@ -33,6 +36,7 @@ Completed:
 - the repo now has deterministic macOS App Store screenshot generation via `./scripts/capture-appstore-screenshots-macos`
 - the app has dedicated App Store screenshot launch flags and renders `overview`, `mirrors`, and `logs` shots directly to 2880x1800 PNGs
 - the repo now has `scripts/prepare-appstore-macos-submission.py`, which uploaded the macOS screenshot set and populated App Store Connect metadata for app `6762634278`
+- the repo now has a fully working macOS App Store archive/upload path again, including local installer-certificate creation/import, correct newest-export selection in `scripts/upload-appstore`, and successful upload of macOS build `1.0 (2)`
 - App Store Connect now shows:
   - primary category `PRODUCTIVITY`
   - macOS age rating `4+`
@@ -40,11 +44,11 @@ Completed:
   - marketing URL `https://souschefstudio.com/`
   - privacy policy URL `https://souschefstudio.com/privacy`
   - one `APP_DESKTOP` screenshot set with 3 uploaded screenshots
+  - attached macOS build `1.0 (2)` with build id `339b417e-16e4-485d-82ca-eca5874f4c38`
 
 Still blocked:
 
-- a fresh macOS `1.0` build from the current repo state could not be uploaded because `xcodebuild -exportArchive` cannot find a local `Mac Installer Distribution` certificate, so no `1.0` App Store package was produced
-- App Store review contact details are still unset because the required review-contact environment variables are not present in `.env`
+- App Store review contact details are still unset because the required review-contact phone number is not present locally; first name, last name, and email are now populated in `.env`
 
 ## Context and Orientation
 
@@ -114,7 +118,7 @@ python3 scripts/knowledge/check_docs.py
 
 Acceptance means:
 
-- a fresh macOS App Store package is archived and uploaded from the current repo state, or the exact Apple-account/export blocker is explicitly documented
+- a fresh macOS App Store package is archived and uploaded from the current repo state, and the matching `1.0` build is attached to the App Store Connect macOS version
 - the macOS App Store Connect record has the best-available metadata and screenshots populated from automation
 - any remaining manual-only submission requirements are explicitly documented, not left implicit
 
@@ -136,4 +140,4 @@ Acceptance means:
 - depends on App Store Connect API credentials from `.env`
 - depends on an unsigned macOS app build being launchable for screenshot capture
 - depends on App Store Connect API support for the targeted metadata and screenshot endpoints
-- depends on a local `Mac Installer Distribution` certificate before the App Store export/upload step can complete
+- depends on a local review-contact phone number before the App Store review-detail record can be fully automated
