@@ -1,6 +1,7 @@
 # Running implementation notes
 
 - active ExecPlans:
+  - `docs/exec-plans/active/2026-04-20-ios-background-refresh.md`
   - `docs/exec-plans/active/2026-04-20-macos-app-store-submission.md`
   - `docs/exec-plans/active/2026-04-20-google-account-handoff-icloud.md`
   - `docs/exec-plans/active/2026-04-20-shared-configuration-icloud.md`
@@ -15,7 +16,7 @@
   - `docs/exec-plans/completed/2026-04-18-initial-apple-app-and-smoke-path.md`
   - `docs/exec-plans/completed/2026-04-18-apple-codex-harness-bootstrap.md`
 - current milestone:
-  - the repo now has live Google Sign-In wiring, a secure multi-account Google roster with per-account calendar selection, a live Apple / iCloud calendar slice backed by EventKit, a first full-mesh mirror-reconciliation engine, a settings-first shell with a separate audit-trail window plus a persistent bottom status line, a macOS menu bar utility shell with launch-at-login support and a Dock icon that appears only while Settings or Logs is open, and iCloud-backed shared configuration for non-secret settings plus shared Google-account handoff metadata
+  - the repo now has live Google Sign-In wiring, a secure multi-account Google roster with per-account calendar selection, a live Apple / iCloud calendar slice backed by EventKit, a first full-mesh mirror-reconciliation engine, a settings-first shell with a separate audit-trail window plus a persistent bottom status line, a macOS menu bar utility shell with launch-at-login support and a Dock icon that appears only while Settings or Logs is open, iCloud-backed shared configuration for non-secret settings plus shared Google-account handoff metadata, and a best-effort iOS background refresh path backed by `BGAppRefreshTask`
 - Apple identifiers:
   - bundle identifier: `com.matthewpaulmoore.Calendar-Busy-Sync`
   - Apple bundle ID resource ID: `7NFDF46V3H`
@@ -49,9 +50,13 @@
   - `./scripts/archive-appstore --platform ios` (automatic archive + App Store export path exercised end to end; export summary confirms Apple Distribution signing and an iOS Team Store provisioning profile)
   - `./scripts/upload-appstore --platform ios --skip-build` (uploaded the verified `.ipa` to App Store Connect successfully; delivery UUID `abab0ada-9bb3-4fc4-a975-1904de595cfa`)
   - `python3 scripts/check_execplan.py docs/exec-plans/active/2026-04-20-shared-configuration-icloud.md`
+  - `python3 scripts/check_execplan.py docs/exec-plans/active/2026-04-20-ios-background-refresh.md`
   - `python3 scripts/check_execplan.py docs/exec-plans/active/2026-04-20-google-account-handoff-icloud.md`
   - `./scripts/build --platform ios --device-class both` (shared Google-account handoff simulator build validation)
   - `./scripts/test-ui-ios --device both --smoke` (shared Google-account handoff iPhone/iPad smoke validation)
+  - `./scripts/build --platform ios --device-class both` (iOS background refresh validation after adding `BGAppRefreshTask` scheduling and generated plist keys)
+  - `./scripts/test-ui-ios --device both --smoke` (iOS background refresh smoke validation after the new scene lifecycle hooks)
+  - `./scripts/trigger-ios-background-refresh --device iphone --skip-build` (manual simulator verification that the debug one-shot path reuses the iOS background refresh handler)
   - `./scripts/build --platform macos` (menu-bar foregrounding and conditional Dock visibility compile check)
   - `./scripts/test-unit` (menu-bar foregrounding and conditional Dock visibility shell-model coverage)
   - `./scripts/test-ui-macos --smoke` (menu-bar foregrounding and conditional Dock visibility smoke check)
@@ -106,6 +111,8 @@
   - `scripts/prepare-appstore-macos-submission.py` now treats both HTTP `200` and `204` as success when attaching a build to the App Store version relationship, matching App Store Connect's actual response behavior
   - the screenshot renderer must run from an unsigned macOS build because the signed App Store-sandboxed app cannot write release PNGs back into the repo `artifacts/` tree
   - the repo now has a matching iOS submission path: simulator-driven screenshot capture for `APP_IPHONE_67` and `APP_IPAD_PRO_3GEN_129`, a dedicated `scripts/prepare-appstore-ios-submission.py` helper that reuses the shared App Store Connect client/review-detail logic, and a valid attached iOS `1.0 (2)` build on the App Store Connect iOS version
+  - iPhone and iPad now schedule a best-effort `BGAppRefreshTask` request from the SwiftUI scene lifecycle, the generated `Info.plist` carries the required background-refresh identifiers/modes, and Advanced now shows the current mobile background-refresh state without pretending iOS offers a fixed polling interval
+  - debug iOS builds now also expose a `Run Refresh Path Now` Advanced control, and `scripts/trigger-ios-background-refresh` launches the simulator with `SIMCTL_CHILD_CALENDAR_BUSY_SYNC_RUN_IOS_BG_REFRESH_NOW=1` so manual verification uses the exact same app-side refresh path
   - macOS, iPhone simulator, and iPad simulator smoke scripts still pass end-to-end after the auth wiring landed
 - open risks or blockers:
   - custom Google native client IDs still require a build that already includes the matching reversed callback scheme, so arbitrary runtime swaps remain intentionally blocked

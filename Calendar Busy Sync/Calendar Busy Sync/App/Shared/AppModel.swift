@@ -73,6 +73,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var isSyncInFlight = false
     @Published private(set) var lastBusyMirrorSyncSummary: BusyMirrorSyncSummary?
     @Published private(set) var syncMessage: String?
+    @Published private(set) var iosBackgroundRefreshState: IOSBackgroundRefreshState
     @Published var pollIntervalMinutes: Int {
         didSet {
             guard !isApplyingSharedConfiguration else { return }
@@ -135,12 +136,14 @@ final class AppModel: ObservableObject {
     private let launchDate: Date
     private let userDefaults: UserDefaults
     private let sharedConfigurationStore: any SharedAppConfigurationStoring
+    private let iosBackgroundRefreshScheduler: any IOSBackgroundRefreshScheduling
     private let appleCalendarService: any AppleCalendarProviding
     private let appleCalendarSettingsOpener: any AppleCalendarSettingsOpening
     private let googleCalendarService: GoogleCalendarService
     private let googleAccountStore: any GoogleAccountStoring
     private let googleSignInEnvironment: GoogleSignInEnvironment
     private let liveGoogleDebugConfiguration: LiveGoogleDebugConfiguration
+    private let iosBackgroundRefreshDebugConfiguration: IOSBackgroundRefreshDebugConfiguration
     private var hasPrepared = false
     private var hasAttemptedLiveGoogleSmoke = false
     private var syncLoopTask: Task<Void, Never>?
@@ -171,12 +174,14 @@ final class AppModel: ObservableObject {
         userDefaults: UserDefaults = .standard,
         processInfo: ProcessInfo = .processInfo,
         sharedConfigurationStore: (any SharedAppConfigurationStoring)? = nil,
+        iosBackgroundRefreshScheduler: (any IOSBackgroundRefreshScheduling)? = nil,
         appleCalendarService: (any AppleCalendarProviding)? = nil,
         appleCalendarSettingsOpener: (any AppleCalendarSettingsOpening)? = nil,
         googleCalendarService: GoogleCalendarService? = nil,
         googleAccountStore: (any GoogleAccountStoring)? = nil,
         googleSignInEnvironment: GoogleSignInEnvironment? = nil,
-        liveGoogleDebugConfiguration: LiveGoogleDebugConfiguration? = nil
+        liveGoogleDebugConfiguration: LiveGoogleDebugConfiguration? = nil,
+        iosBackgroundRefreshDebugConfiguration: IOSBackgroundRefreshDebugConfiguration? = nil
     ) {
         self.launchOptions = launchOptions
         self.loader = ScenarioLoader()
@@ -184,6 +189,7 @@ final class AppModel: ObservableObject {
         self.launchDate = launchDate
         self.userDefaults = userDefaults
         self.sharedConfigurationStore = sharedConfigurationStore ?? ICloudSharedAppConfigurationStore()
+        self.iosBackgroundRefreshScheduler = iosBackgroundRefreshScheduler ?? SystemIOSBackgroundRefreshScheduler()
         let resolvedAppleCalendarService = appleCalendarService ?? AppleCalendarService()
         self.appleCalendarService = resolvedAppleCalendarService
         self.appleCalendarSettingsOpener = appleCalendarSettingsOpener ?? AppleCalendarSettingsOpener()
@@ -191,6 +197,7 @@ final class AppModel: ObservableObject {
         self.googleAccountStore = googleAccountStore ?? GoogleAccountStore()
         self.googleSignInEnvironment = googleSignInEnvironment ?? GoogleSignInEnvironment.current()
         self.liveGoogleDebugConfiguration = liveGoogleDebugConfiguration ?? LiveGoogleDebugConfiguration.from(processInfo: processInfo)
+        self.iosBackgroundRefreshDebugConfiguration = iosBackgroundRefreshDebugConfiguration ?? IOSBackgroundRefreshDebugConfiguration.from(processInfo: processInfo)
         self.pollIntervalMinutes = Self.loadPollInterval(from: userDefaults)
         self.auditTrailLogLength = Self.loadAuditTrailLogLength(from: userDefaults, platform: launchOptions.platformTarget)
         self.lastSettingsMutationAt = Self.loadSettingsMutationDate(from: userDefaults)
@@ -205,6 +212,10 @@ final class AppModel: ObservableObject {
         self.googleSelectedCalendarIDs = Self.loadGoogleSelectedCalendarIDs(from: userDefaults)
         self.activeGoogleAccountID = userDefaults.string(forKey: SettingKey.activeGoogleAccountID)
         self.sharedGoogleAccountDescriptors = Self.loadSharedGoogleAccountDescriptors(from: userDefaults)
+        self.iosBackgroundRefreshState = Self.initialIOSBackgroundRefreshState(
+            launchOptions: launchOptions,
+            scheduler: self.iosBackgroundRefreshScheduler
+        )
         if self.liveGoogleDebugConfiguration.isEnabled {
             self.liveGoogleSmokeStatus = .awaitingAuthentication
         }
@@ -247,10 +258,20 @@ final class AppModel: ObservableObject {
         await restoreGoogleAccountsIfPossible()
         restartSyncLoopIfNeeded()
         await syncNowIfReady()
+        scheduleIOSBackgroundRefreshIfPossible()
+        if iosBackgroundRefreshDebugConfiguration.runImmediately {
+            await handleIOSBackgroundRefreshTask()
+        }
     }
 
     var supportsPollingSettings: Bool {
         launchOptions.platformTarget == .macos
+    }
+
+    var supportsIOSBackgroundRefresh: Bool {
+        launchOptions.platformTarget == .ios
+            && !launchOptions.uiTestMode
+            && launchOptions.appStoreScreenshotMode == nil
     }
 
     var syncStatusLabel: String {
@@ -513,6 +534,52 @@ final class AppModel: ObservableObject {
         return "Shared settings are enabled, but iCloud is unavailable right now. This device will keep local settings until iCloud returns."
     }
 
+    var iosBackgroundRefreshStatusLabel: String? {
+        guard launchOptions.platformTarget == .ios else {
+            return nil
+        }
+
+        switch iosBackgroundRefreshState {
+        case .unsupported:
+            return "Unavailable"
+        case .denied:
+            return "Off"
+        case .restricted:
+            return "Restricted"
+        case .scheduled:
+            return "On"
+        case .failed:
+            return "Issue"
+        }
+    }
+
+    var iosBackgroundRefreshDetail: String? {
+        guard launchOptions.platformTarget == .ios else {
+            return nil
+        }
+
+        switch iosBackgroundRefreshState {
+        case .unsupported:
+            if launchOptions.uiTestMode || launchOptions.appStoreScreenshotMode != nil {
+                return "Background refresh stays off during harness UI-test and screenshot launches."
+            }
+            return "Background refresh is not available for this app launch."
+        case .denied:
+            return "Background App Refresh is turned off for this device or for Calendar Busy Sync in Settings."
+        case .restricted:
+            return "Background App Refresh is restricted on this device, so iOS will not run sync in the background."
+        case let .scheduled(date):
+            let label = Self.messageTimestampLabel(for: date) ?? "later"
+            return "Best effort. iOS decides the actual timing; the current request asks for no earlier than \(label)."
+        case let .failed(message):
+            return "The app could not schedule a background refresh request. \(message)"
+        }
+    }
+
+    var canRunIOSBackgroundRefreshVerification: Bool {
+        supportsIOSBackgroundRefresh && !isSyncInFlight
+    }
+
     var selectedAppleCalendar: AppleCalendarSummary? {
         appleCalendars.first(where: { $0.id == selectedAppleCalendarID })
     }
@@ -765,6 +832,35 @@ final class AppModel: ObservableObject {
         liveGoogleSmokeStatus.summary
     }
 
+    var iosBackgroundRefreshAuditEntry: AuditTrailEntry? {
+        guard launchOptions.platformTarget == .ios,
+              let detail = iosBackgroundRefreshDetail
+        else {
+            return nil
+        }
+
+        let status: String
+        switch iosBackgroundRefreshState {
+        case .unsupported:
+            status = "blocked"
+        case .denied:
+            status = "pending"
+        case .restricted:
+            status = "blocked"
+        case .scheduled:
+            status = "configured"
+        case .failed:
+            status = "failed"
+        }
+
+        return AuditTrailEntry(
+            timestampLabel: "iOS",
+            title: "Background refresh",
+            detail: detail,
+            status: status
+        )
+    }
+
     var auditTrailEntries: [AuditTrailEntry] {
         var entries = AuditTrailBuilder.entries(
             for: state,
@@ -788,6 +884,31 @@ final class AppModel: ObservableObject {
 
     func handleIncomingURL(_ url: URL) {
         _ = GoogleSignInService.handle(url: url)
+    }
+
+    func handleIOSSceneDidBecomeActive() {
+        scheduleIOSBackgroundRefreshIfPossible()
+    }
+
+    func handleIOSSceneDidEnterBackground() {
+        scheduleIOSBackgroundRefreshIfPossible()
+    }
+
+    func handleIOSBackgroundRefreshTask() async {
+        guard supportsIOSBackgroundRefresh else { return }
+
+        await prepareIfNeeded()
+        guard !Task.isCancelled else { return }
+
+        await syncNowIfReady()
+        guard !Task.isCancelled else { return }
+
+        scheduleIOSBackgroundRefreshIfPossible()
+    }
+
+    func runIOSBackgroundRefreshVerificationNow() async {
+        guard canRunIOSBackgroundRefreshVerification else { return }
+        await handleIOSBackgroundRefreshTask()
     }
 
     func connectAppleCalendar() async {
@@ -1368,6 +1489,39 @@ final class AppModel: ObservableObject {
                 }
 
                 await self.syncNowIfReady()
+            }
+        }
+    }
+
+    private func scheduleIOSBackgroundRefreshIfPossible() {
+        guard launchOptions.platformTarget == .ios else {
+            iosBackgroundRefreshState = .unsupported
+            return
+        }
+
+        guard supportsIOSBackgroundRefresh else {
+            iosBackgroundRefreshState = .unsupported
+            return
+        }
+
+        switch iosBackgroundRefreshScheduler.availability {
+        case .unsupported:
+            iosBackgroundRefreshState = .unsupported
+        case .denied:
+            iosBackgroundRefreshState = .denied
+        case .restricted:
+            iosBackgroundRefreshState = .restricted
+        case .available:
+            let earliestBeginDate = Date().addingTimeInterval(IOSBackgroundRefreshConstants.earliestBeginInterval)
+            do {
+                iosBackgroundRefreshScheduler.cancelAppRefresh(identifier: IOSBackgroundRefreshConstants.taskIdentifier)
+                try iosBackgroundRefreshScheduler.submitAppRefresh(
+                    identifier: IOSBackgroundRefreshConstants.taskIdentifier,
+                    earliestBeginDate: earliestBeginDate
+                )
+                iosBackgroundRefreshState = .scheduled(earliestBeginDate)
+            } catch {
+                iosBackgroundRefreshState = .failed(error.localizedDescription)
             }
         }
     }
@@ -2260,6 +2414,10 @@ final class AppModel: ObservableObject {
             )
         }
 
+        if let iosBackgroundRefreshAuditEntry {
+            entries.append(iosBackgroundRefreshAuditEntry)
+        }
+
         if let syncMessage {
             entries.append(
                 AuditTrailEntry(
@@ -2437,6 +2595,30 @@ final class AppModel: ObservableObject {
         userDefaults.object(forKey: SettingKey.lastModifiedAt) as? Date ?? .distantPast
     }
 
+    private static func initialIOSBackgroundRefreshState(
+        launchOptions: HarnessLaunchOptions,
+        scheduler: any IOSBackgroundRefreshScheduling
+    ) -> IOSBackgroundRefreshState {
+        guard launchOptions.platformTarget == .ios else {
+            return .unsupported
+        }
+
+        guard !launchOptions.uiTestMode, launchOptions.appStoreScreenshotMode == nil else {
+            return .unsupported
+        }
+
+        switch scheduler.availability {
+        case .unsupported:
+            return .unsupported
+        case .available:
+            return .scheduled(Date().addingTimeInterval(IOSBackgroundRefreshConstants.earliestBeginInterval))
+        case .denied:
+            return .denied
+        case .restricted:
+            return .restricted
+        }
+    }
+
     private static func loadAppleCalendarReference(from userDefaults: UserDefaults) -> SharedAppleCalendarReference? {
         guard let data = userDefaults.data(forKey: SettingKey.selectedAppleCalendarReference) else {
             return nil
@@ -2528,6 +2710,20 @@ struct LiveGoogleDebugConfiguration: Equatable {
             isEnabled: enabled,
             preferredAccountEmail: preferredAccountEmail,
             preferredCalendarName: preferredCalendarName
+        )
+    }
+}
+
+struct IOSBackgroundRefreshDebugConfiguration: Equatable {
+    let runImmediately: Bool
+
+    static func from(processInfo: ProcessInfo) -> IOSBackgroundRefreshDebugConfiguration {
+        from(environment: processInfo.environment)
+    }
+
+    static func from(environment: [String: String]) -> IOSBackgroundRefreshDebugConfiguration {
+        IOSBackgroundRefreshDebugConfiguration(
+            runImmediately: environment["CALENDAR_BUSY_SYNC_RUN_IOS_BG_REFRESH_NOW"] == "1"
         )
     }
 }

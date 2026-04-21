@@ -1,0 +1,77 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+source "$(cd "$(dirname "$0")" && pwd)/lib/xcode-env.sh"
+
+ensure_dirs
+sync_google_client_config
+require_project
+
+DEVICE="iphone"
+SKIP_BUILD=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --device)
+      DEVICE="${2:-iphone}"
+      shift 2
+      ;;
+    --skip-build)
+      SKIP_BUILD="1"
+      shift
+      ;;
+    *)
+      echo "usage: ./scripts/trigger-ios-background-refresh [--device iphone|ipad|both] [--skip-build]" >&2
+      exit 1
+      ;;
+  esac
+done
+
+if ! ios_platform_installed; then
+  echo "iOS simulator platform is not installed. Run: xcodebuild -downloadPlatform iOS" >&2
+  exit 1
+fi
+
+launch_probe() {
+  local sim_id="$1"
+  local device_class="$2"
+
+  xcrun simctl boot "${sim_id}" >/dev/null 2>&1 || true
+  xcrun simctl bootstatus "${sim_id}" -b
+  xcrun simctl terminate "${sim_id}" "${BUNDLE_IDENTIFIER}" >/dev/null 2>&1 || true
+  xcrun simctl uninstall "${sim_id}" "${BUNDLE_IDENTIFIER}" >/dev/null 2>&1 || true
+  xcrun simctl install "${sim_id}" "$(ios_app_bundle_path)" >/dev/null
+
+  env \
+    SIMCTL_CHILD_CALENDAR_BUSY_SYNC_RUN_IOS_BG_REFRESH_NOW=1 \
+    xcrun simctl launch \
+      --terminate-running-process \
+      "${sim_id}" \
+      "${BUNDLE_IDENTIFIER}" \
+      --args \
+      --platform-target ios \
+      --device-class "${device_class}" >/dev/null
+
+  printf 'triggered iOS background refresh verification for %s on simulator %s\n' "${device_class}" "${sim_id}"
+}
+
+if [[ -z "${SKIP_BUILD}" ]]; then
+  "${ROOT_DIR}/scripts/build" --platform ios --device-class "${DEVICE}"
+fi
+
+case "${DEVICE}" in
+  iphone)
+    launch_probe "$(iphone_sim_id)" "iphone"
+    ;;
+  ipad)
+    launch_probe "$(ipad_sim_id)" "ipad"
+    ;;
+  both)
+    launch_probe "$(iphone_sim_id)" "iphone"
+    launch_probe "$(ipad_sim_id)" "ipad"
+    ;;
+  *)
+    echo "expected --device iphone|ipad|both" >&2
+    exit 1
+    ;;
+esac

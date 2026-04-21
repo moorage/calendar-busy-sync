@@ -118,6 +118,7 @@ Primary code areas:
 - UIKit usage stays behind `#if os(iOS)` adapters
 - macOS-only polling controls stay behind platform-specific UI because iOS does not guarantee a fixed background schedule
 - macOS menu bar lifecycle, window-visibility tracking, conditional Dock visibility, and launch-at-login logic stay behind `Calendar Busy Sync/Calendar Busy Sync/App/Platform/macOS/`
+- iOS background refresh scheduling and availability checks stay behind `Calendar Busy Sync/Calendar Busy Sync/App/Platform/iOS/`
 - provider SDK or HTTP payload handling stays inside provider adapters
 - shell scripts call shared helpers in `scripts/lib/`
 - Google client plist sync happens in `scripts/sync-google-client-config.py` before build/test commands
@@ -128,6 +129,7 @@ Primary code areas:
 - automatic reconciliation uses a bounded scan window with limited lookback plus the next 60 days so repeated sync passes remain idempotent without scanning unbounded history, while desired mirror writes themselves are clipped to present-and-future time only
 - reconciliation is exact-slot aware: an identical busy block that already exists in a selected destination calendar suppresses a new mirror create, while identity matching still lets moved source events update their existing managed mirrors instead of delete/recreate churn
 - Apple / iCloud mirror identity recovery now uses a hybrid boundary: an on-event `calendarbusysync://mirror/<token>` URL marker plus app-local token persistence, with migration of older note-heavy mirror events and cleanup of orphaned markers
+- iOS now uses `BGAppRefreshTask` as an OS-controlled best-effort trigger for the same reconciliation path; the scheduler is hint-based and must stay suppressible for screenshot and UI-test harness launches
 - shared configuration is privacy-scoped: only non-secret settings roam through iCloud, including shared Google account descriptors and selected-calendar metadata, while Google keychain payloads, archived Google user state, Apple permission state, and mirror token maps remain local; the per-device opt-out switch itself is stored only in local `UserDefaults`
 
 ## Cross-cutting concerns

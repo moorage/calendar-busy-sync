@@ -91,6 +91,12 @@ def write_info_plist(client_config: dict[str, str]) -> None:
         "NSCalendarsUsageDescription": calendar_usage_message,
         "NSCalendarsFullAccessUsageDescription": calendar_usage_message,
         "LSApplicationCategoryType": "public.app-category.productivity",
+        "BGTaskSchedulerPermittedIdentifiers": [
+            "com.matthewpaulmoore.Calendar-Busy-Sync.app-refresh",
+        ],
+        "UIBackgroundModes": [
+            "fetch",
+        ],
         # iPad uploads require a launch-screen declaration and full multitasking orientations.
         "UILaunchScreen": {},
         "UISupportedInterfaceOrientations": [

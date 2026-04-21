@@ -36,6 +36,8 @@ People with multiple jobs, gigs, or companies often keep separate calendars per 
 - the macOS menu bar item should expose `Open Settings`, `Open Logs`, `Sync Now`, and `Launch at Login`, and should visibly indicate when the Settings window is already open
 - polling cadence is user-configurable on macOS only, with a default of every 2 minutes
 - iPhone and iPad do not expose a user-configurable polling interval because background execution is not reliable enough to promise a strict schedule
+- iPhone and iPad should still submit a best-effort background refresh request so iOS can opportunistically reconcile mirrored busy holds when the app is not foregrounded
+- the current iOS background-refresh request should ask for no earlier than 15 minutes later, while explicitly treating that as an OS hint rather than a promise
 - advanced settings include audit trail event log retention, macOS polling cadence, the option to disable shared iCloud settings on the current device, and the option to use a custom Google OAuth app instead of the product default
 - advanced custom OAuth mode should allow the user to supply their own Google client identifiers so they can authorize against their own Google Cloud project
 - custom native Google client IDs are only valid when the build already includes the matching reversed-client-ID callback scheme; otherwise the UI must block the flow and explain that a rebuild is required
@@ -51,6 +53,8 @@ People with multiple jobs, gigs, or companies often keep separate calendars per 
 - the app can share a non-secret Google account descriptor roster through iCloud, letting another device show shared Google accounts that need local sign-in or local cleanup while preserving the selected calendar choice when possible
 - each device can disable shared iCloud configuration locally without changing the shared-setting behavior of the user's other devices
 - Google account handoff remains per-device: shared settings can tell a device which account/calendar should participate, but the device must still authorize the Google account locally before it can sync
+- the iOS build now schedules a best-effort `BGAppRefreshTask` request and exposes its current background-refresh availability/state in Advanced, but still leaves actual execution timing up to iOS
+- debug iOS builds now also expose a manual verification affordance for that same path, and the simulator harness can trigger it through a one-shot launch environment flag instead of inventing a second refresh implementation
 - the app now reconciles the selected calendars as one participant set: accepted busy source events become opaque `Busy` holds on all the others, and moved/deleted/free/non-accepted source events update or delete the mirrored holds on the next pass
 - reconciliation is exact-slot aware, so pre-existing busy occupancy and redundant app-managed duplicates suppress extra mirror writes instead of stacking duplicate busy events into the same slot
 - Apple / iCloud mirrors now keep only a short note sentence visible to the user and move their recoverable identity into a URL marker plus app-local token mapping, with automatic migration of older note-heavy mirrors

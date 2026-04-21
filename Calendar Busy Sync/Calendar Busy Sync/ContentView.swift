@@ -234,6 +234,51 @@ struct ContentView: View {
                 accessibilityID: "settings.advanced.shared-configuration-note"
             )
 
+            #if os(iOS)
+            sectionDivider
+            sectionRow {
+                adaptiveTrailingRow(label: {
+                    Label("Background Refresh", systemImage: "arrow.triangle.2.circlepath.circle")
+                        .foregroundStyle(.secondary)
+                }, trailing: {
+                    Text(model.iosBackgroundRefreshStatusLabel ?? "Unavailable")
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier(AccessibilityIDs.iosBackgroundRefreshStatusLabel)
+                })
+                .font(.caption)
+            }
+
+            if let backgroundRefreshDetail = model.iosBackgroundRefreshDetail {
+                sectionDivider
+                infoMessageRow(
+                    backgroundRefreshDetail,
+                    timestamp: nil,
+                    accessibilityID: AccessibilityIDs.iosBackgroundRefreshDetailLabel
+                )
+            }
+
+            #if DEBUG
+            sectionDivider
+            sectionRow {
+                HStack(spacing: 10) {
+                    Button {
+                        Task {
+                            await model.runIOSBackgroundRefreshVerificationNow()
+                        }
+                    } label: {
+                        Label("Run Refresh Path Now", systemImage: "bolt.badge.clock")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!model.canRunIOSBackgroundRefreshVerification)
+                    .accessibilityIdentifier(AccessibilityIDs.iosBackgroundRefreshRunNowButton)
+
+                    Spacer()
+                }
+                .font(.caption)
+            }
+            #endif
+            #endif
+
             sectionDivider
             sectionRow {
                 HStack(spacing: 12) {

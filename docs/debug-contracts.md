@@ -51,6 +51,9 @@ Stable identifiers should include:
 - `google-calendar.live-smoke-status`
 - `settings.sync.poll-interval`
 - `settings.advanced.shared-configuration.enabled`
+- `settings.advanced.ios-background-refresh.status`
+- `settings.advanced.ios-background-refresh.detail`
+- `settings.advanced.ios-background-refresh.run-now`
 - `settings.advanced.google-oauth.use-custom`
 - `settings.advanced.google-oauth.client-id`
 - `settings.advanced.google-oauth.server-client-id`
@@ -103,6 +106,8 @@ Planned stable harness commands include:
 
 - polling interval controls are exposed on macOS only
 - iPhone and iPad builds still emit the same harness snapshots, but background sync cadence is not a user-configurable setting there
+- normal iOS launches now schedule a best-effort `BGAppRefreshTask`; harness `--ui-test-mode 1` and `--app-store-screenshot ...` launches must suppress that scheduling path
+- debug iOS verification can also drive the same path through `CALENDAR_BUSY_SYNC_RUN_IOS_BG_REFRESH_NOW=1`, which the simulator helper injects as `SIMCTL_CHILD_CALENDAR_BUSY_SYNC_RUN_IOS_BG_REFRESH_NOW=1`
 - the Google Sign-In callback URL is handled through the app lifecycle, but harness smoke launches stay scenario-backed and do not initiate interactive auth
 - unsigned harness launches must block interactive macOS Google sign-in with explicit signed-build guidance, because the OAuth session relies on keychain persistence
 - Apple / iCloud calendar access uses EventKit permission on the current device; harness `--ui-test-mode 1` launches must stay side-effect free and should not trigger permission prompts automatically

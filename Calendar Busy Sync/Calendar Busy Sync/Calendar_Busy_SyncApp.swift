@@ -1,10 +1,14 @@
 import SwiftUI
+#if os(iOS)
+import BackgroundTasks
+#endif
 #if os(macOS)
 import Darwin
 #endif
 
 @main
 struct Calendar_Busy_SyncApp: App {
+    @Environment(\.scenePhase) private var scenePhase
     private let launchOptions: HarnessLaunchOptions
     private let runtimeMode: AppRuntimeMode
     @StateObject private var model: AppModel
@@ -94,6 +98,23 @@ struct Calendar_Busy_SyncApp: App {
         WindowGroup {
             settingsRootView
         }
+        #if os(iOS)
+        .onChange(of: scenePhase) { newPhase in
+            switch newPhase {
+            case .active:
+                model.handleIOSSceneDidBecomeActive()
+            case .background:
+                model.handleIOSSceneDidEnterBackground()
+            case .inactive:
+                break
+            @unknown default:
+                break
+            }
+        }
+        .backgroundTask(.appRefresh(IOSBackgroundRefreshConstants.taskIdentifier)) {
+            await model.handleIOSBackgroundRefreshTask()
+        }
+        #endif
 
         WindowGroup("Audit Trail", id: AppSceneIDs.auditTrail) {
             auditTrailRootView

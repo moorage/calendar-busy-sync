@@ -39,6 +39,14 @@
 	<string>Calendar Busy Sync needs calendar access to read busy events from the calendars you select and write opaque Busy holds to your other selected calendars.</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.productivity</string>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.matthewpaulmoore.Calendar-Busy-Sync.app-refresh</string>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>

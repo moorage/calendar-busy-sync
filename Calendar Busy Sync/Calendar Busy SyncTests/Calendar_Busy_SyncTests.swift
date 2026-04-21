@@ -249,6 +249,225 @@ final class Calendar_Busy_SyncTests: XCTestCase {
     }
 
     @MainActor
+    func testAppModelSchedulesIOSBackgroundRefreshWhenAvailable() async {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let scheduler = MockIOSBackgroundRefreshScheduler(availability: .available)
+
+        let model = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: false,
+                platformTarget: .ios,
+                deviceClass: .iphone
+            ),
+            userDefaults: defaults,
+            iosBackgroundRefreshScheduler: scheduler,
+            googleAccountStore: MockGoogleAccountStore()
+        )
+
+        await model.prepareIfNeeded()
+
+        XCTAssertEqual(scheduler.submissions.count, 1)
+        XCTAssertEqual(scheduler.submissions[0].identifier, IOSBackgroundRefreshConstants.taskIdentifier)
+        XCTAssertEqual(model.iosBackgroundRefreshStatusLabel, "On")
+        XCTAssertTrue(model.iosBackgroundRefreshDetail?.contains("Best effort.") == true)
+    }
+
+    @MainActor
+    func testAppModelSurfacesDeniedIOSBackgroundRefreshState() async {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let scheduler = MockIOSBackgroundRefreshScheduler(availability: .denied)
+
+        let model = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: false,
+                platformTarget: .ios,
+                deviceClass: .iphone
+            ),
+            userDefaults: defaults,
+            iosBackgroundRefreshScheduler: scheduler,
+            googleAccountStore: MockGoogleAccountStore()
+        )
+
+        await model.prepareIfNeeded()
+
+        XCTAssertTrue(scheduler.submissions.isEmpty)
+        XCTAssertEqual(model.iosBackgroundRefreshStatusLabel, "Off")
+        XCTAssertTrue(model.iosBackgroundRefreshDetail?.contains("turned off") == true)
+    }
+
+    @MainActor
+    func testAppModelDoesNotScheduleIOSBackgroundRefreshDuringUITestLaunch() async {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let scheduler = MockIOSBackgroundRefreshScheduler(availability: .available)
+
+        let model = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: true,
+                platformTarget: .ios,
+                deviceClass: .iphone
+            ),
+            userDefaults: defaults,
+            iosBackgroundRefreshScheduler: scheduler,
+            googleAccountStore: MockGoogleAccountStore()
+        )
+
+        await model.prepareIfNeeded()
+
+        XCTAssertTrue(scheduler.submissions.isEmpty)
+        XCTAssertEqual(model.iosBackgroundRefreshStatusLabel, "Unavailable")
+        XCTAssertTrue(model.iosBackgroundRefreshDetail?.contains("UI-test") == true)
+    }
+
+    @MainActor
+    func testAppModelBackgroundRefreshTaskReschedulesNextRequest() async {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let scheduler = MockIOSBackgroundRefreshScheduler(availability: .available)
+
+        let model = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: false,
+                platformTarget: .ios,
+                deviceClass: .iphone
+            ),
+            userDefaults: defaults,
+            iosBackgroundRefreshScheduler: scheduler,
+            googleAccountStore: MockGoogleAccountStore()
+        )
+
+        await model.prepareIfNeeded()
+        await model.handleIOSBackgroundRefreshTask()
+
+        XCTAssertEqual(scheduler.submissions.count, 2)
+        XCTAssertEqual(scheduler.cancelledIdentifiers, [
+            IOSBackgroundRefreshConstants.taskIdentifier,
+            IOSBackgroundRefreshConstants.taskIdentifier,
+        ])
+    }
+
+    @MainActor
+    func testAppModelManualIOSBackgroundRefreshVerificationReusesSchedulerPath() async {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let scheduler = MockIOSBackgroundRefreshScheduler(availability: .available)
+
+        let model = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: false,
+                platformTarget: .ios,
+                deviceClass: .iphone
+            ),
+            userDefaults: defaults,
+            iosBackgroundRefreshScheduler: scheduler,
+            googleAccountStore: MockGoogleAccountStore()
+        )
+
+        await model.prepareIfNeeded()
+        await model.runIOSBackgroundRefreshVerificationNow()
+
+        XCTAssertEqual(scheduler.submissions.count, 2)
+        XCTAssertEqual(scheduler.cancelledIdentifiers.count, 2)
+    }
+
+    @MainActor
+    func testAppModelCanRunIOSBackgroundRefreshVerificationOnlyWhenAvailableAndIdle() async {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let availableScheduler = MockIOSBackgroundRefreshScheduler(availability: .available)
+
+        let iosModel = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: false,
+                platformTarget: .ios,
+                deviceClass: .iphone
+            ),
+            userDefaults: defaults,
+            iosBackgroundRefreshScheduler: availableScheduler,
+            googleAccountStore: MockGoogleAccountStore()
+        )
+
+        await iosModel.prepareIfNeeded()
+
+        XCTAssertTrue(iosModel.canRunIOSBackgroundRefreshVerification)
+
+        let macModel = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: false,
+                platformTarget: .macos,
+                deviceClass: .mac
+            ),
+            userDefaults: UserDefaults(suiteName: "\(#function).mac")!,
+            googleAccountStore: MockGoogleAccountStore()
+        )
+
+        await macModel.prepareIfNeeded()
+
+        XCTAssertFalse(macModel.canRunIOSBackgroundRefreshVerification)
+    }
+
+    func testIOSBackgroundRefreshDebugConfigurationParsesOneShotLaunchFlag() {
+        let configuration = IOSBackgroundRefreshDebugConfiguration.from(
+            environment: [
+                "CALENDAR_BUSY_SYNC_RUN_IOS_BG_REFRESH_NOW": "1",
+            ]
+        )
+
+        XCTAssertTrue(configuration.runImmediately)
+    }
+
+    @MainActor
     func testSharedAppConfigurationDecodesLegacyPayloadWithoutGoogleAccountDescriptors() throws {
         let payload = """
         {
@@ -2089,6 +2308,24 @@ private final class MockSharedAppConfigurationStore: SharedAppConfigurationStori
     func emit(_ configuration: SharedAppConfiguration) {
         self.configuration = configuration
         onChange?(configuration)
+    }
+}
+
+private final class MockIOSBackgroundRefreshScheduler: IOSBackgroundRefreshScheduling {
+    let availability: IOSBackgroundRefreshAvailability
+    private(set) var submissions: [(identifier: String, earliestBeginDate: Date)] = []
+    private(set) var cancelledIdentifiers: [String] = []
+
+    init(availability: IOSBackgroundRefreshAvailability) {
+        self.availability = availability
+    }
+
+    func submitAppRefresh(identifier: String, earliestBeginDate: Date) throws {
+        submissions.append((identifier: identifier, earliestBeginDate: earliestBeginDate))
+    }
+
+    func cancelAppRefresh(identifier: String) {
+        cancelledIdentifiers.append(identifier)
     }
 }
 

@@ -10,6 +10,7 @@ The harness is the shell-first control plane for this repository.
 - `./scripts/test-integration`
 - `./scripts/test-ui-macos --smoke`
 - `./scripts/test-ui-ios --device both --smoke`
+- `./scripts/trigger-ios-background-refresh --device iphone`
 - `./scripts/test-google-live-macos`
 - `./scripts/archive-appstore --platform macos`
 - `./scripts/archive-appstore --platform ios`
@@ -81,3 +82,7 @@ The release screenshot path intentionally uses an unsigned macOS build instead o
 At the moment, macOS App Store export/upload still depends on a local `Mac Installer Distribution` certificate in Keychain Access. Without that installer certificate, the archive step succeeds but the App Store export cannot produce the `.pkg` needed for upload.
 
 For iOS, `./scripts/capture-appstore-screenshots-ios` boots the preferred App Store screenshot simulators, launches the app in screenshot mode, and captures the iPhone and iPad PNG assets under `artifacts/appstore/ios-screenshots/`. `scripts/prepare-appstore-ios-submission.py` then attaches the latest valid `1.0` iOS build, fills in support/marketing URLs plus the shared review contact from `.env`, and uploads the `APP_IPHONE_67` and `APP_IPAD_PRO_3GEN_129` screenshot sets. The export/upload path still runs through `DistributionSummary.plist` verification before `scripts/upload-appstore` sends the `.ipa` to App Store Connect.
+
+Normal iOS launches now also submit a best-effort `BGAppRefreshTask` request so the app can reconcile mirrored busy holds when iOS grants background time. Harness UI-test launches and App Store screenshot launches explicitly suppress that scheduling path to keep automation deterministic and side-effect free.
+
+For development verification, debug iOS builds also expose a `Run Refresh Path Now` button in Advanced. `./scripts/trigger-ios-background-refresh` uses the same internal code path by launching the simulator app with `SIMCTL_CHILD_CALENDAR_BUSY_SYNC_RUN_IOS_BG_REFRESH_NOW=1`, so the manual button and the simulator helper stay aligned instead of drifting into separate logic.
