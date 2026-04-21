@@ -11,6 +11,7 @@
   - `docs/exec-plans/active/2026-04-19-settings-shell-ia-refresh.md`
   - `docs/exec-plans/active/2026-04-19-menu-bar-login-item-utility.md`
 - recent completed ExecPlans:
+  - `docs/exec-plans/completed/2026-04-20-ios-app-store-submission.md`
   - `docs/exec-plans/completed/2026-04-18-initial-apple-app-and-smoke-path.md`
   - `docs/exec-plans/completed/2026-04-18-apple-codex-harness-bootstrap.md`
 - current milestone:
@@ -59,9 +60,14 @@
   - `./scripts/test-unit` (hosted XCTest runner revalidation after gating Dock visibility changes out of hosted-test runtime)
   - `./scripts/test-ui-macos --smoke` (standard-runtime revalidation after hosted-test Dock fix)
   - `./scripts/capture-appstore-screenshots-macos` (generated deterministic 2880x1800 App Store macOS screenshots)
+  - `./scripts/capture-appstore-screenshots-ios` (generated deterministic iPhone `1290x2796` and iPad `2048x2732` App Store screenshots from screenshot-mode simulator launches)
   - `./scripts/archive-appstore --platform macos` (2026-04-20 submission pass: archive/export now succeeds after creating and importing a `Mac Installer Distribution` certificate for team `GG34PA8F4A`)
   - `./scripts/upload-appstore --platform macos --package "artifacts/exports/CalendarBusySync-macos-20260420-174222/Calendar Busy Sync.pkg" --wait` (uploaded a valid `1.0 (2)` macOS App Store package; delivery UUID `339b417e-16e4-485d-82ca-eca5874f4c38`)
   - `python3 scripts/prepare-appstore-macos-submission.py --screenshot-dir artifacts/appstore/macos-screenshots` (uploaded the macOS screenshot set, attached build `339b417e-16e4-485d-82ca-eca5874f4c38`, and re-applied App Store Connect metadata; only review-contact phone remains missing)
+  - `./scripts/archive-appstore --platform ios` (2026-04-20 iOS submission pass: archive/export succeeded for version `1.0` build `2`)
+  - `./scripts/upload-appstore --platform ios --package "artifacts/exports/CalendarBusySync-ios-20260420-183304/Calendar Busy Sync.ipa" --wait` (uploaded a valid `1.0 (2)` iOS App Store package; delivery UUID `bc83e9b0-2414-4c24-95cc-32f276317003`)
+  - `python3 scripts/prepare-appstore-ios-submission.py --iphone-dir artifacts/appstore/ios-screenshots/iphone --ipad-dir artifacts/appstore/ios-screenshots/ipad` (attached build `bc83e9b0-2414-4c24-95cc-32f276317003`, uploaded the iPhone `APP_IPHONE_67` and iPad `APP_IPAD_PRO_3GEN_129` screenshot sets, and created the iOS review-detail record)
+  - `python3 scripts/check_execplan.py docs/exec-plans/completed/2026-04-20-ios-app-store-submission.md`
   - `./scripts/test-unit` (2026-04-20 submission pass rerun: test target compiles again after restoring a defaultable `HarnessLaunchOptions` initializer, but the hosted macOS run hangs after launching the app host and had to be killed manually)
 - evidence gathered:
   - `scripts/sync-google-client-config.py` now turns `.env` + `GOOGLE_CLIENT_PLIST_PATH` into the checked-in app plist inputs used by build/test commands
@@ -99,6 +105,7 @@
   - `scripts/upload-appstore` originally chose the alphabetically last exported package, which uploaded a stale `auto-macos-test` macOS build; it now picks the newest export by modification time instead
   - `scripts/prepare-appstore-macos-submission.py` now treats both HTTP `200` and `204` as success when attaching a build to the App Store version relationship, matching App Store Connect's actual response behavior
   - the screenshot renderer must run from an unsigned macOS build because the signed App Store-sandboxed app cannot write release PNGs back into the repo `artifacts/` tree
+  - the repo now has a matching iOS submission path: simulator-driven screenshot capture for `APP_IPHONE_67` and `APP_IPAD_PRO_3GEN_129`, a dedicated `scripts/prepare-appstore-ios-submission.py` helper that reuses the shared App Store Connect client/review-detail logic, and a valid attached iOS `1.0 (2)` build on the App Store Connect iOS version
   - macOS, iPhone simulator, and iPad simulator smoke scripts still pass end-to-end after the auth wiring landed
 - open risks or blockers:
   - custom Google native client IDs still require a build that already includes the matching reversed callback scheme, so arbitrary runtime swaps remain intentionally blocked

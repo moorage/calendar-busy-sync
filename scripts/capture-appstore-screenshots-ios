@@ -1,0 +1,97 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+source "$(cd "$(dirname "$0")" && pwd)/lib/xcode-env.sh"
+
+ensure_dirs
+sync_google_client_config
+require_project
+
+OUTPUT_ROOT="${ARTIFACTS_DIR}/appstore/ios-screenshots"
+IPHONE_OUTPUT_DIR="${OUTPUT_ROOT}/iphone"
+IPAD_OUTPUT_DIR="${OUTPUT_ROOT}/ipad"
+APPSTORE_MODES=(overview mirrors logs)
+
+boot_and_prepare_simulator() {
+  local sim_id="$1"
+  xcrun simctl boot "${sim_id}" >/dev/null 2>&1 || true
+  xcrun simctl bootstatus "${sim_id}" -b
+  xcrun simctl status_bar "${sim_id}" override \
+    --time "9:41" \
+    --dataNetwork wifi \
+    --wifiBars 3 \
+    --cellularMode active \
+    --cellularBars 4 \
+    --batteryState charged \
+    --batteryLevel 100 >/dev/null 2>&1 || true
+}
+
+clear_simulator_overrides() {
+  local sim_id="$1"
+  xcrun simctl status_bar "${sim_id}" clear >/dev/null 2>&1 || true
+}
+
+capture_mode() {
+  local sim_id="$1"
+  local device_class="$2"
+  local mode="$3"
+  local output_path="$4"
+
+  xcrun simctl terminate "${sim_id}" "${BUNDLE_IDENTIFIER}" >/dev/null 2>&1 || true
+  xcrun simctl launch "${sim_id}" "${BUNDLE_IDENTIFIER}" --args \
+    --app-store-screenshot "${mode}" \
+    --platform-target ios \
+    --device-class "${device_class}" >/dev/null
+  sleep 2
+  xcrun simctl io "${sim_id}" screenshot "${output_path}" >/dev/null
+  xcrun simctl terminate "${sim_id}" "${BUNDLE_IDENTIFIER}" >/dev/null 2>&1 || true
+}
+
+capture_for_device() {
+  local sim_id="$1"
+  local device_class="$2"
+  local output_dir="$3"
+
+  rm -rf "${output_dir}"
+  mkdir -p "${output_dir}"
+
+  xcrun simctl uninstall "${sim_id}" "${BUNDLE_IDENTIFIER}" >/dev/null 2>&1 || true
+  xcrun simctl install "${sim_id}" "$(ios_app_bundle_path)" >/dev/null
+
+  local index=1
+  local mode
+  for mode in "${APPSTORE_MODES[@]}"; do
+    local destination
+    destination="$(printf '%s/%02d-%s.png' "${output_dir}" "${index}" "${mode}")"
+    capture_mode "${sim_id}" "${device_class}" "${mode}" "${destination}"
+    [[ -f "${destination}" ]] || {
+      echo "expected screenshot output at ${destination}" >&2
+      exit 1
+    }
+    index=$((index + 1))
+  done
+}
+
+if ! ios_platform_installed; then
+  echo "iOS simulator platform is not installed. Run: xcodebuild -downloadPlatform iOS" >&2
+  exit 1
+fi
+
+IPHONE_SIM_ID="$(iphone_appstore_sim_id)"
+IPAD_SIM_ID="$(ipad_appstore_sim_id)"
+
+"${ROOT_DIR}/scripts/build" --platform ios --device-class both
+
+boot_and_prepare_simulator "${IPHONE_SIM_ID}"
+boot_and_prepare_simulator "${IPAD_SIM_ID}"
+trap 'clear_simulator_overrides "${IPHONE_SIM_ID}"; clear_simulator_overrides "${IPAD_SIM_ID}"' EXIT
+
+capture_for_device "${IPHONE_SIM_ID}" "iphone" "${IPHONE_OUTPUT_DIR}"
+capture_for_device "${IPAD_SIM_ID}" "ipad" "${IPAD_OUTPUT_DIR}"
+
+clear_simulator_overrides "${IPHONE_SIM_ID}"
+clear_simulator_overrides "${IPAD_SIM_ID}"
+trap - EXIT
+
+printf 'captured iOS App Store screenshots in %s\n' "${OUTPUT_ROOT}"

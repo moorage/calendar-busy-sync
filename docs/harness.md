@@ -15,7 +15,9 @@ The harness is the shell-first control plane for this repository.
 - `./scripts/archive-appstore --platform ios`
 - `./scripts/upload-appstore --platform ios`
 - `./scripts/capture-appstore-screenshots-macos`
+- `./scripts/capture-appstore-screenshots-ios`
 - `python3 scripts/prepare-appstore-macos-submission.py --screenshot-dir artifacts/appstore/macos-screenshots`
+- `python3 scripts/prepare-appstore-ios-submission.py --iphone-dir artifacts/appstore/ios-screenshots/iphone --ipad-dir artifacts/appstore/ios-screenshots/ipad`
 - `./scripts/capture-checkpoint --scenario basic-cross-busy.json --platform-target macos --checkpoint shell-smoke-macos`
 - `./scripts/agent-loop`
 - `./scripts/verify-product-identity`
@@ -74,8 +76,8 @@ For macOS, the script now follows the working Apple flow for this target: automa
 
 The release screenshot path intentionally uses an unsigned macOS build instead of the signed debug app. The signed app is sandboxed for the App Store path and cannot write PNG output back into the repo's `artifacts/` directory, so `./scripts/capture-appstore-screenshots-macos` builds the unsigned harness app and invokes the app-side screenshot renderer directly.
 
-`scripts/prepare-appstore-macos-submission.py` then uses the App Store Connect API credentials from `.env` to populate the macOS version URLs, primary category, age rating, and screenshot set. If no valid macOS build matching the current App Store version exists yet, the script still uploads screenshots and other metadata and reports the missing-build condition clearly instead of failing early.
+`scripts/prepare-appstore-macos-submission.py` then uses the App Store Connect API credentials from `.env` to populate the macOS version URLs, primary category, age rating, review contact, and screenshot set. If no valid macOS build matching the current App Store version exists yet, the script still uploads screenshots and other metadata and reports the missing-build condition clearly instead of failing early.
 
 At the moment, macOS App Store export/upload still depends on a local `Mac Installer Distribution` certificate in Keychain Access. Without that installer certificate, the archive step succeeds but the App Store export cannot produce the `.pkg` needed for upload.
 
-For iOS, the same script verifies the exported `.ipa` through `DistributionSummary.plist` before `scripts/upload-appstore` sends it to App Store Connect with the `.env` API key credentials.
+For iOS, `./scripts/capture-appstore-screenshots-ios` boots the preferred App Store screenshot simulators, launches the app in screenshot mode, and captures the iPhone and iPad PNG assets under `artifacts/appstore/ios-screenshots/`. `scripts/prepare-appstore-ios-submission.py` then attaches the latest valid `1.0` iOS build, fills in support/marketing URLs plus the shared review contact from `.env`, and uploads the `APP_IPHONE_67` and `APP_IPAD_PRO_3GEN_129` screenshot sets. The export/upload path still runs through `DistributionSummary.plist` verification before `scripts/upload-appstore` sends the `.ipa` to App Store Connect.

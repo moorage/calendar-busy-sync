@@ -145,6 +145,27 @@ ipad_sim_id() {
   printf '%s\n' "${id}"
 }
 
+iphone_appstore_sim_id() {
+  local id
+  id="$(preferred_sim_id \
+    "iPhone 15 Pro Max" \
+    "iPhone 14 Pro Max" \
+    "iPhone 16 Pro Max")"
+  [[ -n "${id}" ]] || return 1
+  printf '%s\n' "${id}"
+}
+
+ipad_appstore_sim_id() {
+  local id
+  id="$(preferred_sim_id \
+    "iPad Pro (12.9-inch) (6th generation) (16GB)" \
+    "iPad Pro (12.9-inch) (6th generation)" \
+    "iPad Pro (12.9-inch) (5th generation)" \
+    "iPad Pro (12.9-inch) (4th generation)")"
+  [[ -n "${id}" ]] || return 1
+  printf '%s\n' "${id}"
+}
+
 result_bundle_path() {
   local name="$1"
   printf '%s/%s.xcresult\n' "${XCODEBUILD_DIR}" "${name}"

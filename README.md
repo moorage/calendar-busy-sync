@@ -62,12 +62,16 @@ Create an App Store archive with the configured Sous Chef Studio distribution id
 ./scripts/archive-appstore --platform ios
 ./scripts/upload-appstore --platform ios
 ./scripts/capture-appstore-screenshots-macos
+./scripts/capture-appstore-screenshots-ios
 python3 scripts/prepare-appstore-macos-submission.py --screenshot-dir artifacts/appstore/macos-screenshots
+python3 scripts/prepare-appstore-ios-submission.py --iphone-dir artifacts/appstore/ios-screenshots/iphone --ipad-dir artifacts/appstore/ios-screenshots/ipad
 ```
 
 The App Store packaging flow now uses the provisioning mode Xcode actually accepts for this target: automatic archive plus App Store export. On macOS, that export is verified to land on `Apple Distribution` with the exact certificate SHA-1 from `.env` plus a `Mac Team Store Provisioning Profile` for `com.matthewpaulmoore.Calendar-Busy-Sync`, while the signed macOS debug flow used for local OAuth and iCloud checks still stays on team-managed development signing.
 
-The macOS submission helper path now also includes deterministic App Store screenshot generation and App Store Connect metadata prep. `./scripts/capture-appstore-screenshots-macos` builds an unsigned macOS app specifically so the screenshot renderer can write PNGs into `artifacts/appstore/macos-screenshots/`, and `scripts/prepare-appstore-macos-submission.py` uploads those screenshots while filling in the macOS version URLs, primary category, and age rating.
+The macOS submission helper path now also includes deterministic App Store screenshot generation and App Store Connect metadata prep. `./scripts/capture-appstore-screenshots-macos` builds an unsigned macOS app specifically so the screenshot renderer can write PNGs into `artifacts/appstore/macos-screenshots/`, and `scripts/prepare-appstore-macos-submission.py` uploads those screenshots while filling in the macOS version URLs, primary category, age rating, review contact, and attached build.
+
+The iOS submission path now mirrors that release automation. `./scripts/capture-appstore-screenshots-ios` boots a large iPhone and iPad simulator, launches the app into its screenshot-mode UI, and captures the resulting PNGs into `artifacts/appstore/ios-screenshots/`. `scripts/prepare-appstore-ios-submission.py` then attaches the latest valid `1.0` iOS build, fills in the iOS support and marketing URLs plus review contact, and uploads the iPhone `APP_IPHONE_67` and iPad `APP_IPAD_PRO_3GEN_129` screenshot sets.
 
 One Apple-account prerequisite still sits outside the repo: exporting the macOS App Store `.pkg` requires a local `Mac Installer Distribution` certificate. If that certificate is missing from the keychain, `./scripts/archive-appstore --platform macos` can still archive the app but the export/upload step will stop before a new App Store Connect build appears.
 
