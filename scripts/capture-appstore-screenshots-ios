@@ -11,7 +11,7 @@ require_project
 OUTPUT_ROOT="${ARTIFACTS_DIR}/appstore/ios-screenshots"
 IPHONE_OUTPUT_DIR="${OUTPUT_ROOT}/iphone"
 IPAD_OUTPUT_DIR="${OUTPUT_ROOT}/ipad"
-APPSTORE_MODES=(overview mirrors logs)
+APPSTORE_MODES=(overview mirrors booking logs)
 
 boot_and_prepare_simulator() {
   local sim_id="$1"

@@ -2,6 +2,9 @@ import SwiftUI
 
 struct AppStoreScreenshotView: View {
     let mode: AppStoreScreenshotMode
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    #endif
 
     var body: some View {
         NavigationStack {
@@ -11,13 +14,15 @@ struct AppStoreScreenshotView: View {
                     overviewView
                 case .mirrors:
                     mirrorsView
+                case .booking:
+                    bookingView
                 case .logs:
                     logsView
                 }
             }
             .navigationTitle(mode.navigationTitle)
         }
-        .frame(minWidth: 1180, idealWidth: 1180, maxWidth: .infinity, minHeight: 760, idealHeight: 760, maxHeight: .infinity)
+        .appStoreScreenshotFrame()
         .background(windowBackgroundColor)
     }
 
@@ -186,6 +191,99 @@ struct AppStoreScreenshotView: View {
         }
     }
 
+    private var bookingView: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    settingsSection {
+                        sectionHeader(
+                            title: "Booking Page",
+                            icon: {
+                                Image(systemName: "calendar.badge.plus")
+                                    .foregroundStyle(.secondary)
+                            }
+                        ) {
+                            prominentLabel("Publish", systemImage: "arrow.up.circle")
+                        }
+
+                        sectionDivider
+                        sectionRow {
+                            VStack(alignment: .leading, spacing: 12) {
+                                HStack(spacing: 10) {
+                                    Text("souschefstudio.github.io/booking")
+                                        .font(.headline)
+                                    Spacer()
+                                    textPill("Ready to deploy")
+                                }
+
+                                HStack(spacing: 12) {
+                                    Label("Encrypted request inbox connected", systemImage: "lock.shield")
+                                    Label("GitHub Pages verified", systemImage: "checkmark.seal")
+                                    Label("Auto-approval off", systemImage: "person.crop.circle.badge.checkmark")
+                                }
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+
+                    settingsSection {
+                        sectionHeader(
+                            title: "Appointment Types",
+                            icon: {
+                                Image(systemName: "list.bullet.rectangle")
+                                    .foregroundStyle(.secondary)
+                            }
+                        ) {
+                            borderedLabel("Add Type", systemImage: "plus")
+                        }
+
+                        ForEach(sampleBookingTypes.indices, id: \.self) { index in
+                            if index > 0 {
+                                sectionDivider
+                            }
+
+                            bookingTypeRow(sampleBookingTypes[index])
+                        }
+                    }
+
+                    if !isCompactWidth {
+                        settingsSection {
+                            sectionHeader(
+                                title: "Availability",
+                                icon: {
+                                    Image(systemName: "clock.badge.checkmark")
+                                        .foregroundStyle(.secondary)
+                                }
+                            )
+
+                            sectionDivider
+                            sectionRow {
+                                HStack(spacing: 16) {
+                                    compactSetting("Calendar window", value: "Up to 3 months", icon: "calendar")
+                                    Divider()
+                                    compactSetting("Refresh cadence", value: "Every poll", icon: "arrow.triangle.2.circlepath")
+                                    Divider()
+                                    compactSetting("Minimum notice", value: "4 hours", icon: "timer")
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, 20)
+                .padding(.bottom, 28)
+            }
+
+            statusLine(
+                summary: "Booking availability is up to date.",
+                timestamp: "less than a minute ago",
+                pending: "1 pending deploy",
+                failures: "0 failures"
+            )
+        }
+    }
+
     private var logsView: some View {
         VStack(spacing: 0) {
             List {
@@ -217,6 +315,32 @@ struct AppStoreScreenshotView: View {
                     failures: "0 failures"
                 )
             }
+        }
+    }
+
+    private func bookingTypeRow(_ row: (title: String, duration: String, horizon: String, location: String)) -> some View {
+        sectionRow {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 10) {
+                    Image(systemName: "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(row.title)
+                        .fontWeight(.medium)
+                    Spacer()
+                    textPill(row.duration)
+                }
+
+                HStack(spacing: 12) {
+                    Label(row.horizon, systemImage: "calendar.badge.clock")
+                    Label(row.location, systemImage: "mappin.and.ellipse")
+                    Label("Weekdays", systemImage: "calendar.day.timeline.left")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.leading, 24)
+            }
+            .font(.caption)
         }
     }
 
@@ -264,7 +388,41 @@ struct AppStoreScreenshotView: View {
         .font(.caption)
     }
 
+    @ViewBuilder
     private func statusLine(summary: String, timestamp: String, pending: String, failures: String) -> some View {
+        if isCompactWidth {
+            compactStatusLine(summary: summary, timestamp: timestamp)
+        } else {
+            regularStatusLine(summary: summary, timestamp: timestamp, pending: pending, failures: failures)
+        }
+    }
+
+    private func compactStatusLine(summary: String, timestamp: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(summary)
+                    .fontWeight(.medium)
+                    .lineLimit(2)
+                Text(timestamp)
+                    .foregroundStyle(.secondary)
+            }
+            .font(.caption)
+
+            Spacer(minLength: 8)
+
+            prominentLabel("Sync", systemImage: "arrow.clockwise")
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 10)
+        .background(.thinMaterial)
+        .overlay(alignment: .top) {
+            Divider()
+        }
+    }
+
+    private func regularStatusLine(summary: String, timestamp: String, pending: String, failures: String) -> some View {
         HStack(spacing: 14) {
             HStack(spacing: 6) {
                 Image(systemName: "checkmark.circle.fill")
@@ -441,6 +599,14 @@ struct AppStoreScreenshotView: View {
         #endif
     }
 
+    private var isCompactWidth: Bool {
+        #if os(iOS)
+        horizontalSizeClass == .compact
+        #else
+        false
+        #endif
+    }
+
     private var sampleMirrorRows: [(source: String, target: String)] {
         [
             ("Sous Chef Studio -> Operations", "Busy"),
@@ -484,6 +650,14 @@ struct AppStoreScreenshotView: View {
             )
         ]
     }
+
+    private var sampleBookingTypes: [(title: String, duration: String, horizon: String, location: String)] {
+        [
+            ("Intro Call", "30 min", "Shows 14 days", "Google Meet"),
+            ("Planning Session", "60 min", "Shows 45 days", "Video call"),
+            ("Project Review", "45 min", "Shows 3 months", "Office or remote")
+        ]
+    }
 }
 
 extension AppStoreScreenshotMode {
@@ -491,6 +665,8 @@ extension AppStoreScreenshotMode {
         switch self {
         case .overview, .mirrors:
             return "Calendar Busy Sync"
+        case .booking:
+            return "Booking"
         case .logs:
             return "Audit Trail"
         }
@@ -498,5 +674,23 @@ extension AppStoreScreenshotMode {
 
     var windowTitle: String {
         navigationTitle
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func appStoreScreenshotFrame() -> some View {
+        #if os(macOS)
+        frame(
+            minWidth: 1180,
+            idealWidth: 1180,
+            maxWidth: .infinity,
+            minHeight: 760,
+            idealHeight: 760,
+            maxHeight: .infinity
+        )
+        #else
+        frame(maxWidth: .infinity, maxHeight: .infinity)
+        #endif
     }
 }

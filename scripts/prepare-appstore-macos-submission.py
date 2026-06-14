@@ -23,6 +23,7 @@ DEFAULT_APP_ID = "6762634278"
 DEFAULT_SUPPORT_URL = "https://souschefstudio.com/"
 DEFAULT_MARKETING_URL = "https://souschefstudio.com/"
 DEFAULT_PRIVACY_POLICY_URL = "https://souschefstudio.com/privacy"
+DEFAULT_WHATS_NEW = "Adds Booking Pages so clients can book appointment types from your published availability, with per-type booking windows and refreshed availability publishing."
 
 
 def load_env_file(path: Path) -> dict[str, str]:
@@ -150,15 +151,34 @@ AGE_RATING_NONE_FIELDS = [
 ]
 
 
-def resolve_state(client: AppStoreConnectClient, app_id: str) -> MacSubmissionState:
+def matching_app_store_version(
+    versions: list[dict[str, Any]],
+    platform: str,
+    version_string: str | None,
+) -> dict[str, Any]:
+    matching_versions = [
+        item
+        for item in versions
+        if item["attributes"]["platform"] == platform
+        and (version_string is None or item["attributes"]["versionString"] == version_string)
+    ]
+    if not matching_versions:
+        target = f"{platform} {version_string}" if version_string else platform
+        raise RuntimeError(f"No App Store version found for {target}. Create the version in App Store Connect first.")
+    return matching_versions[0]
+
+
+def resolve_state(
+    client: AppStoreConnectClient,
+    app_id: str,
+    version_string: str | None = None,
+) -> MacSubmissionState:
     versions = client.request(
         "GET",
         f"apps/{app_id}/appStoreVersions",
         params={"limit": 50, "include": "appStoreVersionLocalizations,build"},
     )
-    version_data = next(
-        item for item in versions["data"] if item["attributes"]["platform"] == "MAC_OS"
-    )
+    version_data = matching_app_store_version(versions["data"], "MAC_OS", version_string)
     version_localization_id = version_data["relationships"]["appStoreVersionLocalizations"]["data"][0]["id"]
     attached_build_id = None
     build_data = version_data["relationships"]["build"]["data"]
@@ -278,6 +298,7 @@ def update_localizations(
     support_url: str,
     marketing_url: str,
     privacy_policy_url: str,
+    whats_new: str,
 ) -> None:
     client.request(
         "PATCH",
@@ -289,6 +310,7 @@ def update_localizations(
                 "attributes": {
                     "supportUrl": support_url,
                     "marketingUrl": marketing_url,
+                    "whatsNew": whats_new,
                 },
             }
         },
@@ -468,9 +490,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Prepare the macOS App Store submission state for Calendar Busy Sync.")
     parser.add_argument("--app-id", default=DEFAULT_APP_ID)
     parser.add_argument("--screenshot-dir", type=Path, required=True)
+    parser.add_argument("--version-string")
     parser.add_argument("--support-url", default=DEFAULT_SUPPORT_URL)
     parser.add_argument("--marketing-url", default=DEFAULT_MARKETING_URL)
     parser.add_argument("--privacy-policy-url", default=DEFAULT_PRIVACY_POLICY_URL)
+    parser.add_argument("--whats-new", default=DEFAULT_WHATS_NEW)
     args = parser.parse_args()
 
     env_defaults = load_env_file(ROOT_DIR / ".env")
@@ -492,21 +516,28 @@ def main() -> int:
         raise RuntimeError(f"No PNG screenshots found in {args.screenshot_dir}")
 
     client = AppStoreConnectClient(key_id, issuer_id, key_path)
-    state = resolve_state(client, args.app_id)
+    state = resolve_state(client, args.app_id, args.version_string)
 
     warnings: list[str] = []
 
     category_warning = ensure_primary_category(client, state.app_info_id)
     if category_warning:
         warnings.append(category_warning)
-    ensure_age_rating(client, state.age_rating_declaration_id)
-    update_localizations(
-        client,
-        state,
-        support_url=args.support_url,
-        marketing_url=args.marketing_url,
-        privacy_policy_url=args.privacy_policy_url,
-    )
+    try:
+        ensure_age_rating(client, state.age_rating_declaration_id)
+    except RuntimeError as exc:
+        warnings.append(f"Age rating still needs manual setup in App Store Connect ({exc}).")
+    try:
+        update_localizations(
+            client,
+            state,
+            support_url=args.support_url,
+            marketing_url=args.marketing_url,
+            privacy_policy_url=args.privacy_policy_url,
+            whats_new=args.whats_new,
+        )
+    except RuntimeError as exc:
+        warnings.append(f"Some localization metadata still needs manual setup in App Store Connect ({exc}).")
 
     build: dict[str, Any] | None = None
     build_warning: str | None = None

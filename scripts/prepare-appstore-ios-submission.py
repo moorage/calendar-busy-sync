@@ -31,6 +31,7 @@ def load_mac_submission_module():
 
 
 mac_submission = load_mac_submission_module()
+DEFAULT_WHATS_NEW = mac_submission.DEFAULT_WHATS_NEW
 AppStoreConnectClient = mac_submission.AppStoreConnectClient
 load_env_file = mac_submission.load_env_file
 env_value = mac_submission.env_value
@@ -55,9 +56,13 @@ class IOSSubmissionState:
     attached_build_id: str | None
 
 
-def resolve_state(client: AppStoreConnectClient, app_id: str) -> IOSSubmissionState:
+def resolve_state(
+    client: AppStoreConnectClient,
+    app_id: str,
+    version_string: str | None = None,
+) -> IOSSubmissionState:
     versions = client.request("GET", f"apps/{app_id}/appStoreVersions", params={"limit": 50})
-    version_data = next(item for item in versions["data"] if item["attributes"]["platform"] == "IOS")
+    version_data = mac_submission.matching_app_store_version(versions["data"], "IOS", version_string)
 
     localization_payload = client.request(
         "GET",
@@ -168,9 +173,11 @@ def main() -> int:
     parser.add_argument("--app-id", default=DEFAULT_APP_ID)
     parser.add_argument("--iphone-dir", type=Path, required=True)
     parser.add_argument("--ipad-dir", type=Path, required=True)
+    parser.add_argument("--version-string")
     parser.add_argument("--support-url", default=DEFAULT_SUPPORT_URL)
     parser.add_argument("--marketing-url", default=DEFAULT_MARKETING_URL)
     parser.add_argument("--privacy-policy-url", default=DEFAULT_PRIVACY_POLICY_URL)
+    parser.add_argument("--whats-new", default=DEFAULT_WHATS_NEW)
     args = parser.parse_args()
 
     env_defaults = load_env_file(ROOT_DIR / ".env")
@@ -195,21 +202,28 @@ def main() -> int:
         raise RuntimeError(f"No PNG screenshots found in {args.ipad_dir}")
 
     client = AppStoreConnectClient(key_id, issuer_id, key_path)
-    state = resolve_state(client, args.app_id)
+    state = resolve_state(client, args.app_id, args.version_string)
 
     warnings: list[str] = []
 
     category_warning = ensure_primary_category(client, state.app_info_id)
     if category_warning:
         warnings.append(category_warning)
-    ensure_age_rating(client, state.age_rating_declaration_id)
-    update_localizations(
-        client,
-        state,
-        support_url=args.support_url,
-        marketing_url=args.marketing_url,
-        privacy_policy_url=args.privacy_policy_url,
-    )
+    try:
+        ensure_age_rating(client, state.age_rating_declaration_id)
+    except RuntimeError as exc:
+        warnings.append(f"Age rating still needs manual setup in App Store Connect ({exc}).")
+    try:
+        update_localizations(
+            client,
+            state,
+            support_url=args.support_url,
+            marketing_url=args.marketing_url,
+            privacy_policy_url=args.privacy_policy_url,
+            whats_new=args.whats_new,
+        )
+    except RuntimeError as exc:
+        warnings.append(f"Some localization metadata still needs manual setup in App Store Connect ({exc}).")
 
     build: dict[str, Any] | None = None
     build_warning: str | None = None

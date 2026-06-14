@@ -18,6 +18,7 @@ enum HarnessDeviceClass: String, Codable {
 enum AppStoreScreenshotMode: String, Codable {
     case overview
     case mirrors
+    case booking
     case logs
 }
 

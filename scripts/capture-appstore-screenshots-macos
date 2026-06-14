@@ -12,6 +12,7 @@ APP_NAME="${APP_PRODUCT_NAME}"
 APP_PATH="$(app_bundle_path)"
 APP_BINARY_PATH="${APP_PATH}/Contents/MacOS/${APP_PRODUCT_NAME}"
 OUTPUT_DIR="${ARTIFACTS_DIR}/appstore/macos-screenshots"
+rm -rf "${OUTPUT_DIR}"
 mkdir -p "${OUTPUT_DIR}"
 
 xcodebuild \
@@ -43,6 +44,7 @@ capture_mode() {
 
 capture_mode overview "${OUTPUT_DIR}/01-overview.png"
 capture_mode mirrors "${OUTPUT_DIR}/02-mirror-preview.png"
-capture_mode logs "${OUTPUT_DIR}/03-logs.png"
+capture_mode booking "${OUTPUT_DIR}/03-booking.png"
+capture_mode logs "${OUTPUT_DIR}/04-logs.png"
 
 printf 'captured screenshots in %s\n' "${OUTPUT_DIR}"
