@@ -4,13 +4,14 @@ This document is the top-level codemap for the live repository. It names the maj
 
 ## System overview
 
-This repository contains a universal Apple-platform calendar busy-sync app with five major subsystems:
+This repository contains a universal Apple-platform calendar busy-sync app with six major subsystems:
 
 1. connected account management
 2. calendar selection and routing
 3. event normalization and sync planning
 4. mirrored busy-slot writing and reconciliation
 5. platform shells, shared configuration, and harness tooling
+6. privacy-first booking page generation and encrypted request inbox templates
 
 The live codebase is still early, but the Xcode project, harness shell, multi-account Google auth slice, Apple / iCloud EventKit slice, and first real mirror-reconciliation engine are checked in.
 
@@ -60,6 +61,24 @@ Purpose:
 Expected primary code area:
 
 - `Calendar Busy Sync/Calendar Busy Sync/App/Shared/Sync/`
+
+### Booking domain
+
+Purpose:
+
+- define Markdown-backed appointment and profile configuration
+- centralize booking copy and native icon choices
+- generate and validate public booking artifacts for GitHub Pages
+- derive public open slots from selected local Apple / iCloud busy intervals without publishing raw busy blocks
+- sign public open-slot tokens without exposing provider event identity
+- define encrypted request envelopes for blind relays
+
+Expected primary code area:
+
+- `Calendar Busy Sync/Calendar Busy Sync/App/Shared/Booking/`
+- `templates/booking-site/`
+- `templates/booking-relay/`
+- `docs/self-hosting/`
 
 ### Provider adapters
 
@@ -131,7 +150,9 @@ Primary code areas:
 - reconciliation is exact-slot aware: an identical busy block that already exists in a selected destination calendar suppresses a new mirror create, while identity matching still lets moved source events update their existing managed mirrors instead of delete/recreate churn
 - Apple / iCloud mirror identity recovery now uses a hybrid boundary: an on-event `calendarbusysync://mirror/<token>` URL marker plus app-local token persistence, with migration of older note-heavy mirror events and cleanup of orphaned markers
 - iOS now uses `BGAppRefreshTask` as an OS-controlled best-effort trigger for the same reconciliation path; the scheduler is hint-based and must stay suppressible for screenshot and UI-test harness launches
-- shared configuration is privacy-scoped: only non-secret settings roam through iCloud, including shared Google account descriptors and selected-calendar metadata, while Google keychain payloads, archived Google user state, Apple permission state, and mirror token maps remain local; the per-device opt-out switch itself is stored only in local `UserDefaults`
+- shared configuration is privacy-scoped: only non-secret settings roam through iCloud, including shared Google account descriptors, selected-calendar metadata, and native Booking setup such as appointment types, page/inbox URLs, publishing metadata, profile/theme fields, selected appointment type, and automatic-approval preferences. Google keychain payloads, archived Google user state, Apple permission state, mirror token maps, booking private/signing keys, inbox admin tokens, deploy-key private keys, generated page-file paths, and editable HTML/CSS/template files remain local; the per-device opt-out switch itself is stored only in local `UserDefaults`
+- booking is privacy-scoped: GitHub Pages artifacts carry only public appointment/page data, public encryption material, and signed open-slot tokens; blind relays carry encrypted envelopes only; native app code remains responsible for decryption, live availability rechecks, and calendar writes
+- booking publication composes with existing schedulers: macOS polling and iOS best-effort refresh call the same app-level publish path, regenerate every active appointment type across its per-type availability horizon capped at three months, and Git-over-SSH publishing compares public artifact bytes, skips unchanged files, and treats remote generated-file drift as a visible overwrite warning rather than a blocking conflict
 
 ## Cross-cutting concerns
 

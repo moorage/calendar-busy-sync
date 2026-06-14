@@ -29,6 +29,7 @@ struct HarnessLaunchOptions {
     let dumpPerfStateURL: URL?
     let screenshotPathURL: URL?
     let commandDirectoryURL: URL?
+    let bookingDryRunOnLaunch: Bool
     let uiTestMode: Bool
     let appStoreScreenshotMode: AppStoreScreenshotMode?
     let appStoreScreenshotOutputURL: URL?
@@ -43,6 +44,7 @@ struct HarnessLaunchOptions {
         dumpPerfStateURL: URL? = nil,
         screenshotPathURL: URL? = nil,
         commandDirectoryURL: URL? = nil,
+        bookingDryRunOnLaunch: Bool = false,
         uiTestMode: Bool = false,
         appStoreScreenshotMode: AppStoreScreenshotMode? = nil,
         appStoreScreenshotOutputURL: URL? = nil,
@@ -56,6 +58,7 @@ struct HarnessLaunchOptions {
         self.dumpPerfStateURL = dumpPerfStateURL
         self.screenshotPathURL = screenshotPathURL
         self.commandDirectoryURL = commandDirectoryURL
+        self.bookingDryRunOnLaunch = bookingDryRunOnLaunch
         self.uiTestMode = uiTestMode
         self.appStoreScreenshotMode = appStoreScreenshotMode
         self.appStoreScreenshotOutputURL = appStoreScreenshotOutputURL
@@ -93,6 +96,7 @@ struct HarnessLaunchOptions {
             dumpPerfStateURL: resolveURL(after: "--dump-perf-state"),
             screenshotPathURL: resolveURL(after: "--screenshot-path"),
             commandDirectoryURL: resolveURL(after: "--harness-command-dir"),
+            bookingDryRunOnLaunch: arguments.contains("--booking-dry-run-on-launch"),
             uiTestMode: arguments.contains("--ui-test-mode"),
             appStoreScreenshotMode: AppStoreScreenshotMode(rawValue: value(after: "--app-store-screenshot") ?? ""),
             appStoreScreenshotOutputURL: resolveURL(after: "--app-store-screenshot-output"),

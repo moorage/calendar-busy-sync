@@ -41,6 +41,34 @@ final class Calendar_Busy_SyncUITests: XCTestCase {
         #endif
     }
 
+    @MainActor
+    func testBookingSetupOpensVisibleFlowAndCreatesDraft() throws {
+        let app = XCUIApplication()
+        let scenarioRoot = repoRootURL().appendingPathComponent("Fixtures/scenarios", isDirectory: true).path
+        app.launchArguments = [
+            "--scenario-root", scenarioRoot,
+            "--scenario", "basic-cross-busy.json",
+            "--ui-test-mode", "1",
+        ]
+        app.launch()
+
+        let setupButton = app.buttons["settings.booking.setup"]
+        XCTAssertTrue(setupButton.waitForExistence(timeout: 5))
+        if !setupButton.isHittable {
+            app.scrollViews.firstMatch.swipeUp()
+        }
+        setupButton.tap()
+
+        XCTAssertTrue(app.otherElements["booking-setup.sheet"].waitForExistence(timeout: 5))
+
+        let createDraftButton = app.buttons["booking-setup.create-draft"]
+        XCTAssertTrue(createDraftButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(createDraftButton.isEnabled)
+        createDraftButton.tap()
+
+        XCTAssertTrue(app.buttons["booking-setup.verify-page"].waitForExistence(timeout: 5))
+    }
+
     private func repoRootURL() -> URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

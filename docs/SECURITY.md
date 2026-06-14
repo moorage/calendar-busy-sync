@@ -39,6 +39,28 @@ For each trust boundary, list the relevant threats and required controls. This i
   - require explicit user-selected destination calendars
   - attach deterministic sync identifiers to mirrored writes for idempotent updates and deletes
 
+### Static booking page boundary
+
+- outbound data: public page copy, appointment metadata, theme values, public encryption key, signed open-slot tokens
+- core threats: accidentally publishing private calendar identifiers, provider tokens, raw busy intervals, or private keys
+- required controls:
+  - generate static artifacts from an allowlisted public data model
+  - run public artifact scans before publishing
+  - keep Markdown config free of secret-looking values and calendar account emails
+  - encrypt visitor requests in the browser before any network submission
+
+### Encrypted request inbox boundary
+
+- inbound data: encrypted booking request envelopes and generic abuse-control metadata
+- core threats: relay becoming a calendar backend, request flooding, origin abuse, plaintext logging
+- required controls:
+  - expose only create, list, delete, and health endpoints
+  - require CORS allowlisting for public writes
+  - require an admin token for imports and deletes
+  - cap payload size, pending count, and request rate
+  - avoid request-body logging
+  - keep provider credentials, calendar IDs, and plaintext visitor details out of relay storage
+
 ## Secrets and credentials
 
 - provider tokens and private key material must never be committed
@@ -52,6 +74,7 @@ For each trust boundary, list the relevant threats and required controls. This i
 - changes to mirrored event contents
 - background sync or push-based write flows
 - any new storage of tokens, calendar IDs, or user-linked account state
+- changes to booking-page public artifacts, signed slot tokens, encrypted request envelopes, or relay endpoint behavior
 
 ## Tests and validation
 

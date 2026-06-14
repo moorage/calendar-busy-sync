@@ -1,0 +1,58 @@
+#!/usr/bin/env python3
+"""Create local video-script artifacts for booking setup walkthroughs."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+OUTPUT = ROOT / "artifacts" / "booking-onboarding-videos"
+
+
+VIDEOS = {
+    "github-pages-setup.md": [
+        "Create or choose a GitHub repository.",
+        "Open Settings > Pages and select the publishing source.",
+        "Create a fine-grained token scoped to the repository.",
+        "Paste the repository and token into Calendar Busy Sync.",
+        "Generate page files, publish, and open the booking page.",
+    ],
+    "cloudflare-inbox-setup.md": [
+        "Open the Cloudflare inbox template.",
+        "Create a Workers KV namespace.",
+        "Set ALLOWED_ORIGIN and INBOX_ADMIN_TOKEN.",
+        "Deploy the Worker.",
+        "Paste the Worker URL into Calendar Busy Sync and check the inbox.",
+    ],
+    "vercel-inbox-setup.md": [
+        "Open the Vercel inbox template.",
+        "Create the Vercel project and Blob storage.",
+        "Set ALLOWED_ORIGIN and INBOX_ADMIN_TOKEN.",
+        "Deploy the project.",
+        "Paste the deployment URL into Calendar Busy Sync and check the inbox.",
+    ],
+    "template-customization.md": [
+        "Open the booking-site template folder.",
+        "Edit appointment Markdown and CSS variables.",
+        "Ask a local AI coding tool to change style without protocol files.",
+        "Run scripts/test-booking-site.",
+        "Publish the updated page.",
+    ],
+}
+
+
+def main() -> int:
+    OUTPUT.mkdir(parents=True, exist_ok=True)
+    for filename, steps in VIDEOS.items():
+        body = [f"# {filename.removesuffix('.md').replace('-', ' ').title()}", ""]
+        body.extend(f"{index}. {step}" for index, step in enumerate(steps, start=1))
+        body.append("")
+        (OUTPUT / filename).write_text("\n".join(body))
+
+    print(f"Wrote booking setup video scripts to {OUTPUT}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

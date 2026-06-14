@@ -70,6 +70,61 @@ struct SharedAppleCalendarReference: Codable, Equatable {
     }
 }
 
+struct SharedBookingConfiguration: Codable, Equatable {
+    var pageURLString: String
+    var inboxURLString: String
+    var gitHubRepositoryString: String
+    var gitHubBranchString: String
+    var vercelScopeString: String
+    var vercelProjectNameString: String
+    var publicNameString: String
+    var pageTitleString: String
+    var pageSubtitleString: String
+    var timeZoneIdentifierString: String
+    var themeAccentColorString: String
+    var themeBackgroundColorString: String
+    var themeTextColorString: String
+    var selectedAppointmentTypeIDString: String
+    var isAutomaticApprovalEnabled: Bool
+    var appointmentTypes: [BookingAppointmentType]
+
+    init(
+        pageURLString: String,
+        inboxURLString: String,
+        gitHubRepositoryString: String,
+        gitHubBranchString: String,
+        vercelScopeString: String,
+        vercelProjectNameString: String,
+        publicNameString: String,
+        pageTitleString: String,
+        pageSubtitleString: String,
+        timeZoneIdentifierString: String,
+        themeAccentColorString: String,
+        themeBackgroundColorString: String,
+        themeTextColorString: String,
+        selectedAppointmentTypeIDString: String,
+        isAutomaticApprovalEnabled: Bool,
+        appointmentTypes: [BookingAppointmentType]
+    ) {
+        self.pageURLString = pageURLString
+        self.inboxURLString = inboxURLString
+        self.gitHubRepositoryString = gitHubRepositoryString
+        self.gitHubBranchString = gitHubBranchString
+        self.vercelScopeString = vercelScopeString
+        self.vercelProjectNameString = vercelProjectNameString
+        self.publicNameString = publicNameString
+        self.pageTitleString = pageTitleString
+        self.pageSubtitleString = pageSubtitleString
+        self.timeZoneIdentifierString = timeZoneIdentifierString
+        self.themeAccentColorString = themeAccentColorString
+        self.themeBackgroundColorString = themeBackgroundColorString
+        self.themeTextColorString = themeTextColorString
+        self.selectedAppointmentTypeIDString = selectedAppointmentTypeIDString
+        self.isAutomaticApprovalEnabled = isAutomaticApprovalEnabled
+        self.appointmentTypes = appointmentTypes
+    }
+}
+
 struct SharedAppConfiguration: Codable, Equatable {
     let updatedAt: Date
     let pollIntervalMinutes: Int
@@ -82,6 +137,7 @@ struct SharedAppConfiguration: Codable, Equatable {
     let googleSelectedCalendarIDs: [String: String]
     let activeGoogleAccountID: String?
     let googleAccountDescriptors: [SharedGoogleAccountDescriptor]
+    let bookingConfiguration: SharedBookingConfiguration?
 
     var auditTrailLogLength: AuditTrailLogLength {
         AuditTrailLogLength(rawValue: auditTrailLogLengthRawValue) ?? .last1000
@@ -98,7 +154,8 @@ struct SharedAppConfiguration: Codable, Equatable {
         customGoogleOAuthServerClientID: String,
         googleSelectedCalendarIDs: [String: String],
         activeGoogleAccountID: String?,
-        googleAccountDescriptors: [SharedGoogleAccountDescriptor] = []
+        googleAccountDescriptors: [SharedGoogleAccountDescriptor] = [],
+        bookingConfiguration: SharedBookingConfiguration? = nil
     ) {
         self.updatedAt = updatedAt
         self.pollIntervalMinutes = pollIntervalMinutes
@@ -111,6 +168,7 @@ struct SharedAppConfiguration: Codable, Equatable {
         self.googleSelectedCalendarIDs = googleSelectedCalendarIDs
         self.activeGoogleAccountID = activeGoogleAccountID
         self.googleAccountDescriptors = googleAccountDescriptors
+        self.bookingConfiguration = bookingConfiguration
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -125,6 +183,7 @@ struct SharedAppConfiguration: Codable, Equatable {
         case googleSelectedCalendarIDs
         case activeGoogleAccountID
         case googleAccountDescriptors
+        case bookingConfiguration
     }
 
     init(from decoder: Decoder) throws {
@@ -140,6 +199,7 @@ struct SharedAppConfiguration: Codable, Equatable {
         googleSelectedCalendarIDs = try container.decode([String: String].self, forKey: .googleSelectedCalendarIDs)
         activeGoogleAccountID = try container.decodeIfPresent(String.self, forKey: .activeGoogleAccountID)
         googleAccountDescriptors = try container.decodeIfPresent([SharedGoogleAccountDescriptor].self, forKey: .googleAccountDescriptors) ?? []
+        bookingConfiguration = try container.decodeIfPresent(SharedBookingConfiguration.self, forKey: .bookingConfiguration)
     }
 }
 

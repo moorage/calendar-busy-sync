@@ -12,6 +12,11 @@ The harness is the shell-first control plane for this repository.
 - `./scripts/test-ui-ios --device both --smoke`
 - `./scripts/trigger-ios-background-refresh --device iphone`
 - `./scripts/test-google-live-macos`
+- `./scripts/build-booking-site`
+- `./scripts/test-booking-site`
+- `./scripts/test-booking-relay-cloudflare`
+- `./scripts/test-booking-relay-vercel`
+- `./scripts/capture-booking-onboarding-videos`
 - `./scripts/archive-appstore --platform macos`
 - `./scripts/archive-appstore --platform ios`
 - `./scripts/upload-appstore --platform ios`
@@ -38,8 +43,12 @@ Runtime artifacts live under `artifacts/`:
 - `artifacts/xcodebuild/`
 - `artifacts/checkpoints/`
 - `artifacts/test-results/`
+- `artifacts/booking-site/`
+- `artifacts/booking-onboarding-videos/`
 
 Checked-in scenario fixtures live under `Fixtures/scenarios/`.
+
+Checked-in booking templates live under `templates/booking-site/` and `templates/booking-relay/`.
 
 ## Capture flow
 

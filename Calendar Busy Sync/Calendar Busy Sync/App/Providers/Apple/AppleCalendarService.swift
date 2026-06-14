@@ -10,6 +10,7 @@ protocol AppleCalendarProviding: AnyObject {
     func listBusySourceEvents(in participant: BusyMirrorParticipant, window: DateInterval) throws -> [BusyMirrorSourceEvent]
     func listManagedMirrorEvents(in participant: BusyMirrorParticipant, window: DateInterval) throws -> [ExistingBusyMirrorEvent]
     func listBusyTargetBlocks(in participant: BusyMirrorParticipant, window: DateInterval) throws -> [BusyMirrorTargetBusyBlock]
+    func createBookingEvent(in calendar: AppleCalendarSummary, request: BookingImportedRequest) throws -> AppleManagedEventRecord
     func createManagedMirrorEvent(in calendar: AppleCalendarSummary, desiredMirror: DesiredBusyMirrorEvent) throws
     func updateManagedMirrorEvent(_ existingMirror: ExistingBusyMirrorEvent, desiredMirror: DesiredBusyMirrorEvent) throws
     func deleteManagedMirrorEvent(_ existingMirror: ExistingBusyMirrorEvent) throws
@@ -261,6 +262,43 @@ final class AppleCalendarService: AppleCalendarProviding {
         }
     }
 
+    func createBookingEvent(in calendar: AppleCalendarSummary, request: BookingImportedRequest) throws -> AppleManagedEventRecord {
+        try requireGrantedAuthorization()
+
+        guard let writableCalendar = eventStore.calendar(withIdentifier: calendar.id) else {
+            throw AppleCalendarServiceError.calendarNotFound
+        }
+
+        let event = EKEvent(eventStore: eventStore)
+        event.calendar = writableCalendar
+        event.title = BookingCalendarEventContent.summary(for: request)
+        event.notes = BookingCalendarEventContent.description(for: request)
+        event.startDate = request.slotClaim.startsAt
+        event.endDate = request.slotClaim.endsAt
+        event.availability = .busy
+        event.isAllDay = false
+
+        do {
+            try eventStore.save(event, span: .thisEvent, commit: true)
+        } catch {
+            throw AppleCalendarServiceError.requestFailed(
+                "Apple Calendar could not add the booking. Check calendar access, then try again."
+            )
+        }
+
+        return AppleManagedEventRecord(
+            calendarID: calendar.id,
+            calendarName: calendar.displayName,
+            eventID: event.eventIdentifier,
+            summary: event.title,
+            windowDescription: BookingCalendarEventContent.windowDescription(
+                start: event.startDate,
+                end: event.endDate,
+                timeZone: timeZone()
+            )
+        )
+    }
+
     func createManagedMirrorEvent(in calendar: AppleCalendarSummary, desiredMirror: DesiredBusyMirrorEvent) throws {
         try requireGrantedAuthorization()
 
@@ -498,6 +536,7 @@ final class AppleCalendarService: AppleCalendarProviding {
             return .other
         }
     }
+
 }
 
 private enum ManagedAppleMirrorNotes {

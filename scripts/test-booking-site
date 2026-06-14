@@ -1,0 +1,96 @@
+#!/usr/bin/env python3
+"""Validate the static booking-site template contract."""
+
+from __future__ import annotations
+
+import json
+import subprocess
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+OUTPUT = ROOT / "artifacts" / "booking-site-test"
+
+
+def main() -> int:
+    subprocess.check_call(
+        [
+            str(ROOT / "scripts" / "build-booking-site"),
+            "--output",
+            str(OUTPUT),
+        ],
+        cwd=ROOT,
+    )
+
+    app_js = (OUTPUT / "assets" / "app.js").read_text()
+    assert_contains(app_js, "crypto.subtle.encrypt", "booking page must encrypt requests in the browser")
+    assert_contains(app_js, "const envelope = await encryptRequest", "booking page must create encrypted envelopes")
+    assert_contains(app_js, 'new URLSearchParams(window.location.search).get("appointment")', "booking page must support appointment deep links")
+    assert_contains(app_js, 'appointmentType.slug === value || appointmentType.id === value', "appointment deep links must match appointment slugs or IDs")
+    assert_contains(app_js, "row.dataset.slotId = slot.id", "time rows must keep stable slot IDs for in-place selection")
+    assert_contains(app_js, "function updateSelectedTimeChoice()", "time selection must update row state without rebuilding the list")
+    assert_contains(app_js, 'removeButton.textContent = "Remove"', "guest email fields must include a remove button")
+    assert_contains(app_js, "field.remove()", "guest remove buttons must delete their guest field")
+    assert_contains(app_js, "function clearGuestFields()", "successful submissions must clear dynamic guest fields")
+    assert_contains(app_js, "selectedTimeSummary.textContent = `Selected ${formatSelectedSlot()}.`", "details step must show the selected time above visitor fields")
+    assert_contains(app_js, "appointmentTypes.length === 1", "single appointment pages must auto-select the only appointment type")
+    assert_contains(app_js, "No appointment types are available.", "no-active-appointment pages must show an empty state")
+    assert_contains(app_js, "function applyPreviewMode()", "local previews must be visually distinct")
+    assert_contains(app_js, 'document.body.classList.toggle("local-preview", isLocalPreview)', "local previews must tag the body")
+    assert_contains(app_js, "return [...new Set(preferredZones.filter(Boolean))];", "timezone choices must stay compact instead of dumping every IANA zone")
+    select_slot_body = app_js.split("function selectSlot(slotID)", 1)[1].split("function updateSelectedTimeChoice()", 1)[0]
+    if "renderTimes()" in select_slot_body:
+        raise SystemExit("selecting a time must not rebuild the scrollable time list")
+    if app_js.index("const envelope = await encryptRequest") > app_js.index("await fetch(`${state.config.inbox.url}"):
+        raise SystemExit("request submission must encrypt before network submission")
+
+    forbidden_runtime = ["googletagmanager", "google-analytics", "plausible.io", "cdn.jsdelivr", "unpkg.com"]
+    lower_app = app_js.lower()
+    html = (OUTPUT / "index.html").read_text()
+    assert_contains(html, 'id="preview-banner"', "local preview banner must be present")
+    assert_contains(html, '<button id="back-to-times" class="back-button" type="button" hidden>&larr; Back</button>', "details back button must include a left-arrow label")
+    if html.index('id="back-to-times"') > html.index('id="selected-title"'):
+        raise SystemExit("details back button must appear above the changing step heading")
+    assert_contains(html, 'id="selected-time-summary"', "details step must include a selected-time summary")
+    assert_contains(html, '<details class="timezone-control">', "timezone selection must be progressive disclosure")
+    if html.index('id="selected-time-summary"') > html.index('for="visitor-name"'):
+        raise SystemExit("selected-time summary must appear above name and email fields")
+    lower_html = html.lower()
+    css = (OUTPUT / "assets" / "styles.css").read_text()
+    assert_contains(css, ".preview-banner", "local preview banner must be styled")
+    assert_contains(css, "max-height: min(64vh, 720px);", "large appointment lists must stay scrollable")
+    assert_contains(css, "overflow: auto;", "large appointment lists must not push the scheduler away")
+    for value in forbidden_runtime:
+        if value in lower_app or value in lower_html:
+            raise SystemExit(f"third-party runtime dependency found: {value}")
+
+    if not (OUTPUT / "assets" / "app-icon.png").exists():
+        raise SystemExit("booking page must include the app icon for link previews")
+    assert_contains(html, 'property="og:image" content="assets/app-icon.png"', "booking page must use the app icon as its Open Graph image")
+    assert_contains(html, 'name="twitter:image" content="assets/app-icon.png"', "booking page must use the app icon as its Twitter image")
+    assert_contains(html, 'rel="apple-touch-icon" href="assets/app-icon.png"', "booking page must use the app icon as its touch icon")
+
+    site_config = json.loads((OUTPUT / "public" / "site-config.json").read_text())
+    if "publicKeyJwk" not in site_config["encryption"]:
+        raise SystemExit("site config must publish a browser encryption key")
+    if "fingerprint" not in site_config.get("version", {}):
+        raise SystemExit("site config must publish a version fingerprint for live verification")
+    appointment_type = site_config["appointmentTypes"][0]
+    if appointment_type["weeklyHours"][0]["weekday"] != 2:
+        raise SystemExit("appointment type weekly hours must publish weekday schedules")
+    if appointment_type["weeklyHours"][0]["windows"][0]["endMinuteOfDay"] != 16 * 60 + 30:
+        raise SystemExit("appointment type weekly hours must publish configured windows")
+    if "refresh_token" in json.dumps(site_config).lower():
+        raise SystemExit("site config contains secret-looking data")
+
+    print(f"Validated booking site template at {OUTPUT}")
+    return 0
+
+
+def assert_contains(text: str, needle: str, message: str) -> None:
+    if needle not in text:
+        raise SystemExit(message)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

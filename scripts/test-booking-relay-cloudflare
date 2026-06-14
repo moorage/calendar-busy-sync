@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+"""Validate the Cloudflare encrypted inbox template."""
+
+from __future__ import annotations
+
+import shutil
+import subprocess
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+CLOUDFLARE = ROOT / "templates" / "booking-relay" / "cloudflare"
+
+
+def main() -> int:
+    worker = (CLOUDFLARE / "src" / "worker.js").read_text()
+    for needle in [
+        "POST /v1/inboxes",
+        "MAX_BODY_BYTES",
+        "rateLimit",
+        "MAX_PENDING_REQUESTS",
+        "TURNSTILE_SECRET_KEY",
+        "assertAllowedOrigin",
+        "assertAdmin",
+        "BOOKING_REQUESTS",
+        "allowedOrigin",
+        "storage",
+    ]:
+        if needle not in worker and needle not in (CLOUDFLARE / "README.md").read_text():
+            raise SystemExit(f"Cloudflare template missing {needle}")
+
+    if "console.log" in worker or "console.error" in worker:
+        raise SystemExit("Cloudflare template must not log request bodies or errors by default")
+
+    if shutil.which("node"):
+        subprocess.run(
+            ["node", "--input-type=module", "--check"],
+            input=worker,
+            text=True,
+            cwd=ROOT,
+            check=True,
+        )
+
+    print("Validated Cloudflare encrypted inbox template")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

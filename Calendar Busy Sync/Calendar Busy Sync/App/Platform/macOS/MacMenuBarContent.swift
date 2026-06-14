@@ -89,7 +89,7 @@ struct MacMenuBarContent: View {
     }
 }
 
-private struct MenuPresentationSnapshot: Equatable {
+struct MenuPresentationSnapshot: Equatable {
     let currentActivitySummary: String
     let currentActivityIconName: String
     let pendingActivityLabel: String

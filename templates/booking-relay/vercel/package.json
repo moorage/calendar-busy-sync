@@ -1,0 +1,11 @@
+{
+  "name": "calendar-busy-sync-booking-inbox",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@vercel/blob": "^0.27.0"
+  },
+  "scripts": {
+    "check": "node --check api/healthz.js && node --check \"api/v1/inboxes/[inboxId]/requests.js\" && node --check \"api/v1/inboxes/[inboxId]/requests/[requestId].js\" && node --check lib/http.js && node --check lib/inbox-store.js"
+  }
+}

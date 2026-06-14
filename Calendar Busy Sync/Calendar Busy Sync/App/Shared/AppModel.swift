@@ -35,6 +35,31 @@ enum LiveGoogleSmokeStatus: Equatable {
     }
 }
 
+private enum BookingCalendarTargetProvider: String {
+    case automatic
+    case apple
+    case google
+}
+
+struct BookingCalendarTargetOption: Identifiable, Equatable {
+    var id: String
+    var label: String
+    var detail: String
+
+    static func apple(calendarID: String) -> String {
+        "apple|\(calendarID)"
+    }
+
+    static func google(accountID: String, calendarID: String) -> String {
+        "google|\(accountID)|\(calendarID)"
+    }
+}
+
+private struct BookingSiteBuildWriteResult {
+    var writtenFileCount: Int
+    var busyIntervalCount: Int
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     @Published private(set) var state: ScenarioState?
@@ -90,6 +115,18 @@ final class AppModel: ObservableObject {
     @Published private(set) var sharedConfigurationSyncState: SharedConfigurationSyncState
     @Published private(set) var runtimeAuditTrailEntries: [AuditTrailEntry] = []
     @Published private(set) var iosBackgroundRefreshState: IOSBackgroundRefreshState
+    @Published private(set) var bookingSetupSnapshot: BookingSetupSnapshot
+    @Published private(set) var bookingLastGeneratedFingerprintString: String
+    @Published private(set) var bookingLastServedFingerprintString: String
+    @Published private(set) var bookingLastGeneratedAt: Date?
+    @Published private(set) var bookingLastUploadedAt: Date?
+    @Published private(set) var bookingLastVerifiedAt: Date?
+    @Published private(set) var isBookingTestRequestInFlight = false
+    @Published private(set) var isBookingImportInFlight = false
+    @Published private(set) var isBookingApprovalInFlight = false
+    @Published private(set) var bookingAvailabilityPublishSummary: String?
+    @Published private(set) var importedBookingRequests: [BookingImportedRequest] = []
+    @Published private(set) var bookingAppointmentTypes: [BookingAppointmentType] = []
     @Published var pollIntervalMinutes: Int {
         didSet {
             guard !isApplyingSharedConfiguration else { return }
@@ -128,6 +165,118 @@ final class AppModel: ObservableObject {
             persistSettingsAndRefreshGoogleConfiguration()
         }
     }
+    @Published var bookingPageURLString: String {
+        didSet {
+            persistBookingSettings()
+        }
+    }
+    @Published var bookingInboxURLString: String {
+        didSet {
+            persistBookingSettings()
+            markBookingInboxConfigured(oldValue: oldValue, newValue: bookingInboxURLString)
+        }
+    }
+    @Published var bookingInboxAdminTokenString: String {
+        didSet {
+            persistBookingAdminToken()
+        }
+    }
+    @Published var bookingGitHubRepositoryString: String {
+        didSet {
+            persistBookingSettings()
+        }
+    }
+    @Published var bookingGitHubBranchString: String {
+        didSet {
+            persistBookingSettings()
+        }
+    }
+    @Published private(set) var bookingGitHubDeployKeyPublicKeyString: String
+    @Published private(set) var bookingGitHubDeployKeyFingerprintString: String
+    @Published private(set) var bookingGitHubDeployKeyRepositoryString: String
+    @Published private(set) var bookingGitHubDeployKeyVerifiedAt: Date?
+    @Published var bookingVercelScopeString: String {
+        didSet {
+            persistBookingSettings()
+        }
+    }
+    @Published var bookingVercelProjectNameString: String {
+        didSet {
+            persistBookingSettings()
+        }
+    }
+    @Published var bookingPublicNameString: String {
+        didSet {
+            persistBookingSettings()
+            markBookingCustomizationChanged(oldValue: oldValue, newValue: bookingPublicNameString)
+        }
+    }
+    @Published var bookingPageTitleString: String {
+        didSet {
+            persistBookingSettings()
+            markBookingCustomizationChanged(oldValue: oldValue, newValue: bookingPageTitleString)
+        }
+    }
+    @Published var bookingPageSubtitleString: String {
+        didSet {
+            persistBookingSettings()
+            markBookingCustomizationChanged(oldValue: oldValue, newValue: bookingPageSubtitleString)
+        }
+    }
+    @Published var bookingTimeZoneIdentifierString: String {
+        didSet {
+            persistBookingSettings()
+            markBookingCustomizationChanged(oldValue: oldValue, newValue: bookingTimeZoneIdentifierString)
+        }
+    }
+    @Published var bookingThemeAccentColorString: String {
+        didSet {
+            persistBookingSettings()
+            markBookingCustomizationChanged(oldValue: oldValue, newValue: bookingThemeAccentColorString)
+        }
+    }
+    @Published var bookingThemeBackgroundColorString: String {
+        didSet {
+            persistBookingSettings()
+            markBookingCustomizationChanged(oldValue: oldValue, newValue: bookingThemeBackgroundColorString)
+        }
+    }
+    @Published var bookingThemeTextColorString: String {
+        didSet {
+            persistBookingSettings()
+            markBookingCustomizationChanged(oldValue: oldValue, newValue: bookingThemeTextColorString)
+        }
+    }
+    @Published var bookingCalendarTargetProviderString: String {
+        didSet {
+            persistBookingSettings()
+        }
+    }
+    @Published var bookingAppleTargetCalendarIDString: String {
+        didSet {
+            persistBookingSettings()
+        }
+    }
+    @Published var bookingGoogleTargetAccountIDString: String {
+        didSet {
+            persistBookingSettings()
+        }
+    }
+    @Published var bookingGoogleTargetCalendarIDString: String {
+        didSet {
+            persistBookingSettings()
+        }
+    }
+    @Published var selectedBookingAppointmentTypeIDString: String {
+        didSet {
+            persistBookingSettings()
+        }
+    }
+    @Published var isAutomaticBookingApprovalEnabled: Bool {
+        didSet {
+            persistBookingSettings()
+        }
+    }
     @Published var selectedAppleCalendarID: String {
         didSet {
             guard !isApplyingSharedConfiguration else { return }
@@ -156,6 +305,8 @@ final class AppModel: ObservableObject {
     private let iosBackgroundRefreshScheduler: any IOSBackgroundRefreshScheduling
     private let appleCalendarService: any AppleCalendarProviding
     private let appleCalendarSettingsOpener: any AppleCalendarSettingsOpening
+    private let bookingSecretStore: any BookingSecretStoring
+    private let bookingInviteFileWriter: any BookingInviteFileWriting
     private let googleCalendarService: GoogleCalendarService
     private let googleAccountStore: any GoogleAccountStoring
     private let googleSignInEnvironment: GoogleSignInEnvironment
@@ -164,6 +315,7 @@ final class AppModel: ObservableObject {
     private var hasPrepared = false
     private var hasAttemptedLiveGoogleSmoke = false
     private var syncLoopTask: Task<Void, Never>?
+    private var isBookingAvailabilityPublishInFlight = false
     private var isApplyingSharedConfiguration = false
     private var lastSettingsMutationAt: Date
     private var persistedAppleCalendarReference: SharedAppleCalendarReference?
@@ -182,6 +334,42 @@ final class AppModel: ObservableObject {
         static let selectedGoogleCalendarIDs = "settings.googleCalendar.selectedCalendarIDs"
         static let activeGoogleAccountID = "settings.googleCalendar.activeAccountID"
         static let sharedGoogleAccountDescriptors = "settings.googleCalendar.sharedAccountDescriptors"
+        static let bookingSetupSnapshot = "settings.booking.setupSnapshot"
+        static let bookingLastGeneratedFingerprint = "settings.booking.lastGeneratedFingerprint"
+        static let bookingLastServedFingerprint = "settings.booking.lastServedFingerprint"
+        static let bookingLastGeneratedAt = "settings.booking.lastGeneratedAt"
+        static let bookingLastUploadedAt = "settings.booking.lastUploadedAt"
+        static let bookingLastVerifiedAt = "settings.booking.lastVerifiedAt"
+        static let bookingPageURL = "settings.booking.pageURL"
+        static let bookingInboxURL = "settings.booking.inboxURL"
+        static let selectedBookingAppointmentTypeID = "settings.booking.selectedAppointmentTypeID"
+        static let isAutomaticBookingApprovalEnabled = "settings.booking.automaticApprovalEnabled"
+        static let bookingAppointmentTypes = "settings.booking.appointmentTypes"
+        static let bookingPageFilesFolderPath = "settings.booking.pageFilesFolderPath"
+        static let bookingGitHubRepository = "settings.booking.github.repository"
+        static let bookingGitHubBranch = "settings.booking.github.branch"
+        static let bookingGitHubDeployKeyPublicKey = "settings.booking.github.deployKey.publicKey"
+        static let bookingGitHubDeployKeyFingerprint = "settings.booking.github.deployKey.fingerprint"
+        static let bookingGitHubDeployKeyRepository = "settings.booking.github.deployKey.repository"
+        static let bookingGitHubDeployKeyVerifiedAt = "settings.booking.github.deployKey.verifiedAt"
+        static let bookingVercelScope = "settings.booking.vercel.scope"
+        static let bookingVercelProjectName = "settings.booking.vercel.projectName"
+        static let bookingPublicName = "settings.booking.publicPage.publicName"
+        static let bookingPageTitle = "settings.booking.publicPage.pageTitle"
+        static let bookingPageSubtitle = "settings.booking.publicPage.pageSubtitle"
+        static let bookingTimeZoneIdentifier = "settings.booking.publicPage.timeZoneIdentifier"
+        static let bookingThemeAccentColor = "settings.booking.publicPage.theme.accentColor"
+        static let bookingThemeBackgroundColor = "settings.booking.publicPage.theme.backgroundColor"
+        static let bookingThemeTextColor = "settings.booking.publicPage.theme.textColor"
+        static let bookingCalendarTargetProvider = "settings.booking.calendarTarget.provider"
+        static let bookingAppleTargetCalendarID = "settings.booking.calendarTarget.appleCalendarID"
+        static let bookingGoogleTargetAccountID = "settings.booking.calendarTarget.googleAccountID"
+        static let bookingGoogleTargetCalendarID = "settings.booking.calendarTarget.googleCalendarID"
+    }
+
+    private enum EnvironmentKey {
+        static let uiTestBookingInboxAdminToken = "CALENDAR_BUSY_SYNC_UI_TEST_BOOKING_INBOX_ADMIN_TOKEN"
+        static let uiTestBookingInboxAdminTokenFile = "CALENDAR_BUSY_SYNC_UI_TEST_BOOKING_INBOX_ADMIN_TOKEN_FILE"
     }
 
     init(
@@ -194,6 +382,8 @@ final class AppModel: ObservableObject {
         iosBackgroundRefreshScheduler: (any IOSBackgroundRefreshScheduling)? = nil,
         appleCalendarService: (any AppleCalendarProviding)? = nil,
         appleCalendarSettingsOpener: (any AppleCalendarSettingsOpening)? = nil,
+        bookingSecretStore: (any BookingSecretStoring)? = nil,
+        bookingInviteFileWriter: (any BookingInviteFileWriting)? = nil,
         googleCalendarService: GoogleCalendarService? = nil,
         googleAccountStore: (any GoogleAccountStoring)? = nil,
         googleSignInEnvironment: GoogleSignInEnvironment? = nil,
@@ -202,6 +392,8 @@ final class AppModel: ObservableObject {
     ) {
         let resolvedSharedConfigurationStore = sharedConfigurationStore ?? ICloudSharedAppConfigurationStore()
         let sharedConfigurationEnabled = userDefaults.object(forKey: SettingKey.isSharedConfigurationEnabled) as? Bool ?? true
+        let resolvedGoogleSignInEnvironment = googleSignInEnvironment ?? GoogleSignInEnvironment.current()
+        let resolvedBookingSecretStore = bookingSecretStore ?? BookingKeychainSecretStore()
 
         self.launchOptions = launchOptions
         self.loader = ScenarioLoader()
@@ -213,9 +405,11 @@ final class AppModel: ObservableObject {
         let resolvedAppleCalendarService = appleCalendarService ?? AppleCalendarService()
         self.appleCalendarService = resolvedAppleCalendarService
         self.appleCalendarSettingsOpener = appleCalendarSettingsOpener ?? AppleCalendarSettingsOpener()
+        self.bookingSecretStore = resolvedBookingSecretStore
+        self.bookingInviteFileWriter = bookingInviteFileWriter ?? BookingInviteFileWriter()
         self.googleCalendarService = googleCalendarService ?? GoogleCalendarService()
         self.googleAccountStore = googleAccountStore ?? GoogleAccountStore()
-        self.googleSignInEnvironment = googleSignInEnvironment ?? GoogleSignInEnvironment.current()
+        self.googleSignInEnvironment = resolvedGoogleSignInEnvironment
         self.liveGoogleDebugConfiguration = liveGoogleDebugConfiguration ?? LiveGoogleDebugConfiguration.from(processInfo: processInfo)
         self.iosBackgroundRefreshDebugConfiguration = iosBackgroundRefreshDebugConfiguration ?? IOSBackgroundRefreshDebugConfiguration.from(processInfo: processInfo)
         self.pollIntervalMinutes = Self.loadPollInterval(from: userDefaults)
@@ -236,10 +430,58 @@ final class AppModel: ObservableObject {
         self.googleSelectedCalendarIDs = Self.loadGoogleSelectedCalendarIDs(from: userDefaults)
         self.activeGoogleAccountID = userDefaults.string(forKey: SettingKey.activeGoogleAccountID)
         self.sharedGoogleAccountDescriptors = Self.loadSharedGoogleAccountDescriptors(from: userDefaults)
+        self.bookingSetupSnapshot = Self.loadBookingSetupSnapshot(from: userDefaults)
+        self.bookingLastGeneratedFingerprintString = userDefaults.string(forKey: SettingKey.bookingLastGeneratedFingerprint) ?? ""
+        self.bookingLastServedFingerprintString = userDefaults.string(forKey: SettingKey.bookingLastServedFingerprint) ?? ""
+        self.bookingLastGeneratedAt = userDefaults.object(forKey: SettingKey.bookingLastGeneratedAt) as? Date
+        self.bookingLastUploadedAt = userDefaults.object(forKey: SettingKey.bookingLastUploadedAt) as? Date
+        self.bookingLastVerifiedAt = userDefaults.object(forKey: SettingKey.bookingLastVerifiedAt) as? Date
+        let loadedBookingAppointmentTypes = Self.loadBookingAppointmentTypes(from: userDefaults)
+        self.bookingAppointmentTypes = loadedBookingAppointmentTypes
+        self.bookingPageURLString = userDefaults.string(forKey: SettingKey.bookingPageURL) ?? ""
+        self.bookingInboxURLString = userDefaults.string(forKey: SettingKey.bookingInboxURL) ?? ""
+        self.bookingGitHubRepositoryString = userDefaults.string(forKey: SettingKey.bookingGitHubRepository) ?? ""
+        self.bookingGitHubBranchString = userDefaults.string(forKey: SettingKey.bookingGitHubBranch) ?? "main"
+        self.bookingGitHubDeployKeyPublicKeyString = userDefaults.string(forKey: SettingKey.bookingGitHubDeployKeyPublicKey) ?? ""
+        self.bookingGitHubDeployKeyFingerprintString = userDefaults.string(forKey: SettingKey.bookingGitHubDeployKeyFingerprint) ?? ""
+        self.bookingGitHubDeployKeyRepositoryString = userDefaults.string(forKey: SettingKey.bookingGitHubDeployKeyRepository) ?? ""
+        self.bookingGitHubDeployKeyVerifiedAt = userDefaults.object(forKey: SettingKey.bookingGitHubDeployKeyVerifiedAt) as? Date
+        self.bookingVercelScopeString = userDefaults.string(forKey: SettingKey.bookingVercelScope) ?? ""
+        self.bookingVercelProjectNameString = userDefaults.string(forKey: SettingKey.bookingVercelProjectName) ?? ""
+        self.bookingPublicNameString = userDefaults.string(forKey: SettingKey.bookingPublicName) ?? BookingProfile.example.publicName
+        self.bookingPageTitleString = userDefaults.string(forKey: SettingKey.bookingPageTitle) ?? BookingProfile.example.pageTitle
+        self.bookingPageSubtitleString = userDefaults.string(forKey: SettingKey.bookingPageSubtitle) ?? BookingProfile.example.pageSubtitle
+        self.bookingTimeZoneIdentifierString = userDefaults.string(forKey: SettingKey.bookingTimeZoneIdentifier) ?? BookingProfile.example.timeZoneIdentifier
+        self.bookingThemeAccentColorString = userDefaults.string(forKey: SettingKey.bookingThemeAccentColor) ?? BookingTheme.defaultValue.accentColor
+        self.bookingThemeBackgroundColorString = userDefaults.string(forKey: SettingKey.bookingThemeBackgroundColor) ?? BookingTheme.defaultValue.backgroundColor
+        self.bookingThemeTextColorString = userDefaults.string(forKey: SettingKey.bookingThemeTextColor) ?? BookingTheme.defaultValue.textColor
+        self.bookingCalendarTargetProviderString = userDefaults.string(forKey: SettingKey.bookingCalendarTargetProvider) ?? ""
+        self.bookingAppleTargetCalendarIDString = userDefaults.string(forKey: SettingKey.bookingAppleTargetCalendarID) ?? ""
+        self.bookingGoogleTargetAccountIDString = userDefaults.string(forKey: SettingKey.bookingGoogleTargetAccountID) ?? ""
+        self.bookingGoogleTargetCalendarIDString = userDefaults.string(forKey: SettingKey.bookingGoogleTargetCalendarID) ?? ""
+        self.selectedBookingAppointmentTypeIDString = userDefaults.string(forKey: SettingKey.selectedBookingAppointmentTypeID)
+            ?? loadedBookingAppointmentTypes.first?.id.rawValue
+            ?? ""
+        self.isAutomaticBookingApprovalEnabled = userDefaults.object(forKey: SettingKey.isAutomaticBookingApprovalEnabled) as? Bool ?? false
+        let storedBookingInboxAdminToken = (try? resolvedBookingSecretStore.loadAdminToken()) ?? ""
+        let uiTestBookingInboxAdminToken = Self.loadUITestBookingInboxAdminToken(
+            launchOptions: launchOptions,
+            processInfo: processInfo,
+            fileManager: fileManager
+        )
+        self.bookingInboxAdminTokenString = storedBookingInboxAdminToken.isEmpty
+            ? uiTestBookingInboxAdminToken.trimmingCharacters(in: .whitespacesAndNewlines)
+            : storedBookingInboxAdminToken
+        try? resolvedBookingSecretStore.deleteLegacyGitHubToken()
         self.iosBackgroundRefreshState = Self.initialIOSBackgroundRefreshState(
             launchOptions: launchOptions,
             scheduler: self.iosBackgroundRefreshScheduler
         )
+        if self.bookingInboxAdminTokenString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           self.bookingSetupSnapshot.inboxStatus == .connected
+        {
+            self.bookingSetupSnapshot.inboxStatus = .reachable
+        }
         if self.liveGoogleDebugConfiguration.isEnabled {
             self.liveGoogleSmokeStatus = .awaitingAuthentication
         }
@@ -653,6 +895,205 @@ final class AppModel: ObservableObject {
             + (selectedAppleCalendar == nil ? 0 : 1)
     }
 
+    var bookingApprovalCalendarTargetSummary: String {
+        if let calendar = bookingAppleCalendarTarget {
+            return "Apple / iCloud: \(calendar.displayName)"
+        }
+
+        if let target = bookingGoogleCalendarTarget {
+            let account = target.account
+            let calendar = target.calendar
+            return "Google: \(calendar.displayName) (\(account.email))"
+        }
+
+        return "No target calendar selected"
+    }
+
+    var bookingApprovalCalendarDetail: String {
+        if let calendar = bookingAppleCalendarTarget {
+            return "Accepted bookings are added to \(calendar.displayName). iCloud calendars also save an invite file with attendees."
+        }
+
+        if let target = bookingGoogleCalendarTarget {
+            let account = target.account
+            let calendar = target.calendar
+            return "Accepted bookings are added to \(calendar.displayName) for \(account.email)."
+        }
+
+        return "Select an Apple / iCloud calendar or a Google calendar before approving requests or enabling automatic acceptance."
+    }
+
+    var bookingCalendarTargetWarning: String? {
+        guard bookingCalendarTargetOptions.isEmpty else {
+            return nil
+        }
+
+        switch appleCalendarAuthorizationState {
+        case .denied:
+            return "Apple Calendar access is denied for this app. Re-enable it in System Settings > Privacy & Security > Calendars."
+        case .restricted:
+            return "Apple Calendar access is restricted on this device, so Booking cannot load Apple or iCloud target calendars."
+        case .notDetermined:
+            return "Grant Apple Calendar access or connect Google on this device before Booking can write accepted requests to a calendar."
+        case .granted:
+            break
+        }
+
+        let pendingLocalConnectionCount = googleAccountRosterRows.filter {
+            $0.kind == .needsLocalConnection
+        }.count
+
+        if pendingLocalConnectionCount > 0 {
+            let sharedAccountMessage = pendingLocalConnectionCount == 1
+                ? "A shared Google calendar is configured, but this Mac still needs local Google sign-in before Booking can write accepted requests to it."
+                : "\(pendingLocalConnectionCount) shared Google calendars are configured, but this Mac still needs local Google sign-in before Booking can write accepted requests to them."
+
+            if let blockingReason = googleSignInEnvironment.blockingReason {
+                return "\(sharedAccountMessage) \(blockingReason)"
+            }
+
+            return sharedAccountMessage
+        }
+
+        if let blockingReason = googleSignInEnvironment.blockingReason {
+            return blockingReason
+        }
+
+        if let googleAuthMessage {
+            return googleAuthMessage
+        }
+
+        if case let .invalid(message) = googleOAuthResolution {
+            return message
+        }
+
+        return nil
+    }
+
+    var bookingApprovalGoogleTargetAccountID: String? {
+        bookingGoogleCalendarTarget?.account.id
+    }
+
+    var bookingApprovalAppleTargetIsSelected: Bool {
+        bookingAppleCalendarTarget != nil
+    }
+
+    var bookingCalendarTargetOptions: [BookingCalendarTargetOption] {
+        let appleOptions = appleCalendars.map { calendar in
+            BookingCalendarTargetOption(
+                id: BookingCalendarTargetOption.apple(calendarID: calendar.id),
+                label: calendar.displayName,
+                detail: "Apple / iCloud"
+            )
+        }
+        let googleOptions = googleAccountCards.flatMap { card in
+            card.calendars.map { calendar in
+                BookingCalendarTargetOption(
+                    id: BookingCalendarTargetOption.google(accountID: card.id, calendarID: calendar.id),
+                    label: calendar.displayName,
+                    detail: "Google • \(card.account.email)"
+                )
+            }
+        }
+        return appleOptions + googleOptions
+    }
+
+    var selectedBookingCalendarTargetOptionID: String {
+        if let calendar = bookingAppleCalendarTarget {
+            return BookingCalendarTargetOption.apple(calendarID: calendar.id)
+        }
+
+        if let target = bookingGoogleCalendarTarget {
+            return BookingCalendarTargetOption.google(
+                accountID: target.account.id,
+                calendarID: target.calendar.id
+            )
+        }
+
+        return ""
+    }
+
+    private var bookingTargetProvider: BookingCalendarTargetProvider {
+        BookingCalendarTargetProvider(rawValue: bookingCalendarTargetProviderString) ?? .automatic
+    }
+
+    private var bookingAppleCalendarTarget: AppleCalendarSummary? {
+        guard bookingTargetProvider != .google else {
+            return nil
+        }
+
+        let targetCalendarID = bookingAppleTargetCalendarIDString.isEmpty
+            ? selectedAppleCalendarID
+            : bookingAppleTargetCalendarIDString
+        return appleCalendars.first(where: { $0.id == targetCalendarID })
+    }
+
+    private var bookingGoogleCalendarTarget: (account: StoredGoogleAccount, calendar: GoogleCalendarSummary)? {
+        if bookingTargetProvider == .google,
+           let account = storedGoogleAccount(id: bookingGoogleTargetAccountIDString),
+           let calendar = googleCalendarsByAccountID[account.id]?.first(where: { $0.id == bookingGoogleTargetCalendarIDString }) {
+            return (account, calendar)
+        }
+
+        guard bookingTargetProvider == .automatic || bookingTargetProvider == .google else {
+            return nil
+        }
+
+        if let accountID = activeResolvedGoogleAccountID,
+           let account = storedGoogleAccount(id: accountID),
+           let calendar = selectedGoogleCalendar(for: accountID) {
+            return (account, calendar)
+        }
+
+        return nil
+    }
+
+    private func bookingAppleCalendarTarget(
+        for appointmentType: BookingAppointmentType,
+        allowsFallback: Bool = true
+    ) -> AppleCalendarSummary? {
+        guard let target = appointmentType.calendarTarget else {
+            return allowsFallback ? bookingAppleCalendarTarget : nil
+        }
+
+        guard target.provider == .apple else {
+            return nil
+        }
+
+        return appleCalendars.first(where: { $0.id == target.calendarID })
+    }
+
+    private func bookingGoogleCalendarTarget(
+        for appointmentType: BookingAppointmentType,
+        allowsFallback: Bool = true
+    ) -> (account: StoredGoogleAccount, calendar: GoogleCalendarSummary)? {
+        guard let target = appointmentType.calendarTarget else {
+            return allowsFallback ? bookingGoogleCalendarTarget : nil
+        }
+
+        guard target.provider == .google,
+              let accountID = target.accountID,
+              let account = storedGoogleAccount(id: accountID),
+              let calendar = googleCalendarsByAccountID[accountID]?.first(where: { $0.id == target.calendarID })
+        else {
+            return nil
+        }
+
+        return (account, calendar)
+    }
+
+    private func defaultBookingAppointmentCalendarTarget() -> BookingAppointmentCalendarTarget? {
+        if let calendar = bookingAppleCalendarTarget {
+            return .apple(calendarID: calendar.id)
+        }
+
+        if let target = bookingGoogleCalendarTarget {
+            return .google(accountID: target.account.id, calendarID: target.calendar.id)
+        }
+
+        return nil
+    }
+
     var appleConnectionStatusLabel: String {
         if isAppleCalendarOperationInFlight {
             return isAppleCalendarEnabled ? "Updating…" : "Connecting…"
@@ -904,6 +1345,749 @@ final class AppModel: ObservableObject {
         return runtimeAuditTrailEntries
     }
 
+    var bookingPageStatusLabel: String {
+        bookingSetupSnapshot.pageStatus.label
+    }
+
+    var bookingPageEvidenceLines: [String] {
+        var lines: [String] = []
+        if let bookingLastGeneratedAt {
+            lines.append("Generated \(Self.syncTimestampFormatter.string(from: bookingLastGeneratedAt))")
+        }
+        if let bookingLastUploadedAt {
+            lines.append("Uploaded \(Self.syncTimestampFormatter.string(from: bookingLastUploadedAt))")
+        }
+        if let bookingLastVerifiedAt {
+            lines.append("Verified \(Self.syncTimestampFormatter.string(from: bookingLastVerifiedAt))")
+        }
+        if !bookingLastGeneratedFingerprintString.isEmpty {
+            lines.append("Latest local version \(String(bookingLastGeneratedFingerprintString.prefix(12)))")
+        }
+        if !bookingLastServedFingerprintString.isEmpty {
+            lines.append("Live page version \(String(bookingLastServedFingerprintString.prefix(12)))")
+        }
+        if let bookingAvailabilityPublishSummary {
+            lines.append(bookingAvailabilityPublishSummary)
+        }
+        return lines
+    }
+
+    var bookingInboxStatusLabel: String {
+        bookingSetupSnapshot.inboxStatus.label
+    }
+
+    var bookingPagePreviewSummary: String {
+        "\(bookingResolvedPageTitle) / \(bookingResolvedPublicName) / \(bookingResolvedTheme.accentColor)"
+    }
+
+    var bookingPageSafetyLines: [String] {
+        [
+            "Public config includes appointment copy, public key, inbox URL, and version fingerprint.",
+            "Secret scan runs before writing generated config and availability.",
+            "Protected files keep slot signing, request encryption, and relay protocol behavior intact.",
+        ]
+    }
+
+    var bookingSafeCustomizationFileLines: [String] {
+        [
+            "content/profile.md",
+            "content/appointment-types/*.md",
+            "content/default-copy.json",
+            "assets/styles.css",
+        ]
+    }
+
+    var bookingProtectedProtocolFileLines: [String] {
+        [
+            "assets/app.js",
+            "public/site-config.json",
+            "public/availability/*.json",
+        ]
+    }
+
+    var bookingVercelEnvironmentLines: [String] {
+        [
+            "ALLOWED_ORIGIN=\(bookingExpectedAllowedOriginString.isEmpty ? "https://owner.github.io" : bookingExpectedAllowedOriginString)",
+            "INBOX_ADMIN_TOKEN=(store only in Vercel and this app)",
+            "MAX_PENDING_REQUESTS=100",
+        ]
+    }
+
+    var bookingRequestInboxEvidenceLines: [String] {
+        var lines = ["Status \(bookingInboxStatusLabel)"]
+        if !bookingExpectedAllowedOriginString.isEmpty {
+            lines.append("Expected origin \(bookingExpectedAllowedOriginString)")
+        }
+        if !bookingInboxURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            lines.append("Inbox URL configured")
+        }
+        if !bookingInboxAdminTokenString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            lines.append("Admin token stored locally")
+        }
+        lines.append(contentsOf: bookingVercelEnvironmentLines)
+        return lines
+    }
+
+    var bookingExpectedAllowedOriginString: String {
+        guard let url = URL(string: bookingPageURLString.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            return ""
+        }
+
+        return Self.originString(for: url)
+    }
+
+    var bookingRequestsStatusLabel: String {
+        bookingSetupSnapshot.requestsLabel
+    }
+
+    var bookingResolvedProfile: BookingProfile {
+        BookingProfile(
+            id: BookingProfileID("default"),
+            publicName: bookingResolvedPublicName,
+            pageTitle: bookingResolvedPageTitle,
+            pageSubtitle: bookingPageSubtitleString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? BookingProfile.example.pageSubtitle
+                : bookingPageSubtitleString.trimmingCharacters(in: .whitespacesAndNewlines),
+            timeZoneIdentifier: TimeZone(identifier: bookingTimeZoneIdentifierString.trimmingCharacters(in: .whitespacesAndNewlines))?.identifier
+                ?? BookingProfile.example.timeZoneIdentifier
+        )
+    }
+
+    var bookingResolvedTheme: BookingTheme {
+        BookingTheme(
+            accentColor: Self.normalizedHexColor(bookingThemeAccentColorString, fallback: BookingTheme.defaultValue.accentColor),
+            backgroundColor: Self.normalizedHexColor(bookingThemeBackgroundColorString, fallback: BookingTheme.defaultValue.backgroundColor),
+            textColor: Self.normalizedHexColor(bookingThemeTextColorString, fallback: BookingTheme.defaultValue.textColor)
+        )
+    }
+
+    private var bookingResolvedPublicName: String {
+        let value = bookingPublicNameString.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? BookingProfile.example.publicName : value
+    }
+
+    private var bookingResolvedPageTitle: String {
+        let value = bookingPageTitleString.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? "Request time with \(bookingResolvedPublicName)" : value
+    }
+
+    private var bookingResolvedShareID: BookingShareID {
+        let slug = bookingAppointmentTypes.first { !$0.isPaused }?.slug
+            ?? bookingAppointmentTypes.first?.slug
+            ?? "intro-call"
+        return BookingShareID(slug)
+    }
+
+    var selectedBookingAppointmentType: BookingAppointmentType? {
+        bookingAppointmentTypes.first { $0.id.rawValue == selectedBookingAppointmentTypeIDString }
+            ?? bookingAppointmentTypes.first
+    }
+
+    var selectedBookingAppointmentTypeURL: URL? {
+        guard let selectedBookingAppointmentType else {
+            return nil
+        }
+
+        return bookingPageURL(for: selectedBookingAppointmentType)
+    }
+
+    var selectedBookingAppointmentTypeURLString: String {
+        selectedBookingAppointmentTypeURL?.absoluteString ?? ""
+    }
+
+    var canUseSelectedBookingAppointmentTypeURL: Bool {
+        selectedBookingAppointmentTypeURL != nil && selectedBookingAppointmentType?.isPaused == false
+    }
+
+    var inferredBookingPageURLString: String {
+        guard let repository = try? BookingGitHubRepository(rawValue: bookingGitHubRepositoryString) else {
+            return ""
+        }
+
+        return repository.pagesURL.absoluteString
+    }
+
+    var canUseInferredBookingPageURL: Bool {
+        !inferredBookingPageURLString.isEmpty
+    }
+
+    var canGenerateBookingGitHubDeployKey: Bool {
+        (try? BookingGitHubRepository(rawValue: bookingGitHubRepositoryString)) != nil
+    }
+
+    var hasMatchingBookingGitHubDeployKey: Bool {
+        guard let repository = try? BookingGitHubRepository(rawValue: bookingGitHubRepositoryString) else {
+            return false
+        }
+
+        return bookingGitHubDeployKeyRepositoryString == repository.slug
+            && !bookingGitHubDeployKeyPublicKeyString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var bookingGitHubDeployKeyStatusMessage: String {
+        guard !bookingGitHubDeployKeyPublicKeyString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return "Generate a deploy key, add the public key to this GitHub repository with write access, then verify it."
+        }
+
+        let repositorySuffix = bookingGitHubDeployKeyRepositoryString.isEmpty
+            ? ""
+            : " for \(bookingGitHubDeployKeyRepositoryString)"
+        if let verifiedAt = bookingGitHubDeployKeyVerifiedAt {
+            let verifiedLabel = Self.messageTimestampLabel(for: verifiedAt) ?? Self.syncTimestampFormatter.string(from: verifiedAt)
+            return "Deploy key\(repositorySuffix) verified \(verifiedLabel)."
+        }
+
+        return "Deploy key\(repositorySuffix) generated. Add the public key to GitHub with write access, then verify it."
+    }
+
+    var canPublishBookingPageToGitHub: Bool {
+        (try? BookingGitHubRepository(rawValue: bookingGitHubRepositoryString)) != nil
+            && hasMatchingBookingGitHubDeployKey
+    }
+
+    var shouldConfirmBookingPublishOnDismiss: Bool {
+        bookingSetupSnapshot.pageStatus == .needsPublish
+            && canPublishBookingPageToGitHub
+            && hasActiveBookingAppointmentTypes
+    }
+
+    var canVerifyBookingPage: Bool {
+        let trimmedURL = bookingPageURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmedURL),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "https",
+              url.host?.isEmpty == false
+        else {
+            return false
+        }
+
+        return true
+    }
+
+    var hasActiveBookingAppointmentTypes: Bool {
+        bookingAppointmentTypes.contains { !$0.isPaused }
+    }
+
+    var canRunBookingDryRun: Bool {
+        true
+    }
+
+    var bookingPageFilesFolderPath: String {
+        bookingSiteBuildOutputURL.path
+    }
+
+    var bookingPageFilesFolderURL: URL {
+        bookingSiteBuildOutputURL
+    }
+
+    var bookingPageTemplateFolderPath: String {
+        bookingEditableTemplateURL.path
+    }
+
+    var bookingPageTemplateFolderURL: URL {
+        bookingEditableTemplateURL
+    }
+
+    var canCreateGoogleMeetForBookingTarget: Bool {
+        selectedBookingAppointmentType.map { canCreateGoogleMeet(for: $0) } ?? false
+    }
+
+    var bookingPublishActionTitle: String {
+        bookingPageURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? BookingCopy.Action.runDryRun
+            : BookingCopy.Action.publishPage
+    }
+
+    var bookingPublishActionIconName: String {
+        bookingPageURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? BookingIconography.pageStep.primarySystemName
+            : BookingIconography.publishPage.primarySystemName
+    }
+
+    var canCheckBookingInbox: Bool {
+        !bookingInboxURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var canSendBookingTestRequest: Bool {
+        bookingSetupSnapshot.inboxStatus == .connected
+            && !bookingPageURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !isBookingTestRequestInFlight
+    }
+
+    var canImportBookingRequests: Bool {
+        bookingSetupSnapshot.inboxStatus == .connected
+            && !bookingInboxAdminTokenString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !isBookingImportInFlight
+    }
+
+    var hasImportedBookingRequests: Bool {
+        !importedBookingRequests.isEmpty
+    }
+
+    var activeBookingRequests: [BookingImportedRequest] {
+        importedBookingRequests.filter { request in
+            request.status != .approved && request.status != .declined
+        }
+    }
+
+    var hasActiveBookingRequests: Bool {
+        !activeBookingRequests.isEmpty
+    }
+
+    var bookingRequestHistory: [BookingImportedRequest] {
+        importedBookingRequests
+    }
+
+    var hasBookingRequestHistory: Bool {
+        !bookingRequestHistory.isEmpty
+    }
+
+    func bookingPageURL(for appointmentType: BookingAppointmentType) -> URL? {
+        guard !appointmentType.isPaused else {
+            return nil
+        }
+
+        let trimmedURL = bookingPageURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard var components = URLComponents(string: trimmedURL),
+              let scheme = components.scheme?.lowercased(),
+              scheme == "https",
+              components.host?.isEmpty == false
+        else {
+            return nil
+        }
+
+        var queryItems = components.queryItems?.filter { $0.name != "appointment" } ?? []
+        queryItems.append(URLQueryItem(name: "appointment", value: appointmentType.slug))
+        components.queryItems = queryItems
+        return components.url
+    }
+
+    func canCreateGoogleMeet(for appointmentType: BookingAppointmentType) -> Bool {
+        bookingGoogleCalendarTarget(for: appointmentType, allowsFallback: false) != nil
+    }
+
+    func bookingCalendarTargetSummary(for appointmentType: BookingAppointmentType) -> String {
+        if let calendar = bookingAppleCalendarTarget(for: appointmentType, allowsFallback: false) {
+            return "Apple / iCloud: \(calendar.displayName)"
+        }
+
+        if let target = bookingGoogleCalendarTarget(for: appointmentType, allowsFallback: false) {
+            return "Google: \(target.calendar.displayName) (\(target.account.email))"
+        }
+
+        return "No target calendar selected"
+    }
+
+    func bookingCalendarTargetDetail(for appointmentType: BookingAppointmentType) -> String {
+        if let calendar = bookingAppleCalendarTarget(for: appointmentType, allowsFallback: false) {
+            return calendar.isLikelyICloud
+                ? "Accepted \(appointmentType.name) requests are added here. iCloud targets also save an invite file with attendees."
+                : "Accepted \(appointmentType.name) requests are added here."
+        }
+
+        if let target = bookingGoogleCalendarTarget(for: appointmentType, allowsFallback: false) {
+            return "Accepted \(appointmentType.name) requests are added to \(target.calendar.displayName) for \(target.account.email)."
+        }
+
+        return "Choose where accepted \(appointmentType.name) requests should create calendar events."
+    }
+
+    func selectedBookingCalendarTargetOptionID(for appointmentTypeID: AppointmentTypeID) -> String {
+        bookingAppointmentTypes.first(where: { $0.id == appointmentTypeID })?.calendarTarget?.optionID ?? ""
+    }
+
+    func bookingAppointmentTypeLifecycleStatus(_ appointmentType: BookingAppointmentType) -> BookingAppointmentTypeLifecycleStatus {
+        if appointmentType.isPaused {
+            return .paused
+        }
+        if appointmentType.weeklyHours.allSatisfy({ $0.windows.isEmpty }) {
+            return .noSlots
+        }
+        if (try? BookingConfigurationValidator.validateAppointmentTypes(bookingAppointmentTypes)) == nil {
+            return .broken("Validation failed")
+        }
+        switch bookingSetupSnapshot.pageStatus {
+        case .published:
+            return .live
+        case .needsPublish:
+            return .changedLocally
+        case .notPublished, .generatedLocally, .uploaded, .publishFailed, .disabled:
+            return .draft
+        }
+    }
+
+    @discardableResult
+    func addBookingAppointmentType() -> BookingAppointmentType {
+        let slug = uniqueAppointmentSlug(base: "new-meeting")
+        let appointmentType = BookingAppointmentType(
+            id: AppointmentTypeID(slug),
+            slug: slug,
+            name: "New meeting",
+            summary: "A focused conversation.",
+            durationMinutes: 30,
+            availabilityHorizonDays: BookingAppointmentType.defaultAvailabilityHorizonDays,
+            minimumNoticeMinutes: 240,
+            bufferBeforeMinutes: 0,
+            bufferAfterMinutes: 0,
+            weeklyHours: BookingWeeklyHours.weekdayDefault,
+            location: .none,
+            calendarTarget: defaultBookingAppointmentCalendarTarget(),
+            isAutoConfirmEnabled: false,
+            isPaused: false,
+            questions: BookingDraftFactory.defaultAppointmentTypes.first?.questions ?? []
+        )
+        bookingAppointmentTypes.append(appointmentType)
+        selectedBookingAppointmentTypeIDString = appointmentType.id.rawValue
+        persistBookingAppointmentTypes()
+        markBookingPageNeedsPublish(message: "Appointment type added. Generate page files before sharing it.")
+        return appointmentType
+    }
+
+    @discardableResult
+    func duplicateBookingAppointmentType(_ id: AppointmentTypeID) -> BookingAppointmentType? {
+        guard let source = bookingAppointmentTypes.first(where: { $0.id == id }) else {
+            return nil
+        }
+
+        let slug = uniqueAppointmentSlug(base: source.slug)
+        var copy = source
+        copy.id = AppointmentTypeID(slug)
+        copy.slug = slug
+        copy.name = "\(source.name) copy"
+        copy.isPaused = true
+        bookingAppointmentTypes.append(copy)
+        selectedBookingAppointmentTypeIDString = copy.id.rawValue
+        persistBookingAppointmentTypes()
+        markBookingPageNeedsPublish(message: "Appointment type duplicated. Generate page files before sharing it.")
+        return copy
+    }
+
+    func pauseBookingAppointmentType(_ id: AppointmentTypeID) {
+        setBookingAppointmentTypePaused(id, isPaused: true)
+    }
+
+    func resumeBookingAppointmentType(_ id: AppointmentTypeID) {
+        setBookingAppointmentTypePaused(id, isPaused: false)
+    }
+
+    func deleteBookingAppointmentType(_ id: AppointmentTypeID) {
+        guard bookingAppointmentTypes.count > 1 else {
+            markBookingPageNeedsPublish(message: "Keep at least one appointment type.")
+            return
+        }
+
+        bookingAppointmentTypes.removeAll { $0.id == id }
+        if selectedBookingAppointmentTypeIDString == id.rawValue {
+            selectedBookingAppointmentTypeIDString = bookingAppointmentTypes.first?.id.rawValue ?? ""
+        }
+        persistBookingAppointmentTypes()
+        markBookingPageNeedsPublish(message: "Appointment type removed. Generate page files before sharing changes.")
+    }
+
+    func updateBookingAppointmentType(_ appointmentType: BookingAppointmentType) {
+        updateBookingAppointmentType(appointmentType, replacing: appointmentType.id)
+    }
+
+    func updateBookingAppointmentType(_ appointmentType: BookingAppointmentType, replacing originalID: AppointmentTypeID) {
+        do {
+            var nextAppointmentTypes = bookingAppointmentTypes
+            if let index = nextAppointmentTypes.firstIndex(where: { $0.id == originalID }) {
+                nextAppointmentTypes[index] = appointmentType
+            } else {
+                nextAppointmentTypes.append(appointmentType)
+            }
+
+            try BookingConfigurationValidator.validateAppointmentTypes(nextAppointmentTypes)
+            bookingAppointmentTypes = nextAppointmentTypes
+            selectedBookingAppointmentTypeIDString = appointmentType.id.rawValue
+            persistBookingAppointmentTypes()
+            markBookingPageNeedsPublish(message: "Appointment type saved. Generate page files before sharing changes.")
+        } catch {
+            updateBookingSetupSnapshot(
+                BookingSetupSnapshot(
+                    pageStatus: bookingSetupSnapshot.pageStatus,
+                    inboxStatus: bookingSetupSnapshot.inboxStatus,
+                    pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
+                    lastMessage: error.localizedDescription
+                ),
+                auditDetail: "Could not save appointment type. \(error.localizedDescription)"
+            )
+        }
+    }
+
+    func setBookingCalendarTargetOptionID(_ optionID: String, for appointmentTypeID: AppointmentTypeID) {
+        guard let index = bookingAppointmentTypes.firstIndex(where: { $0.id == appointmentTypeID }) else {
+            return
+        }
+
+        guard optionID.isEmpty || BookingAppointmentCalendarTarget.parse(optionID: optionID) != nil else {
+            return
+        }
+
+        bookingAppointmentTypes[index].calendarTarget = BookingAppointmentCalendarTarget.parse(optionID: optionID)
+        selectedBookingAppointmentTypeIDString = appointmentTypeID.rawValue
+        persistBookingAppointmentTypes()
+        updateBookingSetupSnapshot(
+            BookingSetupSnapshot(
+                pageStatus: bookingSetupSnapshot.pageStatus,
+                inboxStatus: bookingSetupSnapshot.inboxStatus,
+                pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
+                lastMessage: optionID.isEmpty
+                    ? "Appointment target calendar cleared."
+                    : "Appointment target calendar updated."
+            ),
+            auditDetail: optionID.isEmpty
+                ? "Booking appointment target calendar cleared."
+                : "Booking appointment target calendar updated."
+        )
+    }
+
+    func useInferredGitHubPagesURL() {
+        let inferredURL = inferredBookingPageURLString
+        guard !inferredURL.isEmpty else {
+            updateBookingSetupSnapshot(
+                BookingSetupSnapshot(
+                    pageStatus: .publishFailed,
+                    inboxStatus: bookingSetupSnapshot.inboxStatus,
+                    pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
+                    lastMessage: "Enter a GitHub repository like owner/repo first."
+                ),
+                auditDetail: "Could not infer a GitHub Pages URL."
+            )
+            return
+        }
+
+        bookingPageURLString = inferredURL
+        markBookingPageNeedsPublish(message: "Booking page URL set from the GitHub repository. Publish page files next.")
+    }
+
+    func generateBookingGitHubDeployKey() async {
+        let repository: BookingGitHubRepository
+        do {
+            repository = try BookingGitHubRepository(rawValue: bookingGitHubRepositoryString)
+        } catch {
+            updateBookingSetupSnapshot(
+                BookingSetupSnapshot(
+                    pageStatus: .publishFailed,
+                    inboxStatus: bookingSetupSnapshot.inboxStatus,
+                    pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
+                    lastMessage: error.localizedDescription
+                ),
+                auditDetail: "Deploy key generation skipped because repository settings are invalid."
+            )
+            return
+        }
+
+        #if os(macOS)
+        do {
+            let deployKey = try await BookingGitHubDeployKeyGenerator.generate(repository: repository, fileManager: fileManager)
+            try bookingSecretStore.saveGitHubDeployKeyPrivateKey(deployKey.privateKeyPEM)
+            recordBookingGitHubDeployKey(
+                publicKey: deployKey.publicKey,
+                fingerprint: deployKey.fingerprint,
+                repository: repository.slug,
+                verifiedAt: nil
+            )
+            updateBookingSetupSnapshot(
+                BookingSetupSnapshot(
+                    pageStatus: bookingSetupSnapshot.pageStatus,
+                    inboxStatus: bookingSetupSnapshot.inboxStatus,
+                    pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
+                    lastMessage: "Deploy key generated. Add the public key to \(repository.slug) with write access, then verify it."
+                ),
+                auditDetail: "Generated a GitHub deploy key for \(repository.slug)."
+            )
+        } catch {
+            updateBookingSetupSnapshot(
+                BookingSetupSnapshot(
+                    pageStatus: .publishFailed,
+                    inboxStatus: bookingSetupSnapshot.inboxStatus,
+                    pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
+                    lastMessage: "Could not generate a deploy key."
+                ),
+                auditDetail: "Deploy key generation failed. \(error.localizedDescription)"
+            )
+        }
+        #else
+        updateBookingSetupSnapshot(
+            BookingSetupSnapshot(
+                pageStatus: .publishFailed,
+                inboxStatus: bookingSetupSnapshot.inboxStatus,
+                pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
+                lastMessage: "GitHub publishing from the app is available on macOS."
+            ),
+            auditDetail: "Deploy key generation skipped on a non-macOS platform."
+        )
+        #endif
+    }
+
+    func verifyBookingGitHubDeployKey() async {
+        let repository: BookingGitHubRepository
+        do {
+            repository = try BookingGitHubRepository(rawValue: bookingGitHubRepositoryString)
+            guard bookingGitHubDeployKeyRepositoryString == repository.slug else {
+                throw BookingConfigurationError.invalidField("Generate a deploy key for \(repository.slug) before verifying.")
+            }
+            let privateKey = try loadBookingGitHubDeployKeyPrivateKey()
+            try await BookingGitHubPublisher.verifyDeployKey(
+                repository: repository,
+                privateKeyPEM: privateKey,
+                fileManager: fileManager
+            )
+        } catch {
+            updateBookingSetupSnapshot(
+                BookingSetupSnapshot(
+                    pageStatus: .publishFailed,
+                    inboxStatus: bookingSetupSnapshot.inboxStatus,
+                    pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
+                    lastMessage: "Deploy key could not reach this GitHub repository."
+                ),
+                auditDetail: "GitHub deploy key verification failed. \(error.localizedDescription)"
+            )
+            return
+        }
+
+        let verifiedAt = Date()
+        recordBookingGitHubDeployKey(
+            publicKey: bookingGitHubDeployKeyPublicKeyString,
+            fingerprint: bookingGitHubDeployKeyFingerprintString,
+            repository: repository.slug,
+            verifiedAt: verifiedAt
+        )
+        updateBookingSetupSnapshot(
+            BookingSetupSnapshot(
+                pageStatus: bookingSetupSnapshot.pageStatus,
+                inboxStatus: bookingSetupSnapshot.inboxStatus,
+                pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
+                lastMessage: "Deploy key can reach \(repository.slug). Publish page files next."
+            ),
+            auditDetail: "Verified GitHub deploy key access for \(repository.slug)."
+        )
+    }
+
+    func publishBookingPageToGitHub() async {
+        await publishBookingPageToGitHub(reason: "Manual publish", updatesSnapshot: true)
+    }
+
+    private func publishBookingPageToGitHub(reason: String, updatesSnapshot: Bool) async {
+        guard !isBookingAvailabilityPublishInFlight else {
+            if updatesSnapshot {
+                updateBookingSetupSnapshot(
+                    BookingSetupSnapshot(
+                        pageStatus: bookingSetupSnapshot.pageStatus,
+                        inboxStatus: bookingSetupSnapshot.inboxStatus,
+                        pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
+                        lastMessage: "Booking availability publish is already running."
+                    ),
+                    auditDetail: "Skipped overlapping booking availability publish."
+                )
+            }
+            return
+        }
+
+        guard hasMatchingBookingGitHubDeployKey else {
+            if updatesSnapshot {
+                updateBookingSetupSnapshot(
+                    BookingSetupSnapshot(
+                        pageStatus: .publishFailed,
+                        inboxStatus: bookingSetupSnapshot.inboxStatus,
+                        pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
+                        lastMessage: "Generate a deploy key and add it to the GitHub repository with write access."
+                    ),
+                    auditDetail: "GitHub Pages publish skipped because no matching deploy key is configured."
+                )
+            }
+            return
+        }
+
+        let repository: BookingGitHubRepository
+        do {
+            repository = try BookingGitHubRepository(rawValue: bookingGitHubRepositoryString)
+        } catch {
+            if updatesSnapshot {
+                updateBookingSetupSnapshot(
+                    BookingSetupSnapshot(
+                        pageStatus: .publishFailed,
+                        inboxStatus: bookingSetupSnapshot.inboxStatus,
+                        pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
+                        lastMessage: error.localizedDescription
+                    ),
+                    auditDetail: "GitHub Pages publish skipped because repository settings are invalid."
+                )
+            }
+            return
+        }
+
+        isBookingAvailabilityPublishInFlight = true
+        defer {
+            isBookingAvailabilityPublishInFlight = false
+        }
+
+        do {
+            let privateKey = try loadBookingGitHubDeployKeyPrivateKey()
+            _ = try writeBookingSiteBuild()
+            let publishSummary = try await BookingGitHubPublisher.publishDirectory(
+                at: bookingSiteBuildOutputURL,
+                repository: repository,
+                branch: bookingGitHubBranchString,
+                privateKeyPEM: privateKey,
+                fileManager: fileManager
+            )
+            if bookingPageURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                bookingPageURLString = repository.pagesURL.absoluteString
+            }
+
+            let summaryMessage = Self.bookingGitHubPublishMessage(
+                publishSummary,
+                reason: reason
+            )
+            bookingAvailabilityPublishSummary = summaryMessage
+            if publishSummary.didChangeRemote {
+                recordBookingUploadedVersion(uploadedAt: Date())
+            }
+            recordBookingRemoteDriftWarningIfNeeded(
+                publishSummary,
+                repository: repository
+            )
+            if updatesSnapshot || publishSummary.didChangeRemote {
+                updateBookingSetupSnapshot(
+                    BookingSetupSnapshot(
+                        pageStatus: publishSummary.didChangeRemote ? .uploaded : bookingSetupSnapshot.pageStatus,
+                        inboxStatus: bookingSetupSnapshot.inboxStatus,
+                        pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
+                        lastMessage: summaryMessage
+                    ),
+                    auditDetail: "GitHub Pages publish for \(repository.slug): \(summaryMessage)"
+                )
+            } else {
+                appendAuditTrailEntry(
+                    title: "Booking availability publish",
+                    detail: summaryMessage,
+                    status: "ready"
+                )
+            }
+        } catch {
+            bookingAvailabilityPublishSummary = "Availability publish failed. \(error.localizedDescription)"
+            if updatesSnapshot {
+                updateBookingSetupSnapshot(
+                    BookingSetupSnapshot(
+                        pageStatus: .publishFailed,
+                        inboxStatus: bookingSetupSnapshot.inboxStatus,
+                        pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
+                        lastMessage: BookingCopy.Validation.publishFailed
+                    ),
+                    auditDetail: "GitHub Pages publish failed. \(error.localizedDescription)"
+                )
+            } else {
+                appendAuditTrailEntry(
+                    title: "Booking availability publish",
+                    detail: "GitHub Pages publish failed. \(error.localizedDescription)",
+                    status: "failed"
+                )
+            }
+        }
+    }
+
     func handleIncomingURL(_ url: URL) {
         _ = GoogleSignInService.handle(url: url)
     }
@@ -1002,6 +2186,730 @@ final class AppModel: ObservableObject {
     func runIOSBackgroundRefreshVerificationNow() async {
         guard canRunIOSBackgroundRefreshVerification else { return }
         await handleIOSBackgroundRefreshTask()
+    }
+
+    func startBookingSetup() {
+        runBookingPublishDryRun()
+    }
+
+    func runBookingDryRunForHarness() async -> Bool {
+        if isAppleCalendarEnabled {
+            await refreshAppleCalendars()
+        }
+
+        return createBookingSiteBuild()
+    }
+
+    @discardableResult
+    func runBookingPublishDryRun() -> Bool {
+        if !bookingPageURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            Task { @MainActor [weak self] in
+                await self?.verifyBookingPagePublished()
+            }
+            return false
+        }
+
+        return createBookingSiteBuild()
+    }
+
+    @discardableResult
+    func createBookingSiteBuild() -> Bool {
+        do {
+            let result = try writeBookingSiteBuild()
+            updateBookingSetupSnapshot(
+                BookingSetupSnapshot(
+                    pageStatus: .generatedLocally,
+                    inboxStatus: bookingSetupSnapshot.inboxStatus == .notConnected ? .needsCheck : bookingSetupSnapshot.inboxStatus,
+                    pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
+                    lastMessage: "Page files are ready at \(bookingSiteBuildOutputURL.path)."
+                ),
+                auditDetail: "Generated \(result.writtenFileCount) booking page files from \(result.busyIntervalCount) local busy interval(s)."
+            )
+            return true
+        } catch {
+            updateBookingSetupSnapshot(
+                BookingSetupSnapshot(
+                    pageStatus: .publishFailed,
+                    inboxStatus: bookingSetupSnapshot.inboxStatus,
+                    pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
+                    lastMessage: "Could not generate page files. Check file access, then try again."
+                ),
+                auditDetail: "Could not generate booking page files. \(error.localizedDescription)"
+            )
+            return false
+        }
+    }
+
+    @discardableResult
+    func prepareBookingPageTemplateFolder() -> Bool {
+        do {
+            let didSeed = try BookingStaticSiteWriter.seedEditableTemplate(
+                at: bookingEditableTemplateURL,
+                fileManager: fileManager
+            )
+            updateBookingSetupSnapshot(
+                BookingSetupSnapshot(
+                    pageStatus: bookingSetupSnapshot.pageStatus,
+                    inboxStatus: bookingSetupSnapshot.inboxStatus,
+                    pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
+                    lastMessage: didSeed
+                        ? "Editable page template files are ready at \(bookingEditableTemplateURL.path)."
+                        : "Editable page template files are at \(bookingEditableTemplateURL.path)."
+                ),
+                auditDetail: didSeed
+                    ? "Seeded editable booking page template files."
+                    : "Opened existing editable booking page template files."
+            )
+            return true
+        } catch {
+            updateBookingSetupSnapshot(
+                BookingSetupSnapshot(
+                    pageStatus: bookingSetupSnapshot.pageStatus,
+                    inboxStatus: bookingSetupSnapshot.inboxStatus,
+                    pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
+                    lastMessage: "Could not prepare editable page template files."
+                ),
+                auditDetail: "Could not prepare editable booking page template files. \(error.localizedDescription)"
+            )
+            return false
+        }
+    }
+
+    private func writeBookingSiteBuild() throws -> BookingSiteBuildWriteResult {
+        let now = Date()
+        let calendar = Calendar.current
+        let busyIntervals = try bookingBusyIntervalsForDraft(now: now, calendar: calendar)
+        let secrets = try loadOrCreateBookingSecrets()
+        let draft = try BookingDraftFactory.makeDraft(
+            now: now,
+            inboxURL: URL(string: bookingInboxURLString.trimmingCharacters(in: .whitespacesAndNewlines)),
+            busyIntervals: busyIntervals,
+            secrets: secrets,
+            appointmentTypes: bookingAppointmentTypes,
+            profile: bookingResolvedProfile,
+            theme: bookingResolvedTheme,
+            shareID: bookingResolvedShareID,
+            calendar: calendar
+        )
+        let artifacts = try BookingStaticSiteGenerator.artifacts(
+            configuration: draft.configuration,
+            slots: draft.slots,
+            generatedAt: draft.generatedAt,
+            expiresAt: draft.expiresAt
+        )
+        let fingerprint = try BookingPublicationFingerprint.publicSiteFingerprint(configuration: draft.configuration)
+        try BookingStaticSiteWriter.seedEditableTemplate(
+            at: bookingEditableTemplateURL,
+            fileManager: fileManager
+        )
+        let summary = try BookingStaticSiteWriter.write(
+            artifacts: artifacts,
+            to: bookingSiteBuildOutputURL,
+            templateDirectory: bookingEditableTemplateURL,
+            fileManager: fileManager
+        )
+        recordBookingGeneratedVersion(fingerprint: fingerprint, generatedAt: now)
+        return BookingSiteBuildWriteResult(
+            writtenFileCount: summary.writtenRelativePaths.count,
+            busyIntervalCount: busyIntervals.count
+        )
+    }
+
+    private func bookingBusyIntervalsForDraft(now: Date, calendar: Calendar) throws -> [BookingBusyInterval] {
+        guard
+            isAppleCalendarEnabled,
+            appleCalendarAuthorizationState == .granted,
+            let selectedAppleCalendar
+        else {
+            return []
+        }
+
+        let participant = BusyMirrorParticipant(
+            provider: .apple,
+            accountID: nil,
+            calendarID: selectedAppleCalendar.id,
+            displayName: selectedAppleCalendar.displayName
+        )
+        let window = BookingDraftFactory.busyLookupWindow(
+            startingAt: now,
+            appointmentTypes: bookingAppointmentTypes,
+            calendar: calendar
+        )
+
+        return try appleCalendarService.listBusySourceEvents(
+            in: participant,
+            window: window
+        ).compactMap { event in
+            guard event.endDate > event.startDate else {
+                return nil
+            }
+
+            return BookingBusyInterval(
+                interval: DateInterval(start: event.startDate, end: event.endDate)
+            )
+        }
+    }
+
+    func verifyBookingPagePublished() async {
+        let trimmedURL = bookingPageURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmedURL),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "https",
+              url.host?.isEmpty == false
+        else {
+            updateBookingSetupSnapshot(
+                BookingSetupSnapshot(
+                    pageStatus: .publishFailed,
+                    inboxStatus: bookingSetupSnapshot.inboxStatus,
+                    pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
+                    lastMessage: BookingCopy.Validation.repositoryNotFound
+                ),
+                auditDetail: BookingCopy.Validation.repositoryNotFound
+            )
+            return
+        }
+
+        do {
+            var request = URLRequest(url: bookingSiteConfigURL(for: url))
+            request.httpMethod = "GET"
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200..<300).contains(httpResponse.statusCode)
+            else {
+                throw BookingRelayClientError.invalidResponse
+            }
+            let servedFingerprint = try servedBookingFingerprint(from: data)
+            let expectedFingerprint = bookingLastGeneratedFingerprintString.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !expectedFingerprint.isEmpty, servedFingerprint == expectedFingerprint else {
+                recordBookingServedVersion(fingerprint: servedFingerprint, verifiedAt: nil)
+                updateBookingSetupSnapshot(
+                    BookingSetupSnapshot(
+                        pageStatus: .publishFailed,
+                        inboxStatus: bookingSetupSnapshot.inboxStatus,
+                        pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
+                        lastMessage: "The live page is reachable, but it is not serving the latest generated version."
+                    ),
+                    auditDetail: "Booking page verification failed because the served fingerprint did not match the expected version."
+                )
+                return
+            }
+            recordBookingServedVersion(fingerprint: servedFingerprint, verifiedAt: Date())
+
+            updateBookingSetupSnapshot(
+                BookingSetupSnapshot(
+                    pageStatus: .published,
+                    inboxStatus: bookingSetupSnapshot.inboxStatus,
+                    pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
+                    lastMessage: BookingCopy.Validation.publishSucceeded
+                ),
+                auditDetail: BookingCopy.Validation.publishSucceeded
+            )
+        } catch {
+            updateBookingSetupSnapshot(
+                BookingSetupSnapshot(
+                    pageStatus: .publishFailed,
+                    inboxStatus: bookingSetupSnapshot.inboxStatus,
+                    pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
+                    lastMessage: BookingCopy.Validation.publishFailed
+                ),
+                auditDetail: BookingCopy.Validation.publishFailed
+            )
+        }
+    }
+
+    func checkBookingInbox() async {
+        let trimmedURL = bookingInboxURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmedURL),
+              let relayURL = try? BookingRelayURL(url)
+        else {
+            updateBookingSetupSnapshot(
+                BookingSetupSnapshot(
+                    pageStatus: bookingSetupSnapshot.pageStatus,
+                    inboxStatus: .cannotReachInbox,
+                    pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
+                    lastMessage: BookingCopy.Validation.inboxUnreachable
+                ),
+                auditDetail: BookingCopy.Validation.inboxUnreachable
+            )
+            return
+        }
+
+        do {
+            let request = BookingRelayRequestBuilder.healthRequest(relayURL: relayURL)
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200..<300).contains(httpResponse.statusCode)
+            else {
+                throw BookingRelayClientError.invalidResponse
+            }
+            let health = try? JSONDecoder().decode(BookingRelayHealthResponse.self, from: data)
+            let expectedOrigin = bookingExpectedAllowedOriginString
+            if let allowedOrigin = health?.allowedOrigin,
+               !expectedOrigin.isEmpty,
+               allowedOrigin != expectedOrigin
+            {
+                updateBookingSetupSnapshot(
+                    BookingSetupSnapshot(
+                        pageStatus: bookingSetupSnapshot.pageStatus,
+                        inboxStatus: .allowedOriginMismatch,
+                        pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
+                        lastMessage: "Inbox is reachable, but ALLOWED_ORIGIN is \(allowedOrigin) instead of \(expectedOrigin)."
+                    ),
+                    auditDetail: "Booking inbox allowed origin mismatch."
+                )
+                return
+            }
+
+            let nextStatus: BookingInboxStatus = bookingInboxAdminTokenString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? .reachable
+                : .connected
+
+            updateBookingSetupSnapshot(
+                BookingSetupSnapshot(
+                    pageStatus: bookingSetupSnapshot.pageStatus,
+                    inboxStatus: nextStatus,
+                    pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
+                    lastMessage: BookingCopy.Validation.inboxReachable
+                ),
+                auditDetail: BookingCopy.Validation.inboxReachable
+            )
+        } catch {
+            updateBookingSetupSnapshot(
+                BookingSetupSnapshot(
+                    pageStatus: bookingSetupSnapshot.pageStatus,
+                    inboxStatus: .cannotReachInbox,
+                    pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
+                    lastMessage: BookingCopy.Validation.inboxUnreachable
+                ),
+                auditDetail: BookingCopy.Validation.inboxUnreachable
+            )
+        }
+    }
+
+    func sendBookingTestRequest() async {
+        guard !isBookingTestRequestInFlight else { return }
+        guard bookingSetupSnapshot.isReady,
+              let bookingPageURL = URL(string: bookingPageURLString.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let inboxURL = URL(string: bookingInboxURLString.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let relayURL = try? BookingRelayURL(inboxURL)
+        else {
+            updateBookingSetupSnapshot(
+                BookingSetupSnapshot(
+                    pageStatus: bookingSetupSnapshot.pageStatus,
+                    inboxStatus: bookingSetupSnapshot.inboxStatus,
+                    pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
+                    lastMessage: BookingCopy.Validation.testRequestMissing
+                ),
+                auditDetail: BookingCopy.Validation.testRequestMissing
+            )
+            return
+        }
+
+        isBookingTestRequestInFlight = true
+        defer { isBookingTestRequestInFlight = false }
+
+        do {
+            try await BookingTestRequestSender().sendTestRequest(
+                bookingPageURL: bookingPageURL,
+                inboxURL: relayURL
+            )
+            updateBookingSetupSnapshot(
+                BookingSetupSnapshot(
+                    pageStatus: bookingSetupSnapshot.pageStatus,
+                    inboxStatus: bookingSetupSnapshot.inboxStatus,
+                    pendingRequestCount: max(1, bookingSetupSnapshot.pendingRequestCount + 1),
+                    lastMessage: BookingCopy.Validation.testRequestSent
+                ),
+                auditDetail: BookingCopy.Validation.testRequestSent
+            )
+        } catch {
+            updateBookingSetupSnapshot(
+                BookingSetupSnapshot(
+                    pageStatus: bookingSetupSnapshot.pageStatus,
+                    inboxStatus: bookingSetupSnapshot.inboxStatus,
+                    pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
+                    lastMessage: BookingCopy.Validation.testRequestFailed
+                ),
+                auditDetail: BookingCopy.Validation.testRequestFailed
+            )
+        }
+    }
+
+    func importBookingRequests() async {
+        guard !isBookingImportInFlight else { return }
+        guard let inboxURL = URL(string: bookingInboxURLString.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let relayURL = try? BookingRelayURL(inboxURL)
+        else {
+            updateBookingSetupSnapshot(
+                BookingSetupSnapshot(
+                    pageStatus: bookingSetupSnapshot.pageStatus,
+                    inboxStatus: .cannotReachInbox,
+                    pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
+                    lastMessage: BookingCopy.Validation.inboxUnreachable
+                ),
+                auditDetail: BookingCopy.Validation.inboxUnreachable
+            )
+            return
+        }
+
+        let adminTokenValue = bookingInboxAdminTokenString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !adminTokenValue.isEmpty else {
+            updateBookingSetupSnapshot(
+                BookingSetupSnapshot(
+                    pageStatus: bookingSetupSnapshot.pageStatus,
+                    inboxStatus: bookingSetupSnapshot.inboxStatus,
+                    pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
+                    lastMessage: "Add the inbox admin token before importing requests."
+                ),
+                auditDetail: "Inbox admin token is missing."
+            )
+            return
+        }
+
+        isBookingImportInFlight = true
+        defer { isBookingImportInFlight = false }
+
+        do {
+            let secrets = try loadExistingBookingSecrets()
+            let client = BookingRelayClient(
+                relayURL: relayURL,
+                adminToken: BookingRelayAdminToken(rawValue: adminTokenValue)
+            )
+            var cursor: String?
+            var importedCount = 0
+            var skippedCount = 0
+            var importedRequestIDs: [BookingRequestID] = []
+            repeat {
+                let page = try await client.fetchRequests(
+                    inboxID: secrets.inboxID,
+                    cursor: cursor
+                )
+                for envelope in page.requests {
+                    guard !importedBookingRequests.contains(where: { $0.id == envelope.requestID }) else {
+                        continue
+                    }
+                    do {
+                        importedBookingRequests.append(
+                            try importBookingRequestEnvelope(
+                                envelope,
+                                secrets: secrets,
+                                now: Date()
+                            )
+                        )
+                        importedRequestIDs.append(envelope.requestID)
+                        importedCount += 1
+                    } catch {
+                        skippedCount += 1
+                        appendAuditTrailEntry(
+                            title: "Skipped booking request",
+                            detail: "Request \(envelope.requestID.rawValue) could not be imported. \(error.localizedDescription)",
+                            status: "warning"
+                        )
+                    }
+                }
+                cursor = page.cursor
+            } while cursor?.isEmpty == false
+
+            for requestID in importedRequestIDs {
+                guard let request = importedBookingRequests.first(where: { $0.id == requestID }),
+                      shouldAutomaticallyApproveBookingRequest(request)
+                else {
+                    continue
+                }
+
+                await approveBookingRequest(requestID)
+            }
+
+            let automaticallyApprovedCount = importedRequestIDs.filter { requestID in
+                importedBookingRequests.first { $0.id == requestID }?.status == .approved
+            }.count
+            let pendingCount = importedBookingRequests.filter(\.canApprove).count
+            updateBookingSetupSnapshot(
+                BookingSetupSnapshot(
+                    pageStatus: bookingSetupSnapshot.pageStatus,
+                    inboxStatus: .connected,
+                    pendingRequestCount: pendingCount,
+                    lastMessage: bookingImportMessage(
+                        importedCount: importedCount,
+                        automaticallyApprovedCount: automaticallyApprovedCount,
+                        skippedCount: skippedCount
+                    )
+                ),
+                auditDetail: bookingImportAuditDetail(
+                    importedCount: importedCount,
+                    automaticallyApprovedCount: automaticallyApprovedCount,
+                    skippedCount: skippedCount
+                )
+            )
+        } catch {
+            updateBookingSetupSnapshot(
+                BookingSetupSnapshot(
+                    pageStatus: bookingSetupSnapshot.pageStatus,
+                    inboxStatus: bookingSetupSnapshot.inboxStatus,
+                    pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
+                    lastMessage: "Could not import booking requests. Check the inbox token, then try again."
+                ),
+                auditDetail: "Could not import booking requests. \(error.localizedDescription)"
+            )
+        }
+    }
+
+    private func bookingImportMessage(
+        importedCount: Int,
+        automaticallyApprovedCount: Int,
+        skippedCount: Int
+    ) -> String {
+        if importedCount == 0, skippedCount > 0 {
+            return "Skipped \(skippedCount) booking request(s) that no longer match this device."
+        }
+
+        guard importedCount > 0 else {
+            return BookingCopy.Validation.testRequestMissing
+        }
+
+        let skipSuffix = skippedCount > 0 ? " Skipped \(skippedCount) incompatible request(s)." : ""
+
+        guard automaticallyApprovedCount > 0 else {
+            return "Imported \(importedCount) booking request(s).\(skipSuffix)"
+        }
+
+        return "Imported \(importedCount) booking request(s) and automatically accepted \(automaticallyApprovedCount).\(skipSuffix)"
+    }
+
+    private func bookingImportAuditDetail(
+        importedCount: Int,
+        automaticallyApprovedCount: Int,
+        skippedCount: Int
+    ) -> String {
+        if importedCount == 0, skippedCount > 0 {
+            return "Skipped \(skippedCount) encrypted booking request(s) that could not be imported."
+        }
+
+        guard importedCount > 0 else {
+            return "No new booking requests were available."
+        }
+
+        let skipSuffix = skippedCount > 0 ? " Skipped \(skippedCount) incompatible encrypted request(s)." : ""
+
+        guard automaticallyApprovedCount > 0 else {
+            return "Imported \(importedCount) encrypted booking request(s).\(skipSuffix)"
+        }
+
+        return "Imported \(importedCount) encrypted booking request(s) and automatically accepted \(automaticallyApprovedCount).\(skipSuffix)"
+    }
+
+    func approveBookingRequest(_ requestID: BookingRequestID) async {
+        guard !isBookingApprovalInFlight else { return }
+        guard let requestIndex = importedBookingRequests.firstIndex(where: { $0.id == requestID }) else {
+            return
+        }
+        guard importedBookingRequests[requestIndex].canApprove else {
+            return
+        }
+
+        isBookingApprovalInFlight = true
+        defer { isBookingApprovalInFlight = false }
+
+        do {
+            let request = importedBookingRequests[requestIndex]
+            let approval = try await createApprovedBookingEvent(for: request)
+            do {
+                try await deleteBookingRequestFromInbox(request)
+            } catch {
+                appendAuditTrailEntry(
+                    title: "Booking",
+                    detail: "Booking was added to the calendar, but the app could not remove the encrypted inbox record.",
+                    status: "failed"
+                )
+            }
+            markBookingRequest(
+                requestID,
+                status: .approved,
+                message: approvalMessage(for: approval),
+                calendarEventID: approval.event.eventID
+            )
+        } catch BookingApprovalError.slotUnavailable {
+            markBookingRequest(
+                requestID,
+                status: .unavailable,
+                message: BookingCopy.Validation.slotNoLongerOpen
+            )
+        } catch BookingApprovalError.missingCalendar {
+            markBookingRequest(
+                requestID,
+                status: .failed,
+                message: "Select an Apple or Google calendar before approving this request."
+            )
+        } catch {
+            markBookingRequest(
+                requestID,
+                status: .failed,
+                message: BookingCopy.Validation.calendarWriteFailed
+            )
+        }
+    }
+
+    private func createApprovedBookingEvent(for request: BookingImportedRequest) async throws -> BookingApprovalResult {
+        guard let appointmentType = bookingAppointmentType(for: request) else {
+            throw BookingApprovalError.missingCalendar
+        }
+
+        if let calendar = bookingAppleCalendarTarget(for: appointmentType) {
+            guard try bookingRequestSlotIsStillOpen(request) else {
+                throw BookingApprovalError.slotUnavailable
+            }
+
+            let inviteFileURL: URL?
+            if calendar.isLikelyICloud {
+                inviteFileURL = try bookingInviteFileWriter.writeInviteFile(
+                    for: request,
+                    calendarName: calendar.displayName
+                )
+            } else {
+                inviteFileURL = nil
+            }
+
+            let event = try appleCalendarService.createBookingEvent(
+                in: calendar,
+                request: request
+            )
+            return BookingApprovalResult(event: event, inviteFileURL: inviteFileURL)
+        }
+
+        guard let target = bookingGoogleCalendarTarget(for: appointmentType) else {
+            throw BookingApprovalError.missingCalendar
+        }
+
+        let accountID = target.account.id
+        let storedAccount = target.account
+        let calendar = target.calendar
+        let authorizedAccount = try await GoogleSignInService.authorizeStoredAccount(storedAccount)
+        try replaceStoredGoogleAccount(authorizedAccount.storedAccount)
+        guard try await bookingRequestSlotIsStillOpen(
+            request,
+            googleCalendar: calendar,
+            accountID: accountID,
+            accessToken: authorizedAccount.accessToken
+        ) else {
+            throw BookingApprovalError.slotUnavailable
+        }
+
+        let event = try await googleCalendarService.createBookingEvent(
+            in: calendar,
+            accessToken: authorizedAccount.accessToken,
+            request: request,
+            createsGoogleMeet: appointmentType.location.mode == .googleMeet
+        )
+        return BookingApprovalResult(
+            event: AppleManagedEventRecord(
+                calendarID: event.calendarID,
+                calendarName: event.calendarName,
+                eventID: event.eventID,
+                summary: event.summary,
+                windowDescription: event.windowDescription
+            ),
+            inviteFileURL: nil
+        )
+    }
+
+    private func bookingAppointmentType(for request: BookingImportedRequest) -> BookingAppointmentType? {
+        bookingAppointmentTypes.first { $0.id == request.plaintext.appointmentTypeID }
+    }
+
+    private func shouldAutomaticallyApproveBookingRequest(_ request: BookingImportedRequest) -> Bool {
+        isAutomaticBookingApprovalEnabled
+            || bookingAppointmentType(for: request)?.isAutoConfirmEnabled == true
+    }
+
+    private func approvalMessage(for approval: BookingApprovalResult) -> String {
+        var message = "\(BookingCopy.Validation.calendarWriteSucceeded) Added \(approval.event.windowDescription)."
+        if let inviteFileURL = approval.inviteFileURL {
+            message += " Invite file saved to \(inviteFileURL.lastPathComponent)."
+        }
+        return message
+    }
+
+    func declineBookingRequest(_ requestID: BookingRequestID) async {
+        guard !isBookingApprovalInFlight else { return }
+        guard let request = importedBookingRequests.first(where: { $0.id == requestID }) else {
+            return
+        }
+
+        isBookingApprovalInFlight = true
+        defer { isBookingApprovalInFlight = false }
+
+        do {
+            let decline = try await createDeclinedBookingNotice(for: request)
+            do {
+                try await deleteBookingRequestFromInbox(request)
+            } catch {
+                appendAuditTrailEntry(
+                    title: "Booking",
+                    detail: "Decline notice was prepared, but the app could not remove the encrypted inbox record.",
+                    status: "failed"
+                )
+            }
+            markBookingRequest(
+                requestID,
+                status: .declined,
+                message: declineMessage(for: decline)
+            )
+        } catch BookingApprovalError.missingCalendar {
+            markBookingRequest(
+                requestID,
+                status: .failed,
+                message: "Select an Apple or Google calendar before declining this request."
+            )
+        } catch {
+            markBookingRequest(
+                requestID,
+                status: .failed,
+                message: "Could not decline the request. Check calendar access and the inbox token, then try again."
+            )
+        }
+    }
+
+    private func createDeclinedBookingNotice(for request: BookingImportedRequest) async throws -> BookingDeclineResult {
+        guard let appointmentType = bookingAppointmentType(for: request) else {
+            throw BookingApprovalError.missingCalendar
+        }
+
+        if let calendar = bookingAppleCalendarTarget(for: appointmentType), isAppleCalendarEnabled {
+            let inviteFileURL = try bookingInviteFileWriter.writeDeclineFile(
+                for: request,
+                calendarName: calendar.displayName
+            )
+            return BookingDeclineResult(event: nil, inviteFileURL: inviteFileURL)
+        }
+
+        guard let target = bookingGoogleCalendarTarget(for: appointmentType)
+        else {
+            throw BookingApprovalError.missingCalendar
+        }
+
+        let storedAccount = target.account
+        let calendar = target.calendar
+        let authorizedAccount = try await GoogleSignInService.authorizeStoredAccount(storedAccount)
+        try replaceStoredGoogleAccount(authorizedAccount.storedAccount)
+        let event = try await googleCalendarService.createDeclinedBookingEvent(
+            in: calendar,
+            accessToken: authorizedAccount.accessToken,
+            request: request,
+            ownerEmail: authorizedAccount.storedAccount.email
+        )
+        return BookingDeclineResult(event: event, inviteFileURL: nil)
+    }
+
+    private func declineMessage(for decline: BookingDeclineResult) -> String {
+        if let event = decline.event {
+            return "Request declined, Google Calendar notice sent for \(event.windowDescription), and removed from the inbox."
+        }
+
+        if let inviteFileURL = decline.inviteFileURL {
+            return "Request declined and removed from the inbox. Decline file saved to \(inviteFileURL.lastPathComponent)."
+        }
+
+        return "Request declined and removed from the inbox."
     }
 
     func connectAppleCalendar() async {
@@ -1569,11 +3477,19 @@ final class AppModel: ObservableObject {
     }
 
     private func syncNowIfReady() async {
-        guard selectedParticipantCount >= 1 else {
+        if selectedParticipantCount >= 1 {
+            await syncNow()
+        }
+
+        await publishBookingAvailabilityIfNeeded(reason: "Background availability refresh")
+    }
+
+    private func publishBookingAvailabilityIfNeeded(reason: String) async {
+        guard canPublishBookingPageToGitHub, hasActiveBookingAppointmentTypes else {
             return
         }
 
-        await syncNow()
+        await publishBookingPageToGitHub(reason: reason, updatesSnapshot: false)
     }
 
     private func syncAfterParticipantConfigurationChange() async {
@@ -1885,6 +3801,441 @@ final class AppModel: ObservableObject {
         refreshGoogleConfiguration()
     }
 
+    private func updateBookingSetupSnapshot(
+        _ snapshot: BookingSetupSnapshot,
+        auditDetail: String
+    ) {
+        bookingSetupSnapshot = snapshot
+        if let data = try? JSONEncoder().encode(snapshot) {
+            userDefaults.set(data, forKey: SettingKey.bookingSetupSnapshot)
+        }
+
+        appendAuditTrailEntry(
+            title: "Booking",
+            detail: auditDetail,
+            status: snapshot.isReady ? "configured" : "working"
+        )
+    }
+
+    private func persistBookingSettings() {
+        writeBookingSettingsToUserDefaults()
+        persistSettings()
+    }
+
+    private func writeBookingSettingsToUserDefaults() {
+        userDefaults.set(bookingPageURLString, forKey: SettingKey.bookingPageURL)
+        userDefaults.set(bookingInboxURLString, forKey: SettingKey.bookingInboxURL)
+        userDefaults.set(bookingGitHubRepositoryString, forKey: SettingKey.bookingGitHubRepository)
+        userDefaults.set(bookingGitHubBranchString, forKey: SettingKey.bookingGitHubBranch)
+        userDefaults.set(bookingVercelScopeString, forKey: SettingKey.bookingVercelScope)
+        userDefaults.set(bookingVercelProjectNameString, forKey: SettingKey.bookingVercelProjectName)
+        userDefaults.set(bookingPublicNameString, forKey: SettingKey.bookingPublicName)
+        userDefaults.set(bookingPageTitleString, forKey: SettingKey.bookingPageTitle)
+        userDefaults.set(bookingPageSubtitleString, forKey: SettingKey.bookingPageSubtitle)
+        userDefaults.set(bookingTimeZoneIdentifierString, forKey: SettingKey.bookingTimeZoneIdentifier)
+        userDefaults.set(bookingThemeAccentColorString, forKey: SettingKey.bookingThemeAccentColor)
+        userDefaults.set(bookingThemeBackgroundColorString, forKey: SettingKey.bookingThemeBackgroundColor)
+        userDefaults.set(bookingThemeTextColorString, forKey: SettingKey.bookingThemeTextColor)
+        userDefaults.set(bookingCalendarTargetProviderString, forKey: SettingKey.bookingCalendarTargetProvider)
+        userDefaults.set(bookingAppleTargetCalendarIDString, forKey: SettingKey.bookingAppleTargetCalendarID)
+        userDefaults.set(bookingGoogleTargetAccountIDString, forKey: SettingKey.bookingGoogleTargetAccountID)
+        userDefaults.set(bookingGoogleTargetCalendarIDString, forKey: SettingKey.bookingGoogleTargetCalendarID)
+        userDefaults.set(selectedBookingAppointmentTypeIDString, forKey: SettingKey.selectedBookingAppointmentTypeID)
+        userDefaults.set(isAutomaticBookingApprovalEnabled, forKey: SettingKey.isAutomaticBookingApprovalEnabled)
+    }
+
+    private func persistBookingAppointmentTypes() {
+        do {
+            try BookingConfigurationValidator.validateAppointmentTypes(bookingAppointmentTypes)
+            let data = try JSONEncoder().encode(bookingAppointmentTypes)
+            userDefaults.set(data, forKey: SettingKey.bookingAppointmentTypes)
+            persistSettings()
+        } catch {
+            appendAuditTrailEntry(
+                title: "Booking",
+                detail: "Appointment types could not be saved. \(error.localizedDescription)",
+                status: "failed"
+            )
+        }
+    }
+
+    private func setBookingAppointmentTypePaused(_ id: AppointmentTypeID, isPaused: Bool) {
+        guard let index = bookingAppointmentTypes.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+
+        bookingAppointmentTypes[index].isPaused = isPaused
+        selectedBookingAppointmentTypeIDString = id.rawValue
+        persistBookingAppointmentTypes()
+        let message = isPaused
+            ? "Appointment type paused. Publish changes to hide it from the public page."
+            : "Appointment type resumed. Publish changes to make it live again."
+        markBookingPageNeedsPublish(message: message)
+    }
+
+    private func recordBookingGeneratedVersion(fingerprint: String, generatedAt: Date) {
+        bookingLastGeneratedFingerprintString = fingerprint
+        bookingLastGeneratedAt = generatedAt
+        userDefaults.set(fingerprint, forKey: SettingKey.bookingLastGeneratedFingerprint)
+        userDefaults.set(generatedAt, forKey: SettingKey.bookingLastGeneratedAt)
+    }
+
+    private func recordBookingUploadedVersion(uploadedAt: Date) {
+        bookingLastUploadedAt = uploadedAt
+        userDefaults.set(uploadedAt, forKey: SettingKey.bookingLastUploadedAt)
+    }
+
+    private func recordBookingServedVersion(fingerprint: String, verifiedAt: Date?) {
+        bookingLastServedFingerprintString = fingerprint
+        userDefaults.set(fingerprint, forKey: SettingKey.bookingLastServedFingerprint)
+        bookingLastVerifiedAt = verifiedAt
+        if let verifiedAt {
+            userDefaults.set(verifiedAt, forKey: SettingKey.bookingLastVerifiedAt)
+        } else {
+            userDefaults.removeObject(forKey: SettingKey.bookingLastVerifiedAt)
+        }
+    }
+
+    private func recordBookingRemoteDriftWarningIfNeeded(
+        _ summary: BookingGitHubPublisher.PublishSummary,
+        repository: BookingGitHubRepository
+    ) {
+        guard !summary.remoteChangedPaths.isEmpty else { return }
+
+        let pathList = summary.remoteChangedPaths.prefix(4).joined(separator: ", ")
+        let extraCount = max(0, summary.remoteChangedPaths.count - 4)
+        let suffix = extraCount == 0 ? "" : " and \(extraCount) more"
+        appendAuditTrailEntry(
+            title: "Booking availability warning",
+            detail: "Remote generated file(s) in \(repository.slug) changed before this app overwrote them: \(pathList)\(suffix).",
+            status: "warning"
+        )
+    }
+
+    private func bookingSiteConfigURL(for pageURL: URL) -> URL {
+        var components = URLComponents(url: pageURL, resolvingAgainstBaseURL: false)
+        let basePath = components?.path ?? ""
+        let normalizedBasePath = basePath.hasSuffix("/") ? basePath : "\(basePath)/"
+        components?.path = "\(normalizedBasePath)public/site-config.json"
+        components?.query = nil
+        components?.fragment = nil
+        return components?.url ?? pageURL.appendingPathComponent("public/site-config.json")
+    }
+
+    private func servedBookingFingerprint(from data: Data) throws -> String {
+        let object = try JSONSerialization.jsonObject(with: data)
+        guard let dictionary = object as? [String: Any],
+              let version = dictionary["version"] as? [String: Any],
+              let fingerprint = version["fingerprint"] as? String,
+              !fingerprint.isEmpty
+        else {
+            throw BookingRelayClientError.invalidResponse
+        }
+        return fingerprint
+    }
+
+    private func uniqueAppointmentSlug(base: String) -> String {
+        let normalizedBase = Self.normalizedAppointmentSlug(base)
+        let existing = Set(bookingAppointmentTypes.map(\.slug))
+        guard existing.contains(normalizedBase) else {
+            return normalizedBase
+        }
+
+        for index in 2...999 {
+            let candidate = "\(normalizedBase)-\(index)"
+            if !existing.contains(candidate) {
+                return candidate
+            }
+        }
+
+        return "\(normalizedBase)-\(UUID().uuidString.prefix(8).lowercased())"
+    }
+
+    private func markBookingPageNeedsPublish(message: String) {
+        guard !isApplyingSharedConfiguration else { return }
+
+        let status: BookingPublicationStatus
+        switch bookingSetupSnapshot.pageStatus {
+        case .published, .uploaded:
+            status = .needsPublish
+        case .generatedLocally, .needsPublish, .publishFailed:
+            status = .generatedLocally
+        case .notPublished, .disabled:
+            status = .notPublished
+        }
+        updateBookingSetupSnapshot(
+            BookingSetupSnapshot(
+                pageStatus: status,
+                inboxStatus: bookingSetupSnapshot.inboxStatus,
+                pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
+                lastMessage: message
+            ),
+            auditDetail: message
+        )
+    }
+
+    private func markBookingCustomizationChanged(oldValue: String, newValue: String) {
+        guard !isApplyingSharedConfiguration else { return }
+        guard oldValue != newValue else { return }
+        markBookingPageNeedsPublish(message: "Public page customization changed. Generate page files before sharing changes.")
+    }
+
+    private func markBookingInboxConfigured(oldValue: String, newValue: String) {
+        guard !isApplyingSharedConfiguration else { return }
+
+        let trimmedOldValue = oldValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedNewValue = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedOldValue != trimmedNewValue else { return }
+
+        let status: BookingInboxStatus = trimmedNewValue.isEmpty ? .notConnected : .configured
+        updateBookingSetupSnapshot(
+            BookingSetupSnapshot(
+                pageStatus: bookingSetupSnapshot.pageStatus,
+                inboxStatus: status,
+                pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
+                lastMessage: trimmedNewValue.isEmpty
+                    ? "Request inbox URL removed."
+                    : "Request inbox URL configured. Check the inbox before importing requests."
+            ),
+            auditDetail: trimmedNewValue.isEmpty
+                ? "Booking request inbox URL removed."
+                : "Booking request inbox URL configured."
+        )
+    }
+
+    private static func normalizedHexColor(_ value: String, fallback: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let candidate = trimmed.hasPrefix("#") ? trimmed : "#\(trimmed)"
+        guard candidate.range(of: #"^#[0-9A-Fa-f]{6}$"#, options: .regularExpression) != nil else {
+            return fallback
+        }
+
+        return candidate.uppercased()
+    }
+
+    private static func originString(for url: URL) -> String {
+        guard let scheme = url.scheme?.lowercased(),
+              let host = url.host
+        else {
+            return ""
+        }
+
+        var origin = "\(scheme)://\(host)"
+        if let port = url.port {
+            origin += ":\(port)"
+        }
+        return origin
+    }
+
+    private func persistBookingAdminToken() {
+        do {
+            try bookingSecretStore.saveAdminToken(bookingInboxAdminTokenString)
+        } catch {
+            appendAuditTrailEntry(
+                title: "Booking",
+                detail: "Could not save the inbox admin token to secure storage.",
+                status: "failed"
+            )
+        }
+    }
+
+    private func recordBookingGitHubDeployKey(
+        publicKey: String,
+        fingerprint: String,
+        repository: String,
+        verifiedAt: Date?
+    ) {
+        bookingGitHubDeployKeyPublicKeyString = publicKey
+        bookingGitHubDeployKeyFingerprintString = fingerprint
+        bookingGitHubDeployKeyRepositoryString = repository
+        bookingGitHubDeployKeyVerifiedAt = verifiedAt
+        userDefaults.set(publicKey, forKey: SettingKey.bookingGitHubDeployKeyPublicKey)
+        userDefaults.set(fingerprint, forKey: SettingKey.bookingGitHubDeployKeyFingerprint)
+        userDefaults.set(repository, forKey: SettingKey.bookingGitHubDeployKeyRepository)
+        if let verifiedAt {
+            userDefaults.set(verifiedAt, forKey: SettingKey.bookingGitHubDeployKeyVerifiedAt)
+        } else {
+            userDefaults.removeObject(forKey: SettingKey.bookingGitHubDeployKeyVerifiedAt)
+        }
+    }
+
+    private func loadBookingGitHubDeployKeyPrivateKey() throws -> String {
+        guard let privateKey = try bookingSecretStore.loadGitHubDeployKeyPrivateKey(),
+              !privateKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+            throw BookingConfigurationError.invalidField("Generate a deploy key before publishing.")
+        }
+        return privateKey
+    }
+
+    private func loadOrCreateBookingSecrets() throws -> BookingLocalSecrets {
+        if let secrets = try bookingSecretStore.loadSecrets() {
+            return secrets
+        }
+
+        let secrets = BookingLocalSecrets.generate()
+        try bookingSecretStore.saveSecrets(secrets)
+        return secrets
+    }
+
+    private func loadExistingBookingSecrets() throws -> BookingLocalSecrets {
+        guard let secrets = try bookingSecretStore.loadSecrets() else {
+            throw BookingSecretStoreError.missingSecrets
+        }
+
+        return secrets
+    }
+
+    private func importBookingRequestEnvelope(
+        _ envelope: EncryptedBookingRequestEnvelope,
+        secrets: BookingLocalSecrets,
+        now: Date
+    ) throws -> BookingImportedRequest {
+        try BookingRequestImporter.importEnvelope(
+            envelope,
+            secrets: secrets,
+            now: now
+        ) { claim in
+            try bookingSlotIsStillOpen(claim, now: now)
+        }
+    }
+
+    private func bookingRequestSlotIsStillOpen(_ request: BookingImportedRequest) throws -> Bool {
+        try bookingSlotIsStillOpen(request.slotClaim, now: Date())
+    }
+
+    private func bookingRequestSlotIsStillOpen(
+        _ request: BookingImportedRequest,
+        googleCalendar: GoogleCalendarSummary,
+        accountID: String,
+        accessToken: String
+    ) async throws -> Bool {
+        let claim = request.slotClaim
+        guard claim.expiresAt > Date(), claim.endsAt > claim.startsAt else {
+            return false
+        }
+
+        let participant = BusyMirrorParticipant(
+            provider: .google,
+            accountID: accountID,
+            calendarID: googleCalendar.id,
+            displayName: googleCalendar.displayName
+        )
+        let requestedInterval = DateInterval(start: claim.startsAt, end: claim.endsAt)
+        let busyBlocks = try await googleCalendarService.listBusyTargetBlocks(
+            in: participant,
+            calendarTimeZone: googleCalendar.timeZone,
+            window: requestedInterval,
+            accessToken: accessToken
+        )
+        return !busyBlocks.contains { block in
+            block.startDate < requestedInterval.end && requestedInterval.start < block.endDate
+        }
+    }
+
+    private func bookingSlotIsStillOpen(_ claim: BookingSlotClaim, now: Date) throws -> Bool {
+        guard claim.expiresAt > now, claim.endsAt > claim.startsAt else {
+            return false
+        }
+        guard isAppleCalendarEnabled else {
+            if let accountID = activeResolvedGoogleAccountID,
+               selectedGoogleCalendar(for: accountID) != nil
+            {
+                return true
+            }
+            throw AppleCalendarServiceError.notConnected
+        }
+        guard appleCalendarAuthorizationState == .granted,
+              let selectedAppleCalendar
+        else {
+            throw AppleCalendarServiceError.notConnected
+        }
+
+        let participant = BusyMirrorParticipant(
+            provider: .apple,
+            accountID: nil,
+            calendarID: selectedAppleCalendar.id,
+            displayName: selectedAppleCalendar.displayName
+        )
+        let requestedInterval = DateInterval(start: claim.startsAt, end: claim.endsAt)
+        let busyBlocks = try appleCalendarService.listBusyTargetBlocks(
+            in: participant,
+            window: requestedInterval
+        )
+        return !busyBlocks.contains { block in
+            block.startDate < requestedInterval.end && requestedInterval.start < block.endDate
+        }
+    }
+
+    private func deleteBookingRequestFromInbox(_ request: BookingImportedRequest) async throws {
+        guard let inboxURL = URL(string: bookingInboxURLString.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let relayURL = try? BookingRelayURL(inboxURL)
+        else {
+            throw BookingConfigurationError.invalidRelayURL("Inbox URL is not valid.")
+        }
+
+        let adminToken = bookingInboxAdminTokenString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !adminToken.isEmpty else {
+            throw BookingConfigurationError.invalidField("Inbox admin token is required.")
+        }
+
+        try await BookingRelayClient(
+            relayURL: relayURL,
+            adminToken: BookingRelayAdminToken(rawValue: adminToken)
+        ).deleteRequest(
+            inboxID: request.envelope.inboxID,
+            requestID: request.id
+        )
+    }
+
+    private func markBookingRequest(
+        _ requestID: BookingRequestID,
+        status: BookingImportedRequestStatus,
+        message: String,
+        calendarEventID: String? = nil
+    ) {
+        guard let index = importedBookingRequests.firstIndex(where: { $0.id == requestID }) else {
+            return
+        }
+
+        importedBookingRequests[index].status = status
+        importedBookingRequests[index].message = message
+        if let calendarEventID {
+            importedBookingRequests[index].calendarEventID = calendarEventID
+        }
+
+        let pendingCount = importedBookingRequests.filter(\.canApprove).count
+        updateBookingSetupSnapshot(
+            BookingSetupSnapshot(
+                pageStatus: bookingSetupSnapshot.pageStatus,
+                inboxStatus: bookingSetupSnapshot.inboxStatus,
+                pendingRequestCount: pendingCount,
+                lastMessage: message
+            ),
+            auditDetail: message
+        )
+    }
+
+    private var bookingSiteBuildOutputURL: URL {
+        bookingApplicationSupportURL
+            .appendingPathComponent("BookingSiteBuild", isDirectory: true)
+    }
+
+    private var bookingEditableTemplateURL: URL {
+        bookingApplicationSupportURL
+            .appendingPathComponent("BookingSiteTemplate", isDirectory: true)
+    }
+
+    private var bookingApplicationSupportURL: URL {
+        let baseURL = fileManager.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first ?? fileManager.temporaryDirectory
+
+        return baseURL
+            .appendingPathComponent("Calendar Busy Sync", isDirectory: true)
+    }
+
     private func refreshGoogleConfiguration() {
         do {
             let configuration = try DefaultGoogleOAuthConfigurationLoader.load()
@@ -1974,6 +4325,9 @@ final class AppModel: ObservableObject {
         googleSelectedCalendarIDs = configuration.googleSelectedCalendarIDs
         activeGoogleAccountID = configuration.activeGoogleAccountID
         sharedGoogleAccountDescriptors = configuration.googleAccountDescriptors
+        if let bookingConfiguration = configuration.bookingConfiguration {
+            applySharedBookingConfiguration(bookingConfiguration)
+        }
         selectedAppleCalendarID = isAppleCalendarEnabled
             ? AppleCalendarSelectionResolver.resolvedCalendarID(
                 availableCalendars: appleCalendars,
@@ -2072,8 +4426,58 @@ final class AppModel: ObservableObject {
             customGoogleOAuthServerClientID: customGoogleOAuthServerClientID,
             googleSelectedCalendarIDs: googleSelectedCalendarIDs,
             activeGoogleAccountID: activeGoogleAccountID,
-            googleAccountDescriptors: sharedGoogleAccountDescriptors
+            googleAccountDescriptors: sharedGoogleAccountDescriptors,
+            bookingConfiguration: currentSharedBookingConfiguration()
         )
+    }
+
+    private func currentSharedBookingConfiguration() -> SharedBookingConfiguration {
+        SharedBookingConfiguration(
+            pageURLString: bookingPageURLString,
+            inboxURLString: bookingInboxURLString,
+            gitHubRepositoryString: bookingGitHubRepositoryString,
+            gitHubBranchString: bookingGitHubBranchString,
+            vercelScopeString: bookingVercelScopeString,
+            vercelProjectNameString: bookingVercelProjectNameString,
+            publicNameString: bookingPublicNameString,
+            pageTitleString: bookingPageTitleString,
+            pageSubtitleString: bookingPageSubtitleString,
+            timeZoneIdentifierString: bookingTimeZoneIdentifierString,
+            themeAccentColorString: bookingThemeAccentColorString,
+            themeBackgroundColorString: bookingThemeBackgroundColorString,
+            themeTextColorString: bookingThemeTextColorString,
+            selectedAppointmentTypeIDString: selectedBookingAppointmentTypeIDString,
+            isAutomaticApprovalEnabled: isAutomaticBookingApprovalEnabled,
+            appointmentTypes: bookingAppointmentTypes
+        )
+    }
+
+    private func applySharedBookingConfiguration(_ configuration: SharedBookingConfiguration) {
+        let sharedAppointmentTypes = Self.validSharedBookingAppointmentTypes(
+            configuration.appointmentTypes,
+            fallback: bookingAppointmentTypes
+        )
+        let selectedID = sharedAppointmentTypes.contains { $0.id.rawValue == configuration.selectedAppointmentTypeIDString }
+            ? configuration.selectedAppointmentTypeIDString
+            : sharedAppointmentTypes.first?.id.rawValue ?? ""
+
+        bookingPageURLString = configuration.pageURLString
+        bookingInboxURLString = configuration.inboxURLString
+        bookingGitHubRepositoryString = configuration.gitHubRepositoryString
+        bookingGitHubBranchString = configuration.gitHubBranchString.isEmpty ? "main" : configuration.gitHubBranchString
+        bookingVercelScopeString = configuration.vercelScopeString
+        bookingVercelProjectNameString = configuration.vercelProjectNameString
+        bookingPublicNameString = configuration.publicNameString
+        bookingPageTitleString = configuration.pageTitleString
+        bookingPageSubtitleString = configuration.pageSubtitleString
+        bookingTimeZoneIdentifierString = configuration.timeZoneIdentifierString
+        bookingThemeAccentColorString = configuration.themeAccentColorString
+        bookingThemeBackgroundColorString = configuration.themeBackgroundColorString
+        bookingThemeTextColorString = configuration.themeTextColorString
+        selectedBookingAppointmentTypeIDString = selectedID
+        isAutomaticBookingApprovalEnabled = configuration.isAutomaticApprovalEnabled
+        bookingAppointmentTypes = sharedAppointmentTypes
+        persistBookingAppointmentTypes()
     }
 
     private func updateSharedConfigurationSyncState(
@@ -2144,6 +4548,11 @@ final class AppModel: ObservableObject {
     }
 
     private func restoreGoogleAccountsIfPossible() async {
+        guard googleSignInEnvironment.allowsInteractiveSignIn else {
+            googleAuthMessage = googleSignInEnvironment.blockingReason
+            return
+        }
+
         GoogleSignInService.clearSavedSession()
 
         do {
@@ -2293,6 +4702,100 @@ final class AppModel: ObservableObject {
 
     func selectedGoogleCalendarID(for accountID: String) -> String {
         googleSelectedCalendarIDs[accountID] ?? ""
+    }
+
+    func selectedBookingGoogleCalendarID(for accountID: String) -> String {
+        guard bookingTargetProvider == .google,
+              bookingGoogleTargetAccountIDString == accountID
+        else {
+            return ""
+        }
+
+        return bookingGoogleTargetCalendarIDString
+    }
+
+    func setBookingCalendarTargetOptionID(_ optionID: String) {
+        let parts = optionID.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
+        guard let provider = parts.first else {
+            return
+        }
+
+        switch provider {
+        case "apple":
+            guard parts.count == 2 else { return }
+            setBookingAppleCalendarID(parts[1])
+        case "google":
+            guard parts.count == 3 else { return }
+            setBookingGoogleCalendarID(parts[2], for: parts[1])
+        default:
+            return
+        }
+    }
+
+    func setBookingAppleCalendarID(_ calendarID: String) {
+        guard appleCalendars.contains(where: { $0.id == calendarID }) else {
+            return
+        }
+
+        bookingCalendarTargetProviderString = BookingCalendarTargetProvider.apple.rawValue
+        bookingAppleTargetCalendarIDString = calendarID
+        bookingGoogleTargetAccountIDString = ""
+        bookingGoogleTargetCalendarIDString = ""
+    }
+
+    func setAppleCalendarAsBookingTarget() {
+        guard let selectedAppleCalendar else {
+            return
+        }
+
+        setBookingAppleCalendarID(selectedAppleCalendar.id)
+    }
+
+    func setBookingGoogleCalendarID(_ calendarID: String, for accountID: String) {
+        guard googleCalendarsByAccountID[accountID]?.contains(where: { $0.id == calendarID }) == true else {
+            return
+        }
+
+        bookingCalendarTargetProviderString = BookingCalendarTargetProvider.google.rawValue
+        bookingAppleTargetCalendarIDString = ""
+        bookingGoogleTargetAccountIDString = accountID
+        bookingGoogleTargetCalendarIDString = calendarID
+    }
+
+    func refreshBookingCalendarTargetOptions() async {
+        refreshAppleCalendarAuthorizationState()
+        if appleCalendarAuthorizationState == .granted {
+            do {
+                appleCalendars = try appleCalendarService.listWritableCalendars()
+            } catch let error as AppleCalendarServiceError {
+                appleCalendarMessage = error.localizedDescription
+            } catch {
+                appleCalendarMessage = "Apple Calendar targets could not be loaded from this device."
+            }
+        }
+
+        for storedAccount in googleStoredAccounts {
+            guard googleCalendarsByAccountID[storedAccount.id]?.isEmpty != false,
+                  !googleOperationAccountIDs.contains(storedAccount.id)
+            else {
+                continue
+            }
+
+            googleOperationAccountIDs.insert(storedAccount.id)
+            defer {
+                googleOperationAccountIDs.remove(storedAccount.id)
+            }
+
+            do {
+                let authorizedAccount = try await GoogleSignInService.authorizeStoredAccount(storedAccount)
+                try replaceStoredGoogleAccount(authorizedAccount.storedAccount)
+                googleCalendarsByAccountID[storedAccount.id] = try await googleCalendarService.listWritableCalendars(
+                    accessToken: authorizedAccount.accessToken
+                )
+            } catch {
+                setGoogleMessage("Writable Google calendars could not be loaded for booking targets.", for: storedAccount.id)
+            }
+        }
     }
 
     func setSelectedGoogleCalendarID(_ calendarID: String, for accountID: String) {
@@ -2648,6 +5151,89 @@ final class AppModel: ObservableObject {
         return (try? JSONDecoder().decode([SharedGoogleAccountDescriptor].self, from: data)) ?? []
     }
 
+    private static func loadUITestBookingInboxAdminToken(
+        launchOptions: HarnessLaunchOptions,
+        processInfo: ProcessInfo,
+        fileManager: FileManager
+    ) -> String {
+        guard launchOptions.uiTestMode else {
+            return ""
+        }
+
+        let environmentToken = processInfo.environment[EnvironmentKey.uiTestBookingInboxAdminToken] ?? ""
+        let trimmedEnvironmentToken = environmentToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedEnvironmentToken.isEmpty {
+            return trimmedEnvironmentToken
+        }
+
+        let environmentPath = processInfo.environment[EnvironmentKey.uiTestBookingInboxAdminTokenFile] ?? ""
+        let tokenFileURL: URL
+        if !environmentPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            tokenFileURL = URL(fileURLWithPath: environmentPath)
+        } else if let applicationSupportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            tokenFileURL = applicationSupportURL
+                .appendingPathComponent("Calendar Busy Sync", isDirectory: true)
+                .appendingPathComponent("UI Test", isDirectory: true)
+                .appendingPathComponent("booking-inbox-admin-token", isDirectory: false)
+        } else {
+            return ""
+        }
+
+        guard let data = try? Data(contentsOf: tokenFileURL),
+              let token = String(data: data, encoding: .utf8)
+        else {
+            return ""
+        }
+
+        try? fileManager.removeItem(at: tokenFileURL)
+        return token.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func loadBookingSetupSnapshot(from userDefaults: UserDefaults) -> BookingSetupSnapshot {
+        guard let data = userDefaults.data(forKey: SettingKey.bookingSetupSnapshot) else {
+            return .notStarted
+        }
+
+        return (try? JSONDecoder().decode(BookingSetupSnapshot.self, from: data)) ?? .notStarted
+    }
+
+    private static func loadBookingAppointmentTypes(from userDefaults: UserDefaults) -> [BookingAppointmentType] {
+        guard let data = userDefaults.data(forKey: SettingKey.bookingAppointmentTypes),
+              let appointmentTypes = try? JSONDecoder().decode([BookingAppointmentType].self, from: data),
+              !appointmentTypes.isEmpty,
+              (try? BookingConfigurationValidator.validateAppointmentTypes(appointmentTypes)) != nil
+        else {
+            return BookingDraftFactory.defaultAppointmentTypes
+        }
+
+        return appointmentTypes
+    }
+
+    private static func validSharedBookingAppointmentTypes(
+        _ appointmentTypes: [BookingAppointmentType],
+        fallback: [BookingAppointmentType]
+    ) -> [BookingAppointmentType] {
+        guard !appointmentTypes.isEmpty,
+              (try? BookingConfigurationValidator.validateAppointmentTypes(appointmentTypes)) != nil
+        else {
+            return fallback.isEmpty ? BookingDraftFactory.defaultAppointmentTypes : fallback
+        }
+
+        return appointmentTypes
+    }
+
+    private static func normalizedAppointmentSlug(_ value: String) -> String {
+        let lowercased = value.lowercased()
+        let replaced = lowercased.replacingOccurrences(
+            of: #"[^a-z0-9]+"#,
+            with: "-",
+            options: .regularExpression
+        )
+        let trimmed = replaced.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        let clipped = String(trimmed.prefix(54)).trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        return clipped.isEmpty ? "meeting" : clipped
+    }
+
     private static func loadSettingsMutationDate(from userDefaults: UserDefaults) -> Date {
         userDefaults.object(forKey: SettingKey.lastModifiedAt) as? Date ?? .distantPast
     }
@@ -2702,6 +5288,28 @@ final class AppModel: ObservableObject {
         return try? JSONEncoder().encode(descriptors)
     }
 
+    private static func bookingGitHubPublishMessage(
+        _ summary: BookingGitHubPublisher.PublishSummary,
+        reason: String
+    ) -> String {
+        if !summary.didChangeRemote {
+            return "\(reason): no GitHub changes needed; \(summary.skippedCount) file(s) already matched."
+        }
+
+        var parts: [String] = []
+        if summary.uploadedCount > 0 {
+            parts.append("\(summary.uploadedCount) new")
+        }
+        if summary.overwrittenCount > 0 {
+            parts.append("\(summary.overwrittenCount) overwritten")
+        }
+        if summary.skippedCount > 0 {
+            parts.append("\(summary.skippedCount) unchanged")
+        }
+        let remoteWarning = summary.remoteChangedPaths.isEmpty ? "" : " Remote generated files changed before overwrite."
+        return "\(reason): published \(parts.joined(separator: ", ")) file(s).\(remoteWarning)"
+    }
+
     private static let syncTimestampFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -2746,6 +5354,21 @@ private struct SyncParticipantsBundle {
     let participants: [BusyMirrorParticipant]
     let googleAccountsByID: [String: GoogleAuthorizedAccount]
     let googleCalendarsByAccountID: [String: GoogleCalendarSummary]
+}
+
+private struct BookingApprovalResult {
+    let event: AppleManagedEventRecord
+    let inviteFileURL: URL?
+}
+
+private struct BookingDeclineResult {
+    let event: GoogleManagedEventRecord?
+    let inviteFileURL: URL?
+}
+
+private enum BookingApprovalError: Error {
+    case missingCalendar
+    case slotUnavailable
 }
 
 struct LiveGoogleDebugConfiguration: Equatable {

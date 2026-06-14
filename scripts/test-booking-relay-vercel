@@ -1,0 +1,61 @@
+#!/usr/bin/env python3
+"""Validate the Vercel encrypted inbox template."""
+
+from __future__ import annotations
+
+import shutil
+import subprocess
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+VERCEL = ROOT / "templates" / "booking-relay" / "vercel"
+
+
+def main() -> int:
+    for relative_path in [
+        "api/healthz.js",
+        "api/v1/inboxes/[inboxId]/requests.js",
+        "api/v1/inboxes/[inboxId]/requests/[requestId].js",
+        "lib/http.js",
+        "lib/inbox-store.js",
+        "package.json",
+    ]:
+        if not (VERCEL / relative_path).exists():
+            raise SystemExit(f"Vercel template missing {relative_path}")
+
+    http_js = (VERCEL / "lib" / "http.js").read_text()
+    for needle in ["MAX_BODY_BYTES", "assertAllowedOrigin", "assertAdmin", "validateEnvelope"]:
+        if needle not in http_js:
+            raise SystemExit(f"Vercel template missing {needle}")
+
+    health_js = (VERCEL / "api" / "healthz.js").read_text()
+    for needle in ["allowedOrigin", "process.env.ALLOWED_ORIGIN", "storage"]:
+        if needle not in health_js:
+            raise SystemExit(f"Vercel health check must expose non-secret deployment evidence: {needle}")
+
+    if "console.log" in http_js or "console.error" in http_js:
+        raise SystemExit("Vercel template must not log request bodies or errors by default")
+
+    requests_js = (VERCEL / "api" / "v1" / "inboxes" / "[inboxId]" / "requests.js").read_text()
+    if 'access: "public"' not in requests_js:
+        raise SystemExit("Vercel Blob SDK writes must use public access; request contents must already be encrypted")
+
+    delete_js = (VERCEL / "api" / "v1" / "inboxes" / "[inboxId]" / "requests" / "[requestId].js").read_text()
+    if "../../../../../lib/http.js" not in delete_js:
+        raise SystemExit("Vercel delete route must import shared HTTP helpers from the project root")
+
+    vercel_json = (VERCEL / "vercel.json").read_text()
+    for route in ["/healthz", "/v1/inboxes/:inboxId/requests", "/v1/inboxes/:inboxId/requests/:requestId"]:
+        if route not in vercel_json:
+            raise SystemExit(f"Vercel template missing public rewrite for {route}")
+
+    if shutil.which("node"):
+        subprocess.check_call(["npm", "run", "check", "--silent"], cwd=VERCEL)
+
+    print("Validated Vercel encrypted inbox template")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

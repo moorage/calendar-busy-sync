@@ -5,6 +5,7 @@ This directory holds user-visible requirements and acceptance criteria.
 Status by spec:
 
 - `calendar-sync.md` - initial product spec for cross-account busy mirroring, selected-calendar routing, and privacy-preserving busy holds
+- `privacy-first-booking.md` - self-hosted GitHub Pages booking page, Markdown appointment configuration, and blind encrypted request inbox contract
 
 Maintenance rule:
 

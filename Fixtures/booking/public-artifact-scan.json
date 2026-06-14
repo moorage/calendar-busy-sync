@@ -1,0 +1,7 @@
+{
+  "forbiddenValues": [
+    "work-calendar-id",
+    "google-event-id",
+    "person@example.com"
+  ]
+}

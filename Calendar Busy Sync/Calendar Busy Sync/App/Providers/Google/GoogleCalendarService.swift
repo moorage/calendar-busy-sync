@@ -95,6 +95,122 @@ struct GoogleCalendarService {
         )
     }
 
+    func createBookingEvent(
+        in calendar: GoogleCalendarSummary,
+        accessToken: String,
+        request: BookingImportedRequest,
+        createsGoogleMeet: Bool = false
+    ) async throws -> GoogleManagedEventRecord {
+        let eventTimes = EventDateTime.from(
+            startDate: request.slotClaim.startsAt,
+            endDate: request.slotClaim.endsAt,
+            isAllDay: false
+        )
+        let payload = InsertEventRequest(
+            summary: BookingCalendarEventContent.summary(for: request),
+            description: BookingCalendarEventContent.description(for: request),
+            visibility: "private",
+            transparency: "opaque",
+            reminders: EventReminders(useDefault: true),
+            extendedProperties: EventExtendedProperties(
+                privateProperties: [
+                    "calendarBusySyncManaged": "true",
+                    "calendarBusySyncKind": "booking",
+                    "calendarBusySyncBookingRequestID": request.id.rawValue,
+                ]
+            ),
+            start: eventTimes.start,
+            end: eventTimes.end,
+            attendees: request.inviteeEmails.map { InsertEventAttendeeRequest(email: $0) },
+            guestsCanInviteOthers: false,
+            guestsCanModify: false,
+            guestsCanSeeOtherGuests: true,
+            conferenceData: createsGoogleMeet ? InsertConferenceDataRequest.googleMeet(requestID: request.id) : nil
+        )
+
+        var queryItems = [
+            URLQueryItem(name: "sendUpdates", value: "all"),
+        ]
+        if createsGoogleMeet {
+            queryItems.append(URLQueryItem(name: "conferenceDataVersion", value: "1"))
+        }
+
+        let response: InsertEventResponse = try await performJSONRequest(
+            accessToken: accessToken,
+            method: "POST",
+            path: "/calendar/v3/calendars/\(calendar.id.urlPathComponentEncoded)/events",
+            queryItems: queryItems,
+            body: payload
+        )
+
+        return GoogleManagedEventRecord(
+            calendarID: calendar.id,
+            calendarName: calendar.summary,
+            eventID: response.id,
+            summary: response.summary ?? payload.summary,
+            windowDescription: BookingCalendarEventContent.windowDescription(
+                start: request.slotClaim.startsAt,
+                end: request.slotClaim.endsAt,
+                timeZone: TimeZone(identifier: calendar.timeZone ?? "") ?? timeZone()
+            )
+        )
+    }
+
+    func createDeclinedBookingEvent(
+        in calendar: GoogleCalendarSummary,
+        accessToken: String,
+        request: BookingImportedRequest,
+        ownerEmail: String
+    ) async throws -> GoogleManagedEventRecord {
+        let eventTimes = EventDateTime.from(
+            startDate: request.slotClaim.startsAt,
+            endDate: request.slotClaim.endsAt,
+            isAllDay: false
+        )
+        let payload = InsertEventRequest(
+            summary: "Declined: \(BookingCalendarEventContent.summary(for: request))",
+            description: "Request declined through Calendar Busy Sync Booking.\n\(BookingCalendarEventContent.description(for: request))",
+            visibility: "private",
+            transparency: "transparent",
+            reminders: EventReminders(useDefault: false),
+            extendedProperties: EventExtendedProperties(
+                privateProperties: [
+                    "calendarBusySyncManaged": "true",
+                    "calendarBusySyncKind": "booking-decline",
+                    "calendarBusySyncBookingRequestID": request.id.rawValue,
+                ]
+            ),
+            start: eventTimes.start,
+            end: eventTimes.end,
+            attendees: declinedEventAttendees(for: request, ownerEmail: ownerEmail),
+            guestsCanInviteOthers: false,
+            guestsCanModify: false,
+            guestsCanSeeOtherGuests: true
+        )
+
+        let response: InsertEventResponse = try await performJSONRequest(
+            accessToken: accessToken,
+            method: "POST",
+            path: "/calendar/v3/calendars/\(calendar.id.urlPathComponentEncoded)/events",
+            queryItems: [
+                URLQueryItem(name: "sendUpdates", value: "all"),
+            ],
+            body: payload
+        )
+
+        return GoogleManagedEventRecord(
+            calendarID: calendar.id,
+            calendarName: calendar.summary,
+            eventID: response.id,
+            summary: response.summary ?? payload.summary,
+            windowDescription: BookingCalendarEventContent.windowDescription(
+                start: request.slotClaim.startsAt,
+                end: request.slotClaim.endsAt,
+                timeZone: TimeZone(identifier: calendar.timeZone ?? "") ?? timeZone()
+            )
+        )
+    }
+
     func listBusySourceEvents(
         in participant: BusyMirrorParticipant,
         calendarTimeZone: String?,
@@ -401,6 +517,11 @@ private struct InsertEventRequest: Encodable {
     let extendedProperties: EventExtendedProperties
     let start: EventDateTime
     let end: EventDateTime
+    var attendees: [InsertEventAttendeeRequest]? = nil
+    var guestsCanInviteOthers: Bool? = nil
+    var guestsCanModify: Bool? = nil
+    var guestsCanSeeOtherGuests: Bool? = nil
+    var conferenceData: InsertConferenceDataRequest? = nil
 
     static func mirror(for desiredMirror: DesiredBusyMirrorEvent) -> InsertEventRequest {
         InsertEventRequest(
@@ -424,6 +545,59 @@ private struct InsertEventRequest: Encodable {
             ).end
         )
     }
+}
+
+private struct InsertConferenceDataRequest: Encodable {
+    let createRequest: InsertConferenceCreateRequest
+
+    static func googleMeet(requestID: BookingRequestID) -> InsertConferenceDataRequest {
+        InsertConferenceDataRequest(
+            createRequest: InsertConferenceCreateRequest(
+                requestId: "booking-\(requestID.rawValue)",
+                conferenceSolutionKey: InsertConferenceSolutionKey(type: "hangoutsMeet")
+            )
+        )
+    }
+}
+
+private struct InsertConferenceCreateRequest: Encodable {
+    let requestId: String
+    let conferenceSolutionKey: InsertConferenceSolutionKey
+}
+
+private struct InsertConferenceSolutionKey: Encodable {
+    let type: String
+}
+
+private struct InsertEventAttendeeRequest: Encodable {
+    let email: String
+    var responseStatus: String? = nil
+
+    init(email: String, responseStatus: String? = nil) {
+        self.email = email
+        self.responseStatus = responseStatus
+    }
+}
+
+private func declinedEventAttendees(
+    for request: BookingImportedRequest,
+    ownerEmail: String
+) -> [InsertEventAttendeeRequest] {
+    let trimmedOwnerEmail = ownerEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard trimmedOwnerEmail.contains("@") else {
+        return request.inviteeEmails.map { InsertEventAttendeeRequest(email: $0) }
+    }
+
+    var attendees = request.inviteeEmails
+        .filter { email in
+            email.compare(trimmedOwnerEmail, options: .caseInsensitive) != .orderedSame
+        }
+        .map { InsertEventAttendeeRequest(email: $0) }
+    attendees.insert(
+        InsertEventAttendeeRequest(email: trimmedOwnerEmail, responseStatus: "declined"),
+        at: 0
+    )
+    return attendees
 }
 
 private struct EventReminders: Encodable {

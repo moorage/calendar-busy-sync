@@ -7,8 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		CB0000000000000000000411 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = CB0000000000000000001002 /* GoogleSignIn */; };
-		CB0000000000000000000412 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = CB0000000000000000001002 /* GoogleSignIn */; };
+	CB0000000000000000000411 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = CB0000000000000000001002 /* GoogleSignIn */; };
+	CB0000000000000000000412 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = CB0000000000000000001002 /* GoogleSignIn */; };
+	CB0000000000000000000413 /* booking-site in Resources */ = {isa = PBXBuildFile; fileRef = CB0000000000000000000204 /* booking-site */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -32,6 +33,7 @@
 		CB0000000000000000000201 /* Calendar Busy Sync.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Calendar Busy Sync.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		CB0000000000000000000202 /* Calendar Busy SyncTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Calendar Busy SyncTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		CB0000000000000000000203 /* Calendar Busy SyncUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Calendar Busy SyncUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		CB0000000000000000000204 /* booking-site */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "booking-site"; path = "../templates/booking-site"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -85,6 +87,7 @@
 				CB0000000000000000000301 /* Calendar Busy Sync */,
 				CB0000000000000000000302 /* Calendar Busy SyncTests */,
 				CB0000000000000000000303 /* Calendar Busy SyncUITests */,
+				CB0000000000000000000204 /* booking-site */,
 				CB0000000000000000000003 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -224,6 +227,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CB0000000000000000000413 /* booking-site in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -405,7 +409,7 @@
 				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = Calendar_Busy_Sync.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "Calendar_Busy_Sync-macOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = GG34PA8F4A;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -450,7 +454,7 @@
 				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = Calendar_Busy_Sync.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "Calendar_Busy_Sync-macOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = GG34PA8F4A;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -492,7 +496,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -517,7 +521,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -541,7 +545,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -565,7 +569,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;

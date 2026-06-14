@@ -1,0 +1,369 @@
+#!/usr/bin/env python3
+"""Build the static booking-site artifact from Markdown template files."""
+
+from __future__ import annotations
+
+import argparse
+from datetime import datetime, timedelta, timezone, tzinfo
+import hashlib
+import json
+import re
+import shutil
+from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_APP_ICON = (
+    ROOT
+    / "Calendar Busy Sync"
+    / "Calendar Busy Sync"
+    / "Assets.xcassets"
+    / "AppIcon.appiconset"
+    / "ios-marketing-1024.png"
+)
+
+SECRET_TERMS = (
+    "access_token",
+    "refresh_token",
+    "client_secret",
+    "private_key",
+    "api_key",
+    "bearer ",
+    "oauth",
+)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--source", default="templates/booking-site")
+    parser.add_argument("--output", default="artifacts/booking-site")
+    parser.add_argument("--inbox-url", default="https://example.workers.dev")
+    parser.add_argument("--inbox-id", default="demo-inbox")
+    parser.add_argument("--share-id", default="intro-call")
+    args = parser.parse_args()
+
+    source = Path(args.source)
+    output = Path(args.output)
+    if not source.exists():
+        raise SystemExit(f"Booking site template not found: {source}")
+
+    if output.exists():
+        shutil.rmtree(output)
+    shutil.copytree(source, output)
+    copy_default_app_icon(output)
+
+    profile = parse_profile(output / "content" / "profile.md")
+    appointment_types = [
+        parse_appointment(path)
+        for path in sorted((output / "content" / "appointment-types").glob("*.md"))
+    ]
+    validate_unique_slugs(appointment_types)
+    public_appointment_types = [
+        public_appointment_type(appointment_type)
+        for appointment_type in appointment_types
+        if not appointment_type.get("paused", False)
+    ]
+
+    existing_config = json.loads((source / "public" / "site-config.json").read_text())
+    site_config = {
+        "profile": profile,
+        "theme": existing_config["theme"],
+        "copy": existing_config["copy"],
+        "share": {"id": args.share_id},
+        "inbox": {"id": args.inbox_id, "url": args.inbox_url},
+        "encryption": existing_config["encryption"],
+        "appointmentTypes": public_appointment_types,
+    }
+    site_config["version"] = {"fingerprint": public_config_fingerprint(site_config)}
+
+    public_dir = output / "public"
+    public_dir.mkdir(parents=True, exist_ok=True)
+    (public_dir / "site-config.json").write_text(
+        json.dumps(site_config, indent=2, sort_keys=True) + "\n"
+    )
+    (public_dir / "availability").mkdir(parents=True, exist_ok=True)
+    (public_dir / "availability" / "slots.json").write_text(
+        json.dumps(demo_availability(public_appointment_types, profile["timeZone"]), indent=2, sort_keys=True) + "\n"
+    )
+    assert_no_secret_like_values(public_dir / "site-config.json")
+    assert_no_secret_like_values(public_dir / "availability" / "slots.json")
+    print(f"Built booking site at {output}")
+    return 0
+
+
+def copy_default_app_icon(output: Path) -> None:
+    target = output / "assets" / "app-icon.png"
+    if DEFAULT_APP_ICON.exists():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(DEFAULT_APP_ICON, target)
+        return
+
+    if not target.exists():
+        raise SystemExit(f"Default app icon not found: {DEFAULT_APP_ICON}")
+
+
+def parse_profile(path: Path) -> dict[str, str]:
+    frontmatter, body = parse_markdown(path)
+    public_name = required(frontmatter, "public_name", path)
+    return {
+        "publicName": public_name,
+        "pageTitle": frontmatter.get("page_title", f"Request time with {public_name}"),
+        "pageSubtitle": body or "Choose a time and send a private request.",
+        "timeZone": frontmatter.get("time_zone", "America/Los_Angeles"),
+    }
+
+
+def parse_appointment(path: Path) -> dict[str, object]:
+    frontmatter, body = parse_markdown(path)
+    slug = required(frontmatter, "slug", path)
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,62}[a-z0-9]", slug):
+        raise SystemExit(f"{path}: link name must use lowercase letters, numbers, and hyphens")
+
+    duration = int(required(frontmatter, "duration_minutes", path))
+    if duration <= 0:
+        raise SystemExit(f"{path}: add a duration before publishing")
+
+    return {
+        "id": frontmatter.get("id", slug),
+        "slug": slug,
+        "name": required(frontmatter, "name", path),
+        "summary": body,
+        "durationMinutes": duration,
+        "minimumNoticeMinutes": int(frontmatter.get("minimum_notice_minutes", "1440")),
+        "bufferBeforeMinutes": int(frontmatter.get("buffer_before_minutes", "0")),
+        "bufferAfterMinutes": int(frontmatter.get("buffer_after_minutes", "0")),
+        "weeklyHours": parse_weekly_hours(frontmatter.get("weekly_hours")),
+        "autoConfirm": frontmatter.get("auto_confirm", "false").lower() in ("true", "yes"),
+        "paused": frontmatter.get("paused", "false").lower() in ("true", "yes"),
+    }
+
+
+def public_config_fingerprint(site_config: dict[str, object]) -> str:
+    fingerprint_input = {
+        key: value
+        for key, value in site_config.items()
+        if key != "version"
+    }
+    encoded = json.dumps(fingerprint_input, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def public_appointment_type(appointment_type: dict[str, object]) -> dict[str, object]:
+    return {
+        key: value
+        for key, value in appointment_type.items()
+        if key != "paused"
+    }
+
+
+def parse_markdown(path: Path) -> tuple[dict[str, str], str]:
+    text = path.read_text()
+    assert_no_secret_like_text(path, text)
+    lines = text.replace("\r\n", "\n").split("\n")
+    if not lines or lines[0] != "---":
+        raise SystemExit(f"{path}: add front matter before publishing")
+    try:
+        end = lines[1:].index("---") + 1
+    except ValueError as exc:
+        raise SystemExit(f"{path}: close front matter with --- before publishing") from exc
+
+    frontmatter: dict[str, str] = {}
+    for line in lines[1:end]:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if ":" not in line:
+            raise SystemExit(f"{path}: use key: value front matter")
+        key, value = line.split(":", 1)
+        frontmatter[key.strip()] = value.strip().strip("\"'")
+
+    body = "\n".join(lines[end + 1 :]).strip()
+    return frontmatter, body
+
+
+def validate_unique_slugs(appointment_types: list[dict[str, object]]) -> None:
+    seen: set[str] = set()
+    for appointment_type in appointment_types:
+        slug = str(appointment_type["slug"])
+        if slug in seen:
+            raise SystemExit("Another appointment type already uses this link name.")
+        seen.add(slug)
+
+
+def parse_weekly_hours(raw_value: str | None) -> list[dict[str, object]]:
+    if not raw_value:
+        return [
+            {"weekday": weekday, "windows": [{"startMinuteOfDay": 9 * 60, "endMinuteOfDay": 17 * 60}]}
+            for weekday in range(2, 7)
+        ]
+
+    days = []
+    seen: set[int] = set()
+    for entry in raw_value.split(";"):
+        if not entry.strip():
+            continue
+        if "=" not in entry:
+            raise SystemExit("Use day=HH:MM-HH:MM for weekly hours.")
+        day_name, windows_value = [part.strip() for part in entry.split("=", 1)]
+        weekday = parse_weekday(day_name)
+        if weekday in seen:
+            raise SystemExit("Weekly hours can list each weekday only once.")
+        seen.add(weekday)
+        days.append({"weekday": weekday, "windows": parse_working_windows(windows_value)})
+    return sorted(days, key=lambda day: int(day["weekday"]))
+
+
+def parse_weekday(value: str) -> int:
+    weekdays = {
+        "sun": 1,
+        "sunday": 1,
+        "mon": 2,
+        "monday": 2,
+        "tue": 3,
+        "tues": 3,
+        "tuesday": 3,
+        "wed": 4,
+        "wednesday": 4,
+        "thu": 5,
+        "thur": 5,
+        "thurs": 5,
+        "thursday": 5,
+        "fri": 6,
+        "friday": 6,
+        "sat": 7,
+        "saturday": 7,
+    }
+    try:
+        return weekdays[value.lower()]
+    except KeyError as exc:
+        raise SystemExit("Weekly hours must use day names like mon or friday.") from exc
+
+
+def parse_working_windows(value: str) -> list[dict[str, int]]:
+    normalized = value.strip().lower()
+    if normalized in ("closed", "unavailable", "none"):
+        return []
+
+    windows = []
+    for raw_range in value.split("|"):
+        if "-" not in raw_range:
+            raise SystemExit("Use HH:MM-HH:MM ranges for weekly hours.")
+        raw_start, raw_end = [part.strip() for part in raw_range.split("-", 1)]
+        start = parse_minute_of_day(raw_start)
+        end = parse_minute_of_day(raw_end)
+        if start >= end:
+            raise SystemExit("Weekly hours must end after they start.")
+        windows.append({"startMinuteOfDay": start, "endMinuteOfDay": end})
+    return windows
+
+
+def parse_minute_of_day(value: str) -> int:
+    if not re.fullmatch(r"\d{1,2}:\d{2}", value):
+        raise SystemExit("Weekly hours must use 24-hour HH:MM times.")
+    hour_text, minute_text = value.split(":", 1)
+    hour = int(hour_text)
+    minute = int(minute_text)
+    if hour < 0 or hour > 24 or minute < 0 or minute > 59 or (hour == 24 and minute != 0):
+        raise SystemExit("Weekly hours must use 24-hour HH:MM times.")
+    return hour * 60 + minute
+
+
+def demo_availability(appointment_types: list[dict[str, object]], time_zone: str) -> dict[str, object]:
+    generated_at = datetime.now(timezone.utc).replace(microsecond=0)
+    try:
+        display_zone = ZoneInfo(time_zone)
+    except ZoneInfoNotFoundError:
+        display_zone = timezone.utc
+    slots = []
+    for appointment_type in appointment_types:
+        slot_window = first_demo_slot_window(generated_at, appointment_type, display_zone)
+        if slot_window is None:
+            continue
+        starts_at, ends_at = slot_window
+        slot_id = f"{appointment_type['slug']}-{int(starts_at.timestamp())}"
+        slots.append(
+            {
+                "id": slot_id,
+                "appointmentTypeID": appointment_type["id"],
+                "startsAt": starts_at.isoformat().replace("+00:00", "Z"),
+                "endsAt": ends_at.isoformat().replace("+00:00", "Z"),
+                "expiresAt": starts_at.isoformat().replace("+00:00", "Z"),
+                "token": f"sample-public-slot-token-{slot_id}",
+            }
+        )
+
+    return {
+        "generatedAt": generated_at.isoformat().replace("+00:00", "Z"),
+        "expiresAt": (generated_at + timedelta(days=7)).isoformat().replace("+00:00", "Z"),
+        "slots": slots,
+    }
+
+
+def first_demo_slot_window(
+    generated_at: datetime,
+    appointment_type: dict[str, object],
+    display_zone: tzinfo,
+) -> tuple[datetime, datetime] | None:
+    duration = int(appointment_type["durationMinutes"])
+    minimum_start = generated_at + timedelta(minutes=int(appointment_type["minimumNoticeMinutes"]))
+    weekly_hours = appointment_type["weeklyHours"]
+    local_generated_at = generated_at.astimezone(display_zone)
+    for day_offset in range(1, 15):
+        day = local_generated_at + timedelta(days=day_offset)
+        weekday = swift_weekday(day)
+        matching_days = [
+            weekly_day for weekly_day in weekly_hours
+            if int(weekly_day["weekday"]) == weekday
+        ]
+        for matching_day in matching_days:
+            for window in matching_day["windows"]:
+                start = start_of_day(day) + timedelta(minutes=int(window["startMinuteOfDay"]))
+                end = start_of_day(day) + timedelta(minutes=int(window["endMinuteOfDay"]))
+                start = rounded_up_to_slot_step(max(start.astimezone(timezone.utc), minimum_start))
+                end = end.astimezone(timezone.utc)
+                if start + timedelta(minutes=duration) <= end:
+                    return (start, start + timedelta(minutes=duration))
+    return None
+
+
+def rounded_up_to_slot_step(value: datetime) -> datetime:
+    step_minutes = 15
+    floored = value.replace(second=0, microsecond=0)
+    remainder = floored.minute % step_minutes
+    if remainder == 0 and value == floored:
+        return value
+    minutes_to_add = step_minutes - remainder if remainder else step_minutes
+    return floored + timedelta(minutes=minutes_to_add)
+
+
+def swift_weekday(value: datetime) -> int:
+    return ((value.weekday() + 1) % 7) + 1
+
+
+def start_of_day(value: datetime) -> datetime:
+    return value.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def required(frontmatter: dict[str, str], key: str, path: Path) -> str:
+    value = frontmatter.get(key)
+    if not value:
+        raise SystemExit(f"{path}: missing required field {key}")
+    return value
+
+
+def assert_no_secret_like_values(path: Path) -> None:
+    assert_no_secret_like_text(path, path.read_text())
+
+
+def assert_no_secret_like_text(path: Path, text: str) -> None:
+    lowered = text.lower()
+    for term in SECRET_TERMS:
+        if term in lowered:
+            raise SystemExit(f"{path}: this field looks like a secret; remove it before publishing")
+    if "@gmail.com" in lowered or "@googlemail.com" in lowered:
+        raise SystemExit(f"{path}: remove calendar account emails before publishing")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

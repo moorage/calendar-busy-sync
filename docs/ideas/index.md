@@ -22,4 +22,5 @@ Every document under `docs/ideas/backlog/` must appear here.
 
 | Priority lane | Status | Impact | Confidence | Effort | Idea | Why now | Doc |
 | --- | --- | --- | --- | --- | --- | --- | --- |
+| `now` | `completed` | `high` | `high` | `high` | Booking appointment management UX / IA audit | Completed through `docs/exec-plans/completed/2026-06-03-booking-ux-ia-refresh.md` to give booking one workspace, explicit lifecycle states, and first-class publish/deploy/customization flows. | `docs/ideas/backlog/booking-appointment-management-ux-ia-audit.md` |
 | `now` | `ready-to-plan` | `high` | `medium` | `high` | Busy-slot mirroring core | The repository now has a harness, but the actual cross-account sync slice still needs its first implementation plan. | `docs/ideas/backlog/busy-slot-mirroring-core.md` |

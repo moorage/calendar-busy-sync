@@ -34,6 +34,20 @@
                ReferencedContainer = "container:Calendar Busy Sync.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "NO"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "CB0000000000000000000103"
+               BuildableName = "Calendar Busy SyncUITests.xctest"
+               BlueprintName = "Calendar Busy SyncUITests"
+               ReferencedContainer = "container:Calendar Busy Sync.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction
@@ -59,6 +73,17 @@
                BlueprintIdentifier = "CB0000000000000000000102"
                BuildableName = "Calendar Busy SyncTests.xctest"
                BlueprintName = "Calendar Busy SyncTests"
+               ReferencedContainer = "container:Calendar Busy Sync.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "CB0000000000000000000103"
+               BuildableName = "Calendar Busy SyncUITests.xctest"
+               BlueprintName = "Calendar Busy SyncUITests"
                ReferencedContainer = "container:Calendar Busy Sync.xcodeproj">
             </BuildableReference>
          </TestableReference>

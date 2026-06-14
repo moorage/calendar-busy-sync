@@ -247,6 +247,137 @@ final class Calendar_Busy_SyncTests: XCTestCase {
     }
 
     @MainActor
+    func testAppModelPublishesBookingSetupInSharedConfiguration() async {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+
+        let sharedStore = MockSharedAppConfigurationStore(isAvailable: true)
+        let model = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: false,
+                platformTarget: .ios,
+                deviceClass: .iphone
+            ),
+            userDefaults: defaults,
+            sharedConfigurationStore: sharedStore,
+            googleAccountStore: MockGoogleAccountStore()
+        )
+
+        model.bookingPageURLString = "https://example.com/book/"
+        model.bookingInboxURLString = "https://inbox.example.com"
+        model.bookingGitHubRepositoryString = "owner/booking"
+        model.bookingPublicNameString = "Shared Booker"
+        model.isAutomaticBookingApprovalEnabled = true
+
+        var appointmentType = model.bookingAppointmentTypes[0]
+        appointmentType.name = "Shared consultation"
+        appointmentType.durationMinutes = 45
+        model.updateBookingAppointmentType(appointmentType)
+
+        let sharedBooking = sharedStore.loadConfiguration()?.bookingConfiguration
+        XCTAssertEqual(sharedBooking?.pageURLString, "https://example.com/book/")
+        XCTAssertEqual(sharedBooking?.inboxURLString, "https://inbox.example.com")
+        XCTAssertEqual(sharedBooking?.gitHubRepositoryString, "owner/booking")
+        XCTAssertEqual(sharedBooking?.publicNameString, "Shared Booker")
+        XCTAssertEqual(sharedBooking?.isAutomaticApprovalEnabled, true)
+        XCTAssertEqual(sharedBooking?.appointmentTypes.first?.name, "Shared consultation")
+        XCTAssertEqual(sharedBooking?.appointmentTypes.first?.durationMinutes, 45)
+    }
+
+    @MainActor
+    func testAppModelAppliesSharedBookingSetupAtLaunch() async {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        defaults.set(Date(timeIntervalSince1970: 10), forKey: "settings.lastModifiedAt")
+
+        let appointmentType = BookingAppointmentType(
+            id: AppointmentTypeID("icloud-consult"),
+            slug: "icloud-consult",
+            name: "iCloud consult",
+            summary: "Synced appointment setup.",
+            durationMinutes: 60,
+            minimumNoticeMinutes: 120,
+            bufferBeforeMinutes: 10,
+            bufferAfterMinutes: 15,
+            weeklyHours: BookingWeeklyHours.weekdayDefault,
+            location: BookingAppointmentLocation(mode: .phone, details: "Call the visitor."),
+            calendarTarget: .apple(calendarID: "apple-target"),
+            isAutoConfirmEnabled: true,
+            questions: BookingDraftFactory.defaultAppointmentTypes[0].questions
+        )
+        let sharedStore = MockSharedAppConfigurationStore(
+            isAvailable: true,
+            initialConfiguration: SharedAppConfiguration(
+                updatedAt: Date(timeIntervalSince1970: 20),
+                pollIntervalMinutes: 7,
+                auditTrailLogLengthRawValue: AuditTrailLogLength.last5000.rawValue,
+                isAppleCalendarEnabled: false,
+                selectedAppleCalendarReference: nil,
+                usesCustomGoogleOAuthApp: false,
+                customGoogleOAuthClientID: "",
+                customGoogleOAuthServerClientID: "",
+                googleSelectedCalendarIDs: [:],
+                activeGoogleAccountID: nil,
+                bookingConfiguration: SharedBookingConfiguration(
+                    pageURLString: "https://example.com/book/",
+                    inboxURLString: "https://inbox.example.com",
+                    gitHubRepositoryString: "owner/booking",
+                    gitHubBranchString: "main",
+                    vercelScopeString: "team-slug",
+                    vercelProjectNameString: "booking-relay",
+                    publicNameString: "Shared Booker",
+                    pageTitleString: "Book shared time",
+                    pageSubtitleString: "Choose a time that works.",
+                    timeZoneIdentifierString: "America/New_York",
+                    themeAccentColorString: "#123456",
+                    themeBackgroundColorString: "#F8F8F8",
+                    themeTextColorString: "#111111",
+                    selectedAppointmentTypeIDString: appointmentType.id.rawValue,
+                    isAutomaticApprovalEnabled: true,
+                    appointmentTypes: [appointmentType]
+                )
+            )
+        )
+
+        let model = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: false,
+                platformTarget: .ios,
+                deviceClass: .iphone
+            ),
+            userDefaults: defaults,
+            sharedConfigurationStore: sharedStore,
+            googleAccountStore: MockGoogleAccountStore()
+        )
+
+        await model.prepareIfNeeded()
+
+        XCTAssertEqual(model.bookingPageURLString, "https://example.com/book/")
+        XCTAssertEqual(model.bookingInboxURLString, "https://inbox.example.com")
+        XCTAssertEqual(model.bookingGitHubRepositoryString, "owner/booking")
+        XCTAssertEqual(model.bookingVercelProjectNameString, "booking-relay")
+        XCTAssertEqual(model.bookingPublicNameString, "Shared Booker")
+        XCTAssertEqual(model.bookingThemeAccentColorString, "#123456")
+        XCTAssertEqual(model.selectedBookingAppointmentTypeIDString, "icloud-consult")
+        XCTAssertTrue(model.isAutomaticBookingApprovalEnabled)
+        XCTAssertEqual(model.bookingAppointmentTypes, [appointmentType])
+    }
+
+    @MainActor
     func testAppModelIgnoresObservedSharedConfigurationWhenDisabledLocally() async {
         let defaults = UserDefaults(suiteName: #function)!
         defaults.removePersistentDomain(forName: #function)
@@ -754,6 +885,7 @@ final class Calendar_Busy_SyncTests: XCTestCase {
             "--harness-command-dir", "/tmp/commands",
             "--platform-target", "ios",
             "--device-class", "ipad",
+            "--booking-dry-run-on-launch",
             "--ui-test-mode", "1",
         ])
 
@@ -767,6 +899,7 @@ final class Calendar_Busy_SyncTests: XCTestCase {
         XCTAssertEqual(options.commandDirectoryURL?.path, "/tmp/commands")
         XCTAssertEqual(options.platformTarget, .ios)
         XCTAssertEqual(options.deviceClass, .ipad)
+        XCTAssertTrue(options.bookingDryRunOnLaunch)
         XCTAssertTrue(options.uiTestMode)
     }
 
@@ -1289,6 +1422,7 @@ final class Calendar_Busy_SyncTests: XCTestCase {
                     archivedUserData: Data("beta".utf8)
                 ),
             ]),
+            googleSignInEnvironment: GoogleSignInEnvironment(blockingReason: nil),
             liveGoogleDebugConfiguration: LiveGoogleDebugConfiguration(
                 isEnabled: false,
                 preferredAccountEmail: nil,
@@ -1631,6 +1765,980 @@ final class Calendar_Busy_SyncTests: XCTestCase {
         XCTAssertEqual(accounts[2].displayName, "Person Example")
         XCTAssertEqual(accounts[2].detail, "person@example.com")
         XCTAssertEqual(accounts[2].selectedCalendars.first?.name, "Consulting")
+    }
+
+    @MainActor
+    func testBookingImportApprovalWritesAppleCalendarEventAndDeletesRelayRecord() async throws {
+        let suiteName = "CalendarBusySyncTests.\(#function)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let secrets = BookingLocalSecrets.generate()
+        let secretStore = MockBookingSecretStore(
+            secrets: secrets,
+            adminToken: "admin-token"
+        )
+        let appleCalendar = AppleCalendarSummary(
+            id: "apple-calendar",
+            title: "Consulting",
+            sourceTitle: "iCloud",
+            sourceKind: .iCloud
+        )
+        let appleService = MockAppleCalendarService(
+            authorizationState: .granted,
+            calendars: [appleCalendar],
+            createdEvent: nil
+        )
+        let inviteFileWriter = MockBookingInviteFileWriter(
+            inviteFileURL: URL(fileURLWithPath: "/tmp/booking-request-approval-1.ics")
+        )
+        let model = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: false,
+                platformTarget: .macos,
+                deviceClass: .mac
+            ),
+            userDefaults: defaults,
+            sharedConfigurationStore: MockSharedAppConfigurationStore(isAvailable: true),
+            appleCalendarService: appleService,
+            bookingSecretStore: secretStore,
+            bookingInviteFileWriter: inviteFileWriter,
+            googleAccountStore: MockGoogleAccountStore()
+        )
+        model.bookingInboxURLString = "https://relay.example.com"
+        await model.connectAppleCalendar()
+
+        let now = Date()
+        let slotStart = now.addingTimeInterval(60 * 60)
+        let claim = BookingSlotClaim(
+            appointmentTypeID: AppointmentTypeID("intro-call"),
+            slotID: BookingSlotID("intro-call-\(Int(slotStart.timeIntervalSince1970))"),
+            startsAt: slotStart,
+            endsAt: slotStart.addingTimeInterval(30 * 60),
+            generatedAt: now,
+            expiresAt: slotStart,
+            nonce: "nonce",
+            signingKeyVersion: "v1"
+        )
+        let token = try secrets.slotSigner.sign(claim)
+        let envelope = try BookingTestRequestSender.encrypt(
+            plaintext: BookingTestRequestPlaintext(
+                requestID: BookingRequestID("request-approval-1"),
+                appointmentTypeID: claim.appointmentTypeID,
+                slotID: claim.slotID,
+                slotToken: token,
+                visitor: BookingTestVisitor(
+                    name: "Matt Moore",
+                    email: "matt@alumni.ucsd.edu",
+                    topic: "A 30 minute meeting",
+                    guestEmails: ["guest@example.com"]
+                ),
+                browserTimeZone: "America/Los_Angeles",
+                createdAt: now
+            ),
+            slot: BookingPublishedSlot(
+                id: claim.slotID,
+                appointmentTypeID: claim.appointmentTypeID,
+                startsAt: claim.startsAt,
+                endsAt: claim.endsAt,
+                expiresAt: claim.expiresAt,
+                token: token
+            ),
+            config: BookingPublishedSiteConfig(
+                share: BookingPublishedShare(id: BookingShareID("intro-call")),
+                inbox: BookingPublishedInbox(
+                    id: secrets.inboxID,
+                    url: try XCTUnwrap(URL(string: "https://relay.example.com"))
+                ),
+                encryption: BookingPublishedEncryption(
+                    keyID: secrets.keyID,
+                    publicKeyJWK: BookingKeyMaterial.publicKey(
+                        from: try secrets.privateKey,
+                        keyID: secrets.keyID
+                    ).jwk
+                )
+            ),
+            createdAt: now
+        )
+
+        let responseEncoder = JSONEncoder()
+        responseEncoder.dateEncodingStrategy = .iso8601
+        let listPayload = try responseEncoder.encode(BookingRelayRequestPage(
+            requests: [envelope],
+            cursor: nil
+        ))
+        RelayURLProtocol.responders = [
+            "GET /v1/inboxes/\(secrets.inboxID.rawValue)/requests": { request in
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer admin-token")
+                return (200, listPayload)
+            },
+            "DELETE /v1/inboxes/\(secrets.inboxID.rawValue)/requests/request-approval-1": { request in
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer admin-token")
+                return (204, Data())
+            },
+        ]
+        URLProtocol.registerClass(RelayURLProtocol.self)
+        defer {
+            URLProtocol.unregisterClass(RelayURLProtocol.self)
+            RelayURLProtocol.responders = [:]
+            RelayURLProtocol.seenRequests = []
+        }
+
+        await model.importBookingRequests()
+        let imported = try XCTUnwrap(model.importedBookingRequests.first)
+        XCTAssertEqual(imported.status, .pendingReview)
+
+        await model.approveBookingRequest(imported.id)
+
+        XCTAssertEqual(appleService.createdBookingRequests.map(\.id), [imported.id])
+        XCTAssertEqual(inviteFileWriter.writtenRequests.map(\.id), [imported.id])
+        XCTAssertEqual(inviteFileWriter.writtenRequests.first?.inviteeEmails, ["matt@alumni.ucsd.edu", "guest@example.com"])
+        XCTAssertEqual(model.importedBookingRequests.first?.status, .approved)
+        XCTAssertEqual(model.importedBookingRequests.first?.calendarEventID, "booking-request-approval-1")
+        XCTAssertTrue(model.importedBookingRequests.first?.message.contains("booking-request-approval-1.ics") ?? false)
+        XCTAssertTrue(model.activeBookingRequests.isEmpty)
+        XCTAssertEqual(model.bookingRequestHistory.map(\.id), [imported.id])
+        XCTAssertTrue(RelayURLProtocol.seenRequests.contains("DELETE /v1/inboxes/\(secrets.inboxID.rawValue)/requests/request-approval-1"))
+    }
+
+    @MainActor
+    func testBookingInboxActionsDoNotRequirePublishedPageStatus() throws {
+        let suiteName = "CalendarBusySyncTests.\(#function)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let snapshot = BookingSetupSnapshot(
+            pageStatus: .generatedLocally,
+            inboxStatus: .connected,
+            pendingRequestCount: 3,
+            lastMessage: nil
+        )
+        defaults.set(
+            try JSONEncoder().encode(snapshot),
+            forKey: "settings.booking.setupSnapshot"
+        )
+        defaults.set("https://moorage.github.io/booking-test/", forKey: "settings.booking.pageURL")
+        defaults.set("https://live-booking-relay-vercel.vercel.app", forKey: "settings.booking.inboxURL")
+
+        let model = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: false,
+                platformTarget: .macos,
+                deviceClass: .mac
+            ),
+            userDefaults: defaults,
+            sharedConfigurationStore: MockSharedAppConfigurationStore(isAvailable: true),
+            bookingSecretStore: MockBookingSecretStore(secrets: BookingLocalSecrets.generate(), adminToken: "admin-token"),
+            googleAccountStore: MockGoogleAccountStore()
+        )
+
+        XCTAssertFalse(model.bookingSetupSnapshot.isReady)
+        XCTAssertTrue(model.canImportBookingRequests)
+        XCTAssertTrue(model.canSendBookingTestRequest)
+    }
+
+    @MainActor
+    func testBookingInboxReadySnapshotDowngradesWhenAdminTokenIsMissing() throws {
+        let suiteName = "CalendarBusySyncTests.\(#function)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let snapshot = BookingSetupSnapshot(
+            pageStatus: .published,
+            inboxStatus: .connected,
+            pendingRequestCount: 3,
+            lastMessage: nil
+        )
+        defaults.set(
+            try JSONEncoder().encode(snapshot),
+            forKey: "settings.booking.setupSnapshot"
+        )
+
+        let model = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: false,
+                platformTarget: .macos,
+                deviceClass: .mac
+            ),
+            userDefaults: defaults,
+            sharedConfigurationStore: MockSharedAppConfigurationStore(isAvailable: true),
+            bookingSecretStore: MockBookingSecretStore(secrets: BookingLocalSecrets.generate(), adminToken: nil),
+            googleAccountStore: MockGoogleAccountStore()
+        )
+
+        XCTAssertEqual(model.bookingSetupSnapshot.inboxStatus, .reachable)
+        XCTAssertFalse(model.canImportBookingRequests)
+    }
+
+    @MainActor
+    func testBookingDismissalConfirmsDeployOnlyForPublishablePendingChanges() throws {
+        let suiteName = "CalendarBusySyncTests.\(#function)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let snapshot = BookingSetupSnapshot(
+            pageStatus: .needsPublish,
+            inboxStatus: .connected,
+            pendingRequestCount: 0,
+            lastMessage: nil
+        )
+        defaults.set(try JSONEncoder().encode(snapshot), forKey: "settings.booking.setupSnapshot")
+        defaults.set("moorage/booking-test", forKey: "settings.booking.github.repository")
+        defaults.set("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKey", forKey: "settings.booking.github.deployKey.publicKey")
+        defaults.set("moorage/booking-test", forKey: "settings.booking.github.deployKey.repository")
+
+        let publishableModel = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: false,
+                platformTarget: .macos,
+                deviceClass: .mac
+            ),
+            userDefaults: defaults,
+            sharedConfigurationStore: MockSharedAppConfigurationStore(isAvailable: true),
+            bookingSecretStore: MockBookingSecretStore(secrets: BookingLocalSecrets.generate(), adminToken: nil),
+            googleAccountStore: MockGoogleAccountStore()
+        )
+
+        XCTAssertTrue(publishableModel.shouldConfirmBookingPublishOnDismiss)
+
+        defaults.removeObject(forKey: "settings.booking.github.deployKey.publicKey")
+        let unpublishableModel = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: false,
+                platformTarget: .macos,
+                deviceClass: .mac
+            ),
+            userDefaults: defaults,
+            sharedConfigurationStore: MockSharedAppConfigurationStore(isAvailable: true),
+            bookingSecretStore: MockBookingSecretStore(secrets: BookingLocalSecrets.generate(), adminToken: nil),
+            googleAccountStore: MockGoogleAccountStore()
+        )
+
+        XCTAssertFalse(unpublishableModel.shouldConfirmBookingPublishOnDismiss)
+    }
+
+    @MainActor
+    func testUITestModeUsesEnvironmentBookingInboxAdminToken() throws {
+        let suiteName = "CalendarBusySyncTests.\(#function)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        setenv("CALENDAR_BUSY_SYNC_UI_TEST_BOOKING_INBOX_ADMIN_TOKEN", " ui-test-admin-token ", 1)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            unsetenv("CALENDAR_BUSY_SYNC_UI_TEST_BOOKING_INBOX_ADMIN_TOKEN")
+        }
+
+        let snapshot = BookingSetupSnapshot(
+            pageStatus: .generatedLocally,
+            inboxStatus: .connected,
+            pendingRequestCount: 3,
+            lastMessage: nil
+        )
+        defaults.set(
+            try JSONEncoder().encode(snapshot),
+            forKey: "settings.booking.setupSnapshot"
+        )
+
+        let secretStore = MockBookingSecretStore(secrets: BookingLocalSecrets.generate(), adminToken: nil)
+        let model = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: true,
+                platformTarget: .macos,
+                deviceClass: .mac
+            ),
+            userDefaults: defaults,
+            sharedConfigurationStore: MockSharedAppConfigurationStore(isAvailable: true),
+            bookingSecretStore: secretStore,
+            googleAccountStore: MockGoogleAccountStore()
+        )
+
+        XCTAssertEqual(model.bookingInboxAdminTokenString, "ui-test-admin-token")
+        XCTAssertEqual(secretStore.adminToken, nil)
+        XCTAssertEqual(model.bookingSetupSnapshot.inboxStatus, .connected)
+        XCTAssertTrue(model.canImportBookingRequests)
+    }
+
+    @MainActor
+    func testUITestModeConsumesBookingInboxAdminTokenFile() throws {
+        let suiteName = "CalendarBusySyncTests.\(#function)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        let tokenFileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("calendar-busy-sync-ui-test-token-\(UUID().uuidString)")
+        try " file-admin-token ".write(to: tokenFileURL, atomically: true, encoding: .utf8)
+        setenv("CALENDAR_BUSY_SYNC_UI_TEST_BOOKING_INBOX_ADMIN_TOKEN_FILE", tokenFileURL.path, 1)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            unsetenv("CALENDAR_BUSY_SYNC_UI_TEST_BOOKING_INBOX_ADMIN_TOKEN_FILE")
+            try? FileManager.default.removeItem(at: tokenFileURL)
+        }
+
+        let snapshot = BookingSetupSnapshot(
+            pageStatus: .generatedLocally,
+            inboxStatus: .connected,
+            pendingRequestCount: 3,
+            lastMessage: nil
+        )
+        defaults.set(
+            try JSONEncoder().encode(snapshot),
+            forKey: "settings.booking.setupSnapshot"
+        )
+
+        let model = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: true,
+                platformTarget: .macos,
+                deviceClass: .mac
+            ),
+            userDefaults: defaults,
+            sharedConfigurationStore: MockSharedAppConfigurationStore(isAvailable: true),
+            bookingSecretStore: MockBookingSecretStore(secrets: BookingLocalSecrets.generate(), adminToken: nil),
+            googleAccountStore: MockGoogleAccountStore()
+        )
+
+        XCTAssertEqual(model.bookingInboxAdminTokenString, "file-admin-token")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: tokenFileURL.path))
+        XCTAssertEqual(model.bookingSetupSnapshot.inboxStatus, .connected)
+        XCTAssertTrue(model.canImportBookingRequests)
+    }
+
+    @MainActor
+    func testBookingImportSkipsIncompatibleRelayRequests() async throws {
+        let suiteName = "CalendarBusySyncTests.\(#function)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let secrets = BookingLocalSecrets.generate()
+        let model = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: false,
+                platformTarget: .macos,
+                deviceClass: .mac
+            ),
+            userDefaults: defaults,
+            sharedConfigurationStore: MockSharedAppConfigurationStore(isAvailable: true),
+            bookingSecretStore: MockBookingSecretStore(secrets: secrets, adminToken: "admin-token"),
+            googleAccountStore: MockGoogleAccountStore()
+        )
+        model.bookingInboxURLString = "https://relay.example.com"
+
+        let invalidEnvelope = EncryptedBookingRequestEnvelope(
+            schemaVersion: 1,
+            requestID: BookingRequestID("request-stale-1"),
+            inboxID: secrets.inboxID,
+            shareID: BookingShareID("intro-call"),
+            createdAt: Date(),
+            expiresAt: Date().addingTimeInterval(60 * 60),
+            keyID: "old-key",
+            algorithm: "P256.ECDH-ES+A256GCM",
+            ephemeralPublicKeyJWK: nil,
+            nonce: "not-base64",
+            ciphertext: "not-base64"
+        )
+        let responseEncoder = JSONEncoder()
+        responseEncoder.dateEncodingStrategy = .iso8601
+        let listPayload = try responseEncoder.encode(BookingRelayRequestPage(
+            requests: [invalidEnvelope],
+            cursor: nil
+        ))
+        RelayURLProtocol.responders = [
+            "GET /v1/inboxes/\(secrets.inboxID.rawValue)/requests": { request in
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer admin-token")
+                return (200, listPayload)
+            },
+        ]
+        URLProtocol.registerClass(RelayURLProtocol.self)
+        defer {
+            URLProtocol.unregisterClass(RelayURLProtocol.self)
+            RelayURLProtocol.responders = [:]
+            RelayURLProtocol.seenRequests = []
+        }
+
+        await model.importBookingRequests()
+
+        XCTAssertTrue(model.importedBookingRequests.isEmpty)
+        XCTAssertEqual(model.bookingSetupSnapshot.inboxStatus, .connected)
+        XCTAssertEqual(model.bookingSetupSnapshot.pendingRequestCount, 0)
+        XCTAssertEqual(
+            model.bookingSetupSnapshot.lastMessage,
+            "Skipped 1 booking request(s) that no longer match this device."
+        )
+    }
+
+    @MainActor
+    func testBookingPageURLUsesSelectedAppointmentTypeDeepLink() throws {
+        let suiteName = "CalendarBusySyncTests.\(#function)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let model = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                platformTarget: .macos,
+                deviceClass: .mac
+            ),
+            userDefaults: defaults,
+            sharedConfigurationStore: MockSharedAppConfigurationStore(isAvailable: true),
+            bookingSecretStore: MockBookingSecretStore(secrets: nil, adminToken: nil),
+            googleAccountStore: MockGoogleAccountStore(),
+            googleSignInEnvironment: GoogleSignInEnvironment(blockingReason: "test")
+        )
+
+        model.bookingPageURLString = "https://moorage.github.io/booking-test/?ref=settings"
+        model.selectedBookingAppointmentTypeIDString = "intro-call"
+
+        XCTAssertEqual(
+            model.selectedBookingAppointmentTypeURLString,
+            "https://moorage.github.io/booking-test/?ref=settings&appointment=intro-call"
+        )
+    }
+
+    @MainActor
+    func testBookingApprovalCalendarTargetNamesSelectedAppleCalendar() async throws {
+        let suiteName = "CalendarBusySyncTests.\(#function)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let iCloud = AppleCalendarSummary(
+            id: "icloud",
+            title: "Matt - iCloud",
+            sourceTitle: "iCloud",
+            sourceKind: .iCloud
+        )
+        let model = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                platformTarget: .macos,
+                deviceClass: .mac
+            ),
+            userDefaults: defaults,
+            sharedConfigurationStore: MockSharedAppConfigurationStore(isAvailable: true),
+            appleCalendarService: MockAppleCalendarService(
+                authorizationState: .granted,
+                calendars: [iCloud],
+                createdEvent: nil
+            ),
+            bookingSecretStore: MockBookingSecretStore(secrets: nil, adminToken: nil),
+            googleAccountStore: MockGoogleAccountStore()
+        )
+
+        XCTAssertEqual(model.bookingApprovalCalendarTargetSummary, "No target calendar selected")
+
+        await model.connectAppleCalendar()
+
+        XCTAssertEqual(model.bookingApprovalCalendarTargetSummary, "Apple / iCloud: Matt - iCloud • iCloud")
+        XCTAssertTrue(model.bookingApprovalCalendarDetail.contains("Accepted bookings are added to Matt - iCloud • iCloud"))
+    }
+
+    @MainActor
+    func testBookingCalendarTargetWarningExplainsSharedGoogleAccountNeedsLocalSignIn() async throws {
+        let suiteName = "CalendarBusySyncTests.\(#function)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let sharedStore = MockSharedAppConfigurationStore(
+            isAvailable: true,
+            initialConfiguration: SharedAppConfiguration(
+                updatedAt: Date(timeIntervalSince1970: 20),
+                pollIntervalMinutes: 2,
+                auditTrailLogLengthRawValue: AuditTrailLogLength.unlimited.rawValue,
+                isAppleCalendarEnabled: false,
+                selectedAppleCalendarReference: nil,
+                usesCustomGoogleOAuthApp: false,
+                customGoogleOAuthClientID: "",
+                customGoogleOAuthServerClientID: "",
+                googleSelectedCalendarIDs: ["shared-google": "primary"],
+                activeGoogleAccountID: "shared-google",
+                googleAccountDescriptors: [
+                    SharedGoogleAccountDescriptor(
+                        id: "shared-google",
+                        email: "shared@example.com",
+                        displayName: "Shared Google",
+                        usesCustomOAuthApp: false,
+                        selectedCalendarID: "primary",
+                        selectedCalendarDisplayName: "Primary"
+                    )
+                ]
+            )
+        )
+        let model = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                platformTarget: .macos,
+                deviceClass: .mac
+            ),
+            userDefaults: defaults,
+            sharedConfigurationStore: sharedStore,
+            appleCalendarService: MockAppleCalendarService(
+                authorizationState: .granted,
+                calendars: [],
+                createdEvent: nil
+            ),
+            bookingSecretStore: MockBookingSecretStore(secrets: nil, adminToken: nil),
+            googleAccountStore: MockGoogleAccountStore(),
+            googleSignInEnvironment: GoogleSignInEnvironment(
+                blockingReason: "Google Sign-In on macOS requires a signed app build."
+            )
+        )
+
+        await model.prepareIfNeeded()
+
+        let warning = try XCTUnwrap(model.bookingCalendarTargetWarning)
+        XCTAssertTrue(warning.contains("A shared Google calendar is configured"))
+        XCTAssertTrue(warning.contains("this Mac still needs local Google sign-in"))
+        XCTAssertTrue(warning.contains("Google Sign-In on macOS requires a signed app build."))
+    }
+
+    @MainActor
+    func testBookingImportAutomaticallyApprovesWhenAppointmentTypeEnabled() async throws {
+        let suiteName = "CalendarBusySyncTests.\(#function)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let secrets = BookingLocalSecrets.generate()
+        let secretStore = MockBookingSecretStore(
+            secrets: secrets,
+            adminToken: "admin-token"
+        )
+        let appleCalendar = AppleCalendarSummary(
+            id: "apple-calendar",
+            title: "Consulting",
+            sourceTitle: "iCloud",
+            sourceKind: .iCloud
+        )
+        let appleService = MockAppleCalendarService(
+            authorizationState: .granted,
+            calendars: [appleCalendar],
+            createdEvent: nil
+        )
+        let inviteFileWriter = MockBookingInviteFileWriter(
+            inviteFileURL: URL(fileURLWithPath: "/tmp/booking-request-auto-1.ics")
+        )
+        let model = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                platformTarget: .macos,
+                deviceClass: .mac
+            ),
+            userDefaults: defaults,
+            sharedConfigurationStore: MockSharedAppConfigurationStore(isAvailable: true),
+            appleCalendarService: appleService,
+            bookingSecretStore: secretStore,
+            bookingInviteFileWriter: inviteFileWriter,
+            googleAccountStore: MockGoogleAccountStore()
+        )
+        model.bookingInboxURLString = "https://relay.example.com"
+        var appointmentType = try XCTUnwrap(model.bookingAppointmentTypes.first)
+        appointmentType.isAutoConfirmEnabled = true
+        model.updateBookingAppointmentType(appointmentType)
+        await model.connectAppleCalendar()
+
+        let now = Date()
+        let slotStart = now.addingTimeInterval(60 * 60)
+        let claim = BookingSlotClaim(
+            appointmentTypeID: AppointmentTypeID("intro-call"),
+            slotID: BookingSlotID("intro-call-\(Int(slotStart.timeIntervalSince1970))"),
+            startsAt: slotStart,
+            endsAt: slotStart.addingTimeInterval(30 * 60),
+            generatedAt: now,
+            expiresAt: slotStart,
+            nonce: "nonce",
+            signingKeyVersion: "v1"
+        )
+        let token = try secrets.slotSigner.sign(claim)
+        let envelope = try BookingTestRequestSender.encrypt(
+            plaintext: BookingTestRequestPlaintext(
+                requestID: BookingRequestID("request-auto-1"),
+                appointmentTypeID: claim.appointmentTypeID,
+                slotID: claim.slotID,
+                slotToken: token,
+                visitor: BookingTestVisitor(
+                    name: "Matt Moore",
+                    email: "matt@alumni.ucsd.edu",
+                    topic: "A 30 minute meeting",
+                    guestEmails: []
+                ),
+                browserTimeZone: "America/Los_Angeles",
+                createdAt: now
+            ),
+            slot: BookingPublishedSlot(
+                id: claim.slotID,
+                appointmentTypeID: claim.appointmentTypeID,
+                startsAt: claim.startsAt,
+                endsAt: claim.endsAt,
+                expiresAt: claim.expiresAt,
+                token: token
+            ),
+            config: BookingPublishedSiteConfig(
+                share: BookingPublishedShare(id: BookingShareID("intro-call")),
+                inbox: BookingPublishedInbox(
+                    id: secrets.inboxID,
+                    url: try XCTUnwrap(URL(string: "https://relay.example.com"))
+                ),
+                encryption: BookingPublishedEncryption(
+                    keyID: secrets.keyID,
+                    publicKeyJWK: BookingKeyMaterial.publicKey(
+                        from: try secrets.privateKey,
+                        keyID: secrets.keyID
+                    ).jwk
+                )
+            ),
+            createdAt: now
+        )
+
+        let responseEncoder = JSONEncoder()
+        responseEncoder.dateEncodingStrategy = .iso8601
+        let listPayload = try responseEncoder.encode(BookingRelayRequestPage(
+            requests: [envelope],
+            cursor: nil
+        ))
+        RelayURLProtocol.responders = [
+            "GET /v1/inboxes/\(secrets.inboxID.rawValue)/requests": { request in
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer admin-token")
+                return (200, listPayload)
+            },
+            "DELETE /v1/inboxes/\(secrets.inboxID.rawValue)/requests/request-auto-1": { request in
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer admin-token")
+                return (204, Data())
+            },
+        ]
+        URLProtocol.registerClass(RelayURLProtocol.self)
+        defer {
+            URLProtocol.unregisterClass(RelayURLProtocol.self)
+            RelayURLProtocol.responders = [:]
+            RelayURLProtocol.seenRequests = []
+        }
+
+        await model.importBookingRequests()
+
+        let imported = try XCTUnwrap(model.importedBookingRequests.first)
+        XCTAssertEqual(imported.status, .approved)
+        XCTAssertEqual(appleService.createdBookingRequests.map(\.id), [imported.id])
+        XCTAssertEqual(inviteFileWriter.writtenRequests.map(\.id), [imported.id])
+        XCTAssertTrue(model.activeBookingRequests.isEmpty)
+        XCTAssertTrue(model.bookingSetupSnapshot.lastMessage?.contains("automatically accepted 1") ?? false)
+        XCTAssertTrue(RelayURLProtocol.seenRequests.contains("DELETE /v1/inboxes/\(secrets.inboxID.rawValue)/requests/request-auto-1"))
+    }
+
+    @MainActor
+    func testBookingDeclineWritesAppleDeclineICSAndDeletesRelayRecord() async throws {
+        let suiteName = "CalendarBusySyncTests.\(#function)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let secrets = BookingLocalSecrets.generate()
+        let secretStore = MockBookingSecretStore(
+            secrets: secrets,
+            adminToken: "admin-token"
+        )
+        let appleCalendar = AppleCalendarSummary(
+            id: "apple-calendar",
+            title: "Consulting",
+            sourceTitle: "iCloud",
+            sourceKind: .iCloud
+        )
+        let appleService = MockAppleCalendarService(
+            authorizationState: .granted,
+            calendars: [appleCalendar],
+            createdEvent: nil
+        )
+        let inviteFileWriter = MockBookingInviteFileWriter(
+            inviteFileURL: URL(fileURLWithPath: "/tmp/booking-request-decline-1.ics")
+        )
+        let model = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: false,
+                platformTarget: .macos,
+                deviceClass: .mac
+            ),
+            userDefaults: defaults,
+            sharedConfigurationStore: MockSharedAppConfigurationStore(isAvailable: true),
+            appleCalendarService: appleService,
+            bookingSecretStore: secretStore,
+            bookingInviteFileWriter: inviteFileWriter,
+            googleAccountStore: MockGoogleAccountStore()
+        )
+        model.bookingInboxURLString = "https://relay.example.com"
+        await model.connectAppleCalendar()
+
+        let now = Date()
+        let slotStart = now.addingTimeInterval(60 * 60)
+        let claim = BookingSlotClaim(
+            appointmentTypeID: AppointmentTypeID("intro-call"),
+            slotID: BookingSlotID("intro-call-\(Int(slotStart.timeIntervalSince1970))"),
+            startsAt: slotStart,
+            endsAt: slotStart.addingTimeInterval(30 * 60),
+            generatedAt: now,
+            expiresAt: slotStart,
+            nonce: "nonce",
+            signingKeyVersion: "v1"
+        )
+        let token = try secrets.slotSigner.sign(claim)
+        let envelope = try BookingTestRequestSender.encrypt(
+            plaintext: BookingTestRequestPlaintext(
+                requestID: BookingRequestID("request-decline-1"),
+                appointmentTypeID: claim.appointmentTypeID,
+                slotID: claim.slotID,
+                slotToken: token,
+                visitor: BookingTestVisitor(
+                    name: "Matt Moore",
+                    email: "matt@alumni.ucsd.edu",
+                    topic: "A 30 minute meeting",
+                    guestEmails: ["guest@example.com"]
+                ),
+                browserTimeZone: "America/Los_Angeles",
+                createdAt: now
+            ),
+            slot: BookingPublishedSlot(
+                id: claim.slotID,
+                appointmentTypeID: claim.appointmentTypeID,
+                startsAt: claim.startsAt,
+                endsAt: claim.endsAt,
+                expiresAt: claim.expiresAt,
+                token: token
+            ),
+            config: BookingPublishedSiteConfig(
+                share: BookingPublishedShare(id: BookingShareID("intro-call")),
+                inbox: BookingPublishedInbox(
+                    id: secrets.inboxID,
+                    url: try XCTUnwrap(URL(string: "https://relay.example.com"))
+                ),
+                encryption: BookingPublishedEncryption(
+                    keyID: secrets.keyID,
+                    publicKeyJWK: BookingKeyMaterial.publicKey(
+                        from: try secrets.privateKey,
+                        keyID: secrets.keyID
+                    ).jwk
+                )
+            ),
+            createdAt: now
+        )
+
+        let responseEncoder = JSONEncoder()
+        responseEncoder.dateEncodingStrategy = .iso8601
+        let listPayload = try responseEncoder.encode(BookingRelayRequestPage(
+            requests: [envelope],
+            cursor: nil
+        ))
+        RelayURLProtocol.responders = [
+            "GET /v1/inboxes/\(secrets.inboxID.rawValue)/requests": { request in
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer admin-token")
+                return (200, listPayload)
+            },
+            "DELETE /v1/inboxes/\(secrets.inboxID.rawValue)/requests/request-decline-1": { request in
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer admin-token")
+                return (204, Data())
+            },
+        ]
+        URLProtocol.registerClass(RelayURLProtocol.self)
+        defer {
+            URLProtocol.unregisterClass(RelayURLProtocol.self)
+            RelayURLProtocol.responders = [:]
+            RelayURLProtocol.seenRequests = []
+        }
+
+        await model.importBookingRequests()
+        let imported = try XCTUnwrap(model.importedBookingRequests.first)
+
+        await model.declineBookingRequest(imported.id)
+
+        XCTAssertTrue(appleService.createdBookingRequests.isEmpty)
+        XCTAssertTrue(inviteFileWriter.writtenRequests.isEmpty)
+        XCTAssertEqual(inviteFileWriter.writtenDeclines.map(\.id), [imported.id])
+        XCTAssertEqual(inviteFileWriter.writtenDeclines.first?.inviteeEmails, ["matt@alumni.ucsd.edu", "guest@example.com"])
+        XCTAssertEqual(model.importedBookingRequests.first?.status, .declined)
+        XCTAssertTrue(model.importedBookingRequests.first?.message.contains("booking-request-decline-1.ics") ?? false)
+        XCTAssertTrue(model.activeBookingRequests.isEmpty)
+        XCTAssertEqual(model.bookingRequestHistory.map(\.id), [imported.id])
+        XCTAssertTrue(RelayURLProtocol.seenRequests.contains("DELETE /v1/inboxes/\(secrets.inboxID.rawValue)/requests/request-decline-1"))
+    }
+
+    func testGoogleBookingEventWritesAttendeeInvites() async throws {
+        let request = makeCalendarTestImportedBookingRequest(
+            guestEmails: [
+                "guest@example.com",
+                "matt@alumni.ucsd.edu",
+            ]
+        )
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [GoogleCalendarURLProtocol.self]
+        let session = URLSession(configuration: config)
+        GoogleCalendarURLProtocol.seenRequests = []
+        GoogleCalendarURLProtocol.responder = { urlRequest in
+            XCTAssertEqual(urlRequest.httpMethod, "POST")
+            XCTAssertEqual(urlRequest.url?.path, "/calendar/v3/calendars/primary/events")
+            XCTAssertEqual(urlRequest.url?.query, "sendUpdates=all&conferenceDataVersion=1")
+            XCTAssertEqual(urlRequest.value(forHTTPHeaderField: "Authorization"), "Bearer access-token")
+            let body = try XCTUnwrap(urlRequest.httpBody)
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            let description = try XCTUnwrap(json["description"] as? String)
+            XCTAssertTrue(description.contains("Notes: A 30 minute meeting"))
+            let attendees = try XCTUnwrap(json["attendees"] as? [[String: Any]])
+            XCTAssertEqual(attendees.compactMap { $0["email"] as? String }, ["matt@alumni.ucsd.edu", "guest@example.com"])
+            let conferenceData = try XCTUnwrap(json["conferenceData"] as? [String: Any])
+            let createRequest = try XCTUnwrap(conferenceData["createRequest"] as? [String: Any])
+            let solutionKey = try XCTUnwrap(createRequest["conferenceSolutionKey"] as? [String: Any])
+            XCTAssertEqual(solutionKey["type"] as? String, "hangoutsMeet")
+            return (200, Data(#"{"id":"google-booking-1","summary":"Meeting with Matt Moore"}"#.utf8))
+        }
+        defer {
+            GoogleCalendarURLProtocol.responder = nil
+            GoogleCalendarURLProtocol.seenRequests = []
+        }
+
+        let service = GoogleCalendarService(session: session)
+        let event = try await service.createBookingEvent(
+            in: GoogleCalendarSummary(
+                id: "primary",
+                summary: "Matt Google",
+                accessRole: .owner,
+                primary: true,
+                timeZone: "America/Los_Angeles"
+            ),
+            accessToken: "access-token",
+            request: request,
+            createsGoogleMeet: true
+        )
+
+        XCTAssertEqual(event.eventID, "google-booking-1")
+        XCTAssertEqual(GoogleCalendarURLProtocol.seenRequests, ["POST /calendar/v3/calendars/primary/events"])
+    }
+
+    func testGoogleDeclinedBookingEventMarksOwnerDeclinedAndNotifiesInvitees() async throws {
+        let request = makeCalendarTestImportedBookingRequest(
+            guestEmails: ["guest@example.com", "owner@example.com"]
+        )
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [GoogleCalendarURLProtocol.self]
+        let session = URLSession(configuration: config)
+        GoogleCalendarURLProtocol.seenRequests = []
+        GoogleCalendarURLProtocol.responder = { urlRequest in
+            XCTAssertEqual(urlRequest.httpMethod, "POST")
+            XCTAssertEqual(urlRequest.url?.path, "/calendar/v3/calendars/primary/events")
+            XCTAssertEqual(urlRequest.url?.query, "sendUpdates=all")
+            let body = try XCTUnwrap(urlRequest.httpBody)
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertEqual(json["transparency"] as? String, "transparent")
+            XCTAssertEqual(json["summary"] as? String, "Declined: Meeting with Matt Moore")
+            let attendees = try XCTUnwrap(json["attendees"] as? [[String: Any]])
+            XCTAssertEqual(attendees.compactMap { $0["email"] as? String }, [
+                "owner@example.com",
+                "matt@alumni.ucsd.edu",
+                "guest@example.com",
+            ])
+            XCTAssertEqual(attendees.first?["responseStatus"] as? String, "declined")
+            return (200, Data(#"{"id":"google-decline-1","summary":"Declined: Meeting with Matt Moore"}"#.utf8))
+        }
+        defer {
+            GoogleCalendarURLProtocol.responder = nil
+            GoogleCalendarURLProtocol.seenRequests = []
+        }
+
+        let service = GoogleCalendarService(session: session)
+        let event = try await service.createDeclinedBookingEvent(
+            in: GoogleCalendarSummary(
+                id: "primary",
+                summary: "Matt Google",
+                accessRole: .owner,
+                primary: true,
+                timeZone: "America/Los_Angeles"
+            ),
+            accessToken: "access-token",
+            request: request,
+            ownerEmail: "owner@example.com"
+        )
+
+        XCTAssertEqual(event.eventID, "google-decline-1")
+        XCTAssertEqual(GoogleCalendarURLProtocol.seenRequests, ["POST /calendar/v3/calendars/primary/events"])
     }
 
     func testGoogleAccountStoreUpsertsAndRemovesAccounts() throws {
@@ -2361,6 +3469,7 @@ private final class MockAppleCalendarService: AppleCalendarProviding {
     var sourceEvents: [BusyMirrorSourceEvent] = []
     var existingMirrors: [ExistingBusyMirrorEvent] = []
     var busyTargetBlocks: [BusyMirrorTargetBusyBlock] = []
+    var createdBookingRequests: [BookingImportedRequest] = []
     var createdMirrorIdentities: [BusyMirrorIdentity] = []
     var updatedMirrorIdentities: [BusyMirrorIdentity] = []
     var deletedMirrorEventIDs: [String] = []
@@ -2420,6 +3529,17 @@ private final class MockAppleCalendarService: AppleCalendarProviding {
         busyTargetBlocks.filter { $0.targetParticipant.id == participant.id }
     }
 
+    func createBookingEvent(in calendar: AppleCalendarSummary, request: BookingImportedRequest) throws -> AppleManagedEventRecord {
+        createdBookingRequests.append(request)
+        return AppleManagedEventRecord(
+            calendarID: calendar.id,
+            calendarName: calendar.displayName,
+            eventID: "booking-\(request.id.rawValue)",
+            summary: "Meeting with \(request.visitorDisplayName)",
+            windowDescription: "Booking window"
+        )
+    }
+
     func createManagedMirrorEvent(in calendar: AppleCalendarSummary, desiredMirror: DesiredBusyMirrorEvent) throws {
         createdMirrorIdentities.append(desiredMirror.identity)
     }
@@ -2444,6 +3564,232 @@ private final class MockAppleCalendarSettingsOpener: AppleCalendarSettingsOpenin
     func openCalendarAccessSettings() -> Bool {
         didOpenCalendarAccessSettings = true
         return openResult
+    }
+}
+
+private final class MockBookingSecretStore: BookingSecretStoring {
+    var secrets: BookingLocalSecrets?
+    var adminToken: String?
+    var githubDeployKeyPrivateKey: String?
+    var didDeleteLegacyGitHubToken = false
+
+    init(secrets: BookingLocalSecrets?, adminToken: String?) {
+        self.secrets = secrets
+        self.adminToken = adminToken
+    }
+
+    func loadSecrets() throws -> BookingLocalSecrets? {
+        secrets
+    }
+
+    func saveSecrets(_ secrets: BookingLocalSecrets) throws {
+        self.secrets = secrets
+    }
+
+    func loadAdminToken() throws -> String? {
+        adminToken
+    }
+
+    func saveAdminToken(_ token: String) throws {
+        adminToken = token
+    }
+
+    func loadGitHubDeployKeyPrivateKey() throws -> String? {
+        githubDeployKeyPrivateKey
+    }
+
+    func saveGitHubDeployKeyPrivateKey(_ privateKey: String) throws {
+        githubDeployKeyPrivateKey = privateKey
+    }
+
+    func deleteLegacyGitHubToken() throws {
+        didDeleteLegacyGitHubToken = true
+    }
+}
+
+private final class MockBookingInviteFileWriter: BookingInviteFileWriting {
+    let inviteFileURL: URL
+    var writtenRequests: [BookingImportedRequest] = []
+    var writtenDeclines: [BookingImportedRequest] = []
+
+    init(inviteFileURL: URL) {
+        self.inviteFileURL = inviteFileURL
+    }
+
+    func writeInviteFile(for request: BookingImportedRequest, calendarName: String) throws -> URL {
+        writtenRequests.append(request)
+        return inviteFileURL
+    }
+
+    func writeDeclineFile(for request: BookingImportedRequest, calendarName: String) throws -> URL {
+        writtenDeclines.append(request)
+        return inviteFileURL
+    }
+}
+
+private func makeCalendarTestImportedBookingRequest(guestEmails: [String] = []) -> BookingImportedRequest {
+    let now = Date(timeIntervalSince1970: 1_767_225_600)
+    let slotStart = Date(timeIntervalSince1970: 1_767_258_000)
+    let requestID = BookingRequestID("request-google-1")
+    let claim = BookingSlotClaim(
+        appointmentTypeID: AppointmentTypeID("intro-call"),
+        slotID: BookingSlotID("intro-call-1767258000"),
+        startsAt: slotStart,
+        endsAt: slotStart.addingTimeInterval(30 * 60),
+        generatedAt: now,
+        expiresAt: slotStart,
+        nonce: "nonce",
+        signingKeyVersion: "v1"
+    )
+    return BookingImportedRequest(
+        id: requestID,
+        envelope: EncryptedBookingRequestEnvelope(
+            schemaVersion: 1,
+            requestID: requestID,
+            inboxID: BookingInboxID("inbox-123"),
+            shareID: BookingShareID("intro-call"),
+            createdAt: now,
+            expiresAt: slotStart,
+            keyID: "key-v1",
+            algorithm: "P256.ECDH-ES+A256GCM",
+            ephemeralPublicKeyJWK: nil,
+            nonce: "nonce",
+            ciphertext: "ciphertext"
+        ),
+        plaintext: BookingRequestPlaintext(
+            requestID: requestID,
+            appointmentTypeID: claim.appointmentTypeID,
+            slotID: claim.slotID,
+            slotToken: SignedBookingSlotToken("slot-token"),
+            visitor: BookingRequestVisitor(
+                name: "Matt Moore",
+                email: "matt@alumni.ucsd.edu",
+                topic: "A 30 minute meeting",
+                guestEmails: guestEmails
+            ),
+            browserTimeZone: "America/Los_Angeles",
+            createdAt: now
+        ),
+        slotClaim: claim,
+        importedAt: now,
+        status: .pendingReview,
+        message: BookingCopy.Validation.slotStillOpen,
+        calendarEventID: nil
+    )
+}
+
+private final class RelayURLProtocol: URLProtocol {
+    typealias Responder = (URLRequest) throws -> (statusCode: Int, data: Data)
+
+    static var responders: [String: Responder] = [:]
+    static var seenRequests: [String] = []
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        request.url?.host == "relay.example.com"
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        let key = "\(request.httpMethod ?? "GET") \(request.url?.path ?? "")"
+        Self.seenRequests.append(key)
+
+        guard let responder = Self.responders[key], let url = request.url else {
+            client?.urlProtocol(
+                self,
+                didFailWithError: URLError(.unsupportedURL)
+            )
+            return
+        }
+
+        do {
+            var responderRequest = request
+            if responderRequest.httpBody == nil, let stream = request.httpBodyStream {
+                responderRequest.httpBody = Data(inputStream: stream)
+            }
+            let responsePayload = try responder(responderRequest)
+            let response = HTTPURLResponse(
+                url: url,
+                statusCode: responsePayload.statusCode,
+                httpVersion: "HTTP/1.1",
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: responsePayload.data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
+}
+
+private final class GoogleCalendarURLProtocol: URLProtocol {
+    typealias Responder = (URLRequest) throws -> (statusCode: Int, data: Data)
+
+    static var responder: Responder?
+    static var seenRequests: [String] = []
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        request.url?.host == "www.googleapis.com"
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        let key = "\(request.httpMethod ?? "GET") \(request.url?.path ?? "")"
+        Self.seenRequests.append(key)
+
+        guard let responder = Self.responder, let url = request.url else {
+            client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
+            return
+        }
+
+        do {
+            var responderRequest = request
+            if responderRequest.httpBody == nil, let stream = request.httpBodyStream {
+                responderRequest.httpBody = Data(inputStream: stream)
+            }
+            let responsePayload = try responder(responderRequest)
+            let response = HTTPURLResponse(
+                url: url,
+                statusCode: responsePayload.statusCode,
+                httpVersion: "HTTP/1.1",
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: responsePayload.data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
+}
+
+private extension Data {
+    init(inputStream: InputStream) {
+        self.init()
+        inputStream.open()
+        defer { inputStream.close() }
+
+        let bufferSize = 4096
+        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+        defer { buffer.deallocate() }
+
+        while inputStream.hasBytesAvailable {
+            let count = inputStream.read(buffer, maxLength: bufferSize)
+            guard count > 0 else {
+                break
+            }
+            append(buffer, count: count)
+        }
     }
 }
 

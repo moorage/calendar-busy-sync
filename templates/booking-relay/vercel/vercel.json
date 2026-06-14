@@ -1,0 +1,21 @@
+{
+  "functions": {
+    "api/**/*.js": {
+      "maxDuration": 10
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/healthz",
+      "destination": "/api/healthz"
+    },
+    {
+      "source": "/v1/inboxes/:inboxId/requests",
+      "destination": "/api/v1/inboxes/:inboxId/requests"
+    },
+    {
+      "source": "/v1/inboxes/:inboxId/requests/:requestId",
+      "destination": "/api/v1/inboxes/:inboxId/requests/:requestId"
+    }
+  ]
+}

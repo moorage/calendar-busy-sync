@@ -1,0 +1,43 @@
+{
+  "profile": {
+    "publicName": "Sam Rivera",
+    "pageTitle": "Request time with Sam",
+    "pageSubtitle": "Choose a time and send a private request.",
+    "timeZone": "America/Los_Angeles"
+  },
+  "theme": {
+    "accentColor": "#0F766E",
+    "backgroundColor": "#F7F3EA",
+    "textColor": "#171717"
+  },
+  "copy": {
+    "privacyNote": ""
+  },
+  "share": {
+    "id": "intro-call"
+  },
+  "inbox": {
+    "id": "demo-inbox",
+    "url": "https://example.workers.dev"
+  },
+  "encryption": {
+    "keyID": "demo-key-v1",
+    "publicKeyJwk": {
+      "kty": "EC",
+      "crv": "P-256",
+      "x": "xT-soGCN1PNjTQzqvSaNNggT4GpjJJAfANoTyHwqtYY",
+      "y": "P50ij65h03a6WOC9UriwoD_pmnUIVuZAnp5u5ZJ8hmc",
+      "ext": true
+    }
+  },
+  "appointmentTypes": [
+    {
+      "id": "intro-call",
+      "slug": "intro-call",
+      "name": "Intro call",
+      "summary": "A focused first conversation.",
+      "durationMinutes": 30,
+      "autoConfirm": false
+    }
+  ]
+}
