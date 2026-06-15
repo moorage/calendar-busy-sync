@@ -73,8 +73,9 @@ nonisolated enum BookingCopy {
         static let githubRepository = "GitHub repository"
         static let bookingPageURL = "Booking page URL"
         static let allowedWebsite = "Allowed website"
-        static let inboxURL = "Inbox URL"
-        static let inboxAdminToken = "Inbox admin token"
+        static let vercelToken = "Vercel token"
+        static let vercelProject = "Vercel project ID or name"
+        static let vercelTeam = "Vercel team ID or slug (optional)"
         static let linkName = "Link name"
     }
 

@@ -1,5 +1,6 @@
 import XCTest
 @testable import Calendar_Busy_Sync
+import Security
 
 #if os(macOS)
 import EventKit
@@ -2113,6 +2114,93 @@ final class Calendar_Busy_SyncTests: XCTestCase {
     }
 
     @MainActor
+    func testDeployBookingVercelInboxStoresGeneratedSettingsAndChecksHealth() async throws {
+        let suiteName = "CalendarBusySyncTests.\(#function)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defaults.set("https://moorage.github.io/booking-test/", forKey: "settings.booking.pageURL")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        VercelDeploymentURLProtocol.responders = [
+            "POST api.vercel.com /v10/projects/prj_booking/env": { request in
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer vercel-token")
+                XCTAssertEqual(request.url?.query, "upsert=true&teamId=team_123")
+                let body = try XCTUnwrap(request.httpBody)
+                let decoded = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [[String: Any]])
+                XCTAssertTrue(decoded.contains { $0["key"] as? String == "ALLOWED_ORIGIN" && $0["value"] as? String == "https://moorage.github.io" })
+                XCTAssertTrue(decoded.contains { $0["key"] as? String == "MAX_PENDING_REQUESTS" && $0["value"] as? String == "100" })
+                let adminVariable = try XCTUnwrap(decoded.first { $0["key"] as? String == "INBOX_ADMIN_TOKEN" })
+                XCTAssertEqual(adminVariable["type"] as? String, "encrypted")
+                XCTAssertFalse((adminVariable["value"] as? String ?? "").isEmpty)
+                return (200, Data("{}".utf8))
+            },
+            "POST api.vercel.com /v13/deployments": { request in
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer vercel-token")
+                let body = try XCTUnwrap(request.httpBody)
+                let decoded = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+                XCTAssertEqual(decoded["project"] as? String, "prj_booking")
+                XCTAssertEqual(decoded["target"] as? String, "production")
+                let files = try XCTUnwrap(decoded["files"] as? [[String: Any]])
+                XCTAssertTrue(files.contains { $0["file"] as? String == "api/healthz.js" })
+                return (200, Data(#"{"id":"dpl_123","url":"booking-inbox.vercel.app"}"#.utf8))
+            },
+            "GET booking-inbox.vercel.app /healthz": { request in
+                XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+                return (200, Data(#"{"ok":true,"allowedOrigin":"https://moorage.github.io","storage":"vercel-blob"}"#.utf8))
+            },
+        ]
+        VercelDeploymentURLProtocol.seenRequests = []
+        URLProtocol.registerClass(VercelDeploymentURLProtocol.self)
+        defer {
+            URLProtocol.unregisterClass(VercelDeploymentURLProtocol.self)
+            VercelDeploymentURLProtocol.responders = [:]
+            VercelDeploymentURLProtocol.seenRequests = []
+        }
+
+        let secretStore = MockBookingSecretStore(secrets: BookingLocalSecrets.generate(), adminToken: nil)
+        let model = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: false,
+                platformTarget: .macos,
+                deviceClass: .mac
+            ),
+            userDefaults: defaults,
+            sharedConfigurationStore: MockSharedAppConfigurationStore(isAvailable: true),
+            bookingSecretStore: secretStore,
+            googleAccountStore: MockGoogleAccountStore()
+        )
+
+        model.bookingVercelTokenString = "vercel-token"
+        model.bookingVercelProjectNameString = "prj_booking"
+        model.bookingVercelScopeString = "team_123"
+
+        await model.deployBookingVercelInbox()
+
+        XCTAssertEqual(secretStore.vercelToken, "vercel-token")
+        XCTAssertEqual(model.bookingInboxURLString, "https://booking-inbox.vercel.app")
+        XCTAssertFalse(model.bookingInboxAdminTokenString.isEmpty)
+        XCTAssertEqual(secretStore.adminToken, model.bookingInboxAdminTokenString)
+        XCTAssertEqual(model.bookingSetupSnapshot.inboxStatus, .connected)
+        XCTAssertEqual(
+            VercelDeploymentURLProtocol.seenRequests,
+            [
+                "POST api.vercel.com /v10/projects/prj_booking/env",
+                "POST api.vercel.com /v13/deployments",
+                "GET booking-inbox.vercel.app /healthz",
+            ]
+        )
+    }
+
+    @MainActor
     func testUITestModeConsumesBookingInboxAdminTokenFile() throws {
         let suiteName = "CalendarBusySyncTests.\(#function)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
@@ -2742,9 +2830,18 @@ final class Calendar_Busy_SyncTests: XCTestCase {
     }
 
     func testGoogleAccountStoreUpsertsAndRemovesAccounts() throws {
+        let legacyService = "test.google-account-store.\(#function).\(UUID().uuidString)"
+        let vaultService = "test.google-account-vault.\(#function).\(UUID().uuidString)"
+        defer {
+            try? deleteTestKeychainItem(service: legacyService, account: "connected-google-accounts")
+            try? deleteTestKeychainItem(service: vaultService, account: "app-credential-vault")
+        }
+
+        let vault = AppCredentialVault(service: vaultService, accessPolicy: .unprotected)
         let store = GoogleAccountStore(
-            service: "test.google-account-store.\(#function)",
-            accountName: "connected-google-accounts"
+            service: legacyService,
+            accountName: "connected-google-accounts",
+            vault: vault
         )
 
         try store.saveAccounts([])
@@ -2774,6 +2871,72 @@ final class Calendar_Busy_SyncTests: XCTestCase {
 
         try store.saveAccounts([])
         XCTAssertEqual(try store.loadAccounts(), [])
+    }
+
+    func testCredentialVaultMigratesBookingAndGoogleSecretsIntoOneItem() throws {
+        let suffix = UUID().uuidString
+        let vaultService = "test.single-vault.\(suffix)"
+        let bookingService = "test.legacy-booking.\(suffix)"
+        let googleService = "test.legacy-google.\(suffix)"
+        defer {
+            try? deleteTestKeychainItem(service: vaultService, account: "app-credential-vault")
+            try? deleteTestKeychainItem(service: bookingService, account: "booking-local-secrets")
+            try? deleteTestKeychainItem(service: bookingService, account: "booking-inbox-admin-token")
+            try? deleteTestKeychainItem(service: bookingService, account: "booking-vercel-token")
+            try? deleteTestKeychainItem(service: bookingService, account: "booking-github-deploy-key-private-key")
+            try? deleteTestKeychainItem(service: googleService, account: "connected-google-accounts")
+        }
+
+        let bookingSecrets = BookingLocalSecrets.generate()
+        let googleAccount = StoredGoogleAccount(
+            id: "google-1",
+            email: "person@example.com",
+            displayName: "Person",
+            grantedScopes: ["calendar.events"],
+            usesCustomOAuthApp: false,
+            archivedUserData: Data("archived-google-user".utf8)
+        )
+        try saveTestKeychainData(
+            try JSONEncoder().encode(bookingSecrets),
+            service: bookingService,
+            account: "booking-local-secrets"
+        )
+        try saveTestKeychainData(Data("admin-token".utf8), service: bookingService, account: "booking-inbox-admin-token")
+        try saveTestKeychainData(Data("vercel-token".utf8), service: bookingService, account: "booking-vercel-token")
+        try saveTestKeychainData(
+            Data("deploy-key".utf8),
+            service: bookingService,
+            account: "booking-github-deploy-key-private-key"
+        )
+        try saveTestKeychainData(
+            try JSONEncoder().encode([googleAccount]),
+            service: googleService,
+            account: "connected-google-accounts"
+        )
+
+        let vault = AppCredentialVault(service: vaultService, accessPolicy: .unprotected)
+        let bookingStore = BookingKeychainSecretStore(service: bookingService, vault: vault)
+        let googleStore = GoogleAccountStore(
+            service: googleService,
+            accountName: "connected-google-accounts",
+            vault: vault
+        )
+
+        XCTAssertEqual(try bookingStore.loadSecrets(), bookingSecrets)
+        XCTAssertEqual(try bookingStore.loadAdminToken(), "admin-token")
+        XCTAssertEqual(try bookingStore.loadVercelToken(), "vercel-token")
+        XCTAssertEqual(try bookingStore.loadGitHubDeployKeyPrivateKey(), "deploy-key")
+        XCTAssertEqual(try googleStore.loadAccounts(), [googleAccount])
+
+        let payload = try XCTUnwrap(vault.loadPayloadIfPresent())
+        XCTAssertTrue(payload.didMigrateLegacyBookingSecrets)
+        XCTAssertTrue(payload.didMigrateLegacyGoogleAccounts)
+        XCTAssertEqual(payload.bookingLocalSecrets, bookingSecrets)
+        XCTAssertEqual(payload.bookingInboxAdminToken, "admin-token")
+        XCTAssertEqual(payload.bookingVercelToken, "vercel-token")
+        XCTAssertEqual(payload.bookingGitHubDeployKeyPrivateKey, "deploy-key")
+        XCTAssertEqual(payload.googleAccounts, [googleAccount])
+        XCTAssertEqual(try testKeychainItemCount(service: vaultService), 1)
     }
 
     func testBusyMirrorPlannerOnlyMirrorsPresentAndFutureTime() {
@@ -3570,12 +3733,14 @@ private final class MockAppleCalendarSettingsOpener: AppleCalendarSettingsOpenin
 private final class MockBookingSecretStore: BookingSecretStoring {
     var secrets: BookingLocalSecrets?
     var adminToken: String?
+    var vercelToken: String?
     var githubDeployKeyPrivateKey: String?
     var didDeleteLegacyGitHubToken = false
 
-    init(secrets: BookingLocalSecrets?, adminToken: String?) {
+    init(secrets: BookingLocalSecrets?, adminToken: String?, vercelToken: String? = nil) {
         self.secrets = secrets
         self.adminToken = adminToken
+        self.vercelToken = vercelToken
     }
 
     func loadSecrets() throws -> BookingLocalSecrets? {
@@ -3592,6 +3757,14 @@ private final class MockBookingSecretStore: BookingSecretStoring {
 
     func saveAdminToken(_ token: String) throws {
         adminToken = token
+    }
+
+    func loadVercelToken() throws -> String? {
+        vercelToken
+    }
+
+    func saveVercelToken(_ token: String) throws {
+        vercelToken = token
     }
 
     func loadGitHubDeployKeyPrivateKey() throws -> String? {
@@ -3694,6 +3867,56 @@ private final class RelayURLProtocol: URLProtocol {
 
     override func startLoading() {
         let key = "\(request.httpMethod ?? "GET") \(request.url?.path ?? "")"
+        Self.seenRequests.append(key)
+
+        guard let responder = Self.responders[key], let url = request.url else {
+            client?.urlProtocol(
+                self,
+                didFailWithError: URLError(.unsupportedURL)
+            )
+            return
+        }
+
+        do {
+            var responderRequest = request
+            if responderRequest.httpBody == nil, let stream = request.httpBodyStream {
+                responderRequest.httpBody = Data(inputStream: stream)
+            }
+            let responsePayload = try responder(responderRequest)
+            let response = HTTPURLResponse(
+                url: url,
+                statusCode: responsePayload.statusCode,
+                httpVersion: "HTTP/1.1",
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: responsePayload.data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
+}
+
+private final class VercelDeploymentURLProtocol: URLProtocol {
+    typealias Responder = (URLRequest) throws -> (statusCode: Int, data: Data)
+
+    static var responders: [String: Responder] = [:]
+    static var seenRequests: [String] = []
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        guard let host = request.url?.host else { return false }
+        return host == "api.vercel.com" || host == "booking-inbox.vercel.app"
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        let key = "\(request.httpMethod ?? "GET") \(request.url?.host ?? "") \(request.url?.path ?? "")"
         Self.seenRequests.append(key)
 
         guard let responder = Self.responders[key], let url = request.url else {
@@ -3910,6 +4133,58 @@ private func testParticipant(
         calendarID: calendarID,
         displayName: displayName
     )
+}
+
+private func saveTestKeychainData(_ data: Data, service: String, account: String) throws {
+    try deleteTestKeychainItem(service: service, account: account)
+    var query: [String: Any] = [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: service,
+        kSecAttrAccount as String: account,
+        kSecValueData as String: data,
+    ]
+    #if os(iOS)
+    query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+    #endif
+
+    let status = SecItemAdd(query as CFDictionary, nil)
+    guard status == errSecSuccess else {
+        throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
+    }
+}
+
+private func deleteTestKeychainItem(service: String, account: String) throws {
+    let status = SecItemDelete([
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: service,
+        kSecAttrAccount as String: account,
+    ] as CFDictionary)
+    guard status == errSecSuccess || status == errSecItemNotFound else {
+        throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
+    }
+}
+
+private func testKeychainItemCount(service: String) throws -> Int {
+    var query: [String: Any] = [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: service,
+        kSecReturnAttributes as String: kCFBooleanTrue as Any,
+        kSecMatchLimit as String: kSecMatchLimitAll,
+    ]
+
+    var item: CFTypeRef?
+    let status = SecItemCopyMatching(query as CFDictionary, &item)
+    switch status {
+    case errSecSuccess:
+        if let items = item as? [[String: Any]] {
+            return items.count
+        }
+        return item == nil ? 0 : 1
+    case errSecItemNotFound:
+        return 0
+    default:
+        throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
+    }
 }
 
 private extension Array where Element == BusyMirrorOperation {

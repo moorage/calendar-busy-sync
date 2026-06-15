@@ -1,6 +1,6 @@
 # Cloudflare encrypted request inbox
 
-Cloudflare Workers is the recommended encrypted inbox target for the first release.
+Cloudflare Workers is an encrypted inbox template for source review and future provider support. The current in-app setup path is the Vercel project/token deploy flow.
 
 The Worker receives encrypted envelopes only. It never sees calendars, provider credentials, calendar IDs, event IDs, or plaintext visitor answers.
 
@@ -27,8 +27,6 @@ npx wrangler secret put TURNSTILE_SECRET_KEY
 ```bash
 npx wrangler deploy
 ```
-
-8. Paste the Worker URL into Calendar Busy Sync as `Inbox URL`.
 
 ## Abuse controls
 

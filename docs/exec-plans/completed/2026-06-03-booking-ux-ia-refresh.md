@@ -37,12 +37,12 @@ The existing privacy-first booking workstream in `docs/exec-plans/active/2026-05
 - Keep remote mutations limited to local, fixture, throwaway, or explicitly approved dev GitHub/Vercel resources. Do not use production credentials or mutate production repositories without explicit approval.
 - Preserve the privacy contract: generated public artifacts must not contain calendar IDs, provider tokens, private keys, raw busy intervals, visitor plaintext, or selected calendar metadata.
 - Ship the first implementation slice without app-managed Vercel project creation. This slice makes the native request-inbox status and publish evidence clearer, while full automated Vercel project mutation remains outside this UX/IA plan.
-- Complete this plan with guided Vercel setup instead of native app-managed Vercel mutation. The app now makes the required deployment inputs, environment variables, URL/admin-token capture, allowed-origin comparison, and test-request proof legible; it does not shell out to Vercel CLI or mutate Vercel projects because that would require broader secret handling and deployment ownership than this UX/IA refresh needs.
+- Complete this plan with guided Vercel setup as an interim UX slice. The later app-managed Vercel flow owns deployment inputs, generated relay secrets, allowed-origin comparison, and test-request proof without exposing raw inbox credentials in the primary UI.
 - Mark the plan complete with iOS smoke risk recorded. The acceptance surface was validated through macOS build, macOS UI smoke, focused Booking XCTest coverage, static booking/relay tests, local Playwright computer-use checks, and generated onboarding artifacts; the only incomplete command is the documented iOS simulator launch stall after successful build/boot.
 
 ## Outcomes & Retrospective
 
-The booking flow now has one native management workspace with explicit lifecycle evidence instead of a split setup/steady-state IA. Users can create and pause/resume appointment types, customize public name/title/subtitle/timezone/theme in the app, generate and preview fresh local page files, see safe customization and protected protocol files, publish with upload/serve/fingerprint evidence, configure an existing inbox or follow guided Vercel setup, verify allowed-origin readiness, import requests, and approve or decline them.
+The booking flow now has one native management workspace with explicit lifecycle evidence instead of a split setup/steady-state IA. Users can create and pause/resume appointment types, customize public name/title/subtitle/timezone/theme in the app, generate and preview fresh local page files, see safe customization and protected protocol files, publish with upload/serve/fingerprint evidence, follow Vercel setup, verify allowed-origin readiness, import requests, and approve or decline them.
 
 The confusing `draft` / `published` / `verified` / `live` boundary is now version-based. `Live` requires a served public configuration fingerprint match; local edits to appointment types, profile copy, theme, or page settings move the page back to a pending/generated state until regeneration, upload, and verification catch up. The public page handles paused/no-active, one-type, five-type, twenty-type, no-slot, and local-preview states without hiding the request form incorrectly or letting appointment cards/timezone controls dominate the page.
 
@@ -100,7 +100,7 @@ Assumptions:
 5. Make publishing and Vercel deployment evidence-based.
    - In `Publish`, separate local generation, GitHub upload, GitHub Pages serving, and live fingerprint verification. Show repository, branch/folder, last upload timestamp, commit SHA, expected fingerprint, served fingerprint, last verification time, and failure reason.
    - Validate GitHub token/repo/branch inputs before upload where possible, and make GitHub Pages delay explicit after upload.
-   - In `Request Inbox`, support `Use existing inbox` and `Guided Vercel deploy`. The guided path should expose required environment variables, production/preview context, deploy URL capture, `/healthz` check, `ALLOWED_ORIGIN` comparison, and test-request evidence.
+   - In `Request Inbox`, support guided Vercel deploy. The guided path should expose required deployment inputs, production context, `/healthz` check, `ALLOWED_ORIGIN` comparison, and test-request evidence.
    - If app-managed Vercel deployment is implemented using `VERCEL_ACCOUNT_TOKEN` or a user-entered token, create/update the project, set environment variables, deploy, capture the production URL, verify health, and record status without logging secrets.
 
 6. Polish the public booking page states.

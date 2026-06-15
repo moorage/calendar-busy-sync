@@ -941,6 +941,11 @@ final class BookingTests: XCTestCase {
             .write(to: localRoot.appendingPathComponent("public/site-config.json"))
 
         let runner = RecordingBookingGitCommandRunner()
+        let toolchain = BookingGitToolchain(
+            gitURL: tempRoot.appendingPathComponent("Calendar Busy Sync.app/Contents/MacOS/booking-git"),
+            sshURL: tempRoot.appendingPathComponent("Calendar Busy Sync.app/Contents/MacOS/booking-ssh"),
+            sshKeygenURL: tempRoot.appendingPathComponent("Calendar Busy Sync.app/Contents/MacOS/booking-ssh-keygen")
+        )
         let summary = try await BookingGitHubPublisher.publishDirectory(
             at: localRoot,
             repository: try BookingGitHubRepository(rawValue: "moorage/booking-test"),
@@ -952,6 +957,7 @@ final class BookingTests: XCTestCase {
             """,
             fileManager: fileManager,
             commandRunner: runner,
+            toolchain: toolchain,
             workingDirectoryRoot: workRoot
         )
 
@@ -959,10 +965,49 @@ final class BookingTests: XCTestCase {
         XCTAssertEqual(summary.skippedCount, 0)
         XCTAssertEqual(summary.overwrittenCount, 0)
         XCTAssertEqual(summary.remoteChangedPaths, [])
+        XCTAssertTrue(runner.commands.allSatisfy { $0.executableURL == toolchain.gitURL })
         XCTAssertTrue(runner.commands.contains { $0.arguments == ["push", "origin", "HEAD:main"] })
         XCTAssertTrue(runner.commands.contains { command in
-            command.environment["GIT_SSH_COMMAND"]?.contains("-i") == true
+            command.environment["GIT_SSH_COMMAND"]?.contains(toolchain.sshURL.path) == true
         })
+        XCTAssertFalse(runner.commands.contains { command in
+            command.executableURL.path == "/usr/bin/git"
+        })
+    }
+
+    func testGitHubPublisherRequiresBundledGitToolchainWithoutInjectedRunner() async throws {
+        let fileManager = FileManager.default
+        let tempRoot = fileManager.temporaryDirectory
+            .appendingPathComponent("booking-publisher-missing-toolchain-\(UUID().uuidString)", isDirectory: true)
+        let localRoot = tempRoot.appendingPathComponent("local", isDirectory: true)
+        let workRoot = tempRoot.appendingPathComponent("work", isDirectory: true)
+        defer {
+            try? fileManager.removeItem(at: tempRoot)
+        }
+
+        try fileManager.createDirectory(at: localRoot, withIntermediateDirectories: true)
+        try Data("<html>Booking</html>".utf8).write(to: localRoot.appendingPathComponent("index.html"))
+
+        do {
+            _ = try await BookingGitHubPublisher.publishDirectory(
+                at: localRoot,
+                repository: try BookingGitHubRepository(rawValue: "moorage/booking-test"),
+                branch: "main",
+                privateKeyPEM: """
+                -----BEGIN OPENSSH PRIVATE KEY-----
+                test
+                -----END OPENSSH PRIVATE KEY-----
+                """,
+                fileManager: fileManager,
+                workingDirectoryRoot: workRoot
+            )
+            XCTFail("Expected App Store publishing to require bundled Git helpers.")
+        } catch {
+            XCTAssertEqual(
+                error as? BookingConfigurationError,
+                .invalidField("This build is missing its bundled Git publishing helper. Update the app, then try publishing again.")
+            )
+        }
     }
 
     func testGitHubPublisherRejectsNonEmptyRepositoryRoot() async throws {
@@ -1527,7 +1572,7 @@ private final class RecordingBookingGitCommandRunner: BookingGitCommandRunning, 
         recordedCommands.append(command)
         lock.unlock()
 
-        guard command.executableURL.lastPathComponent == "git" else {
+        guard command.executableURL.lastPathComponent.hasSuffix("git") else {
             return BookingGitCommandResult(standardOutput: "", standardError: "")
         }
 

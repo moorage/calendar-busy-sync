@@ -71,6 +71,8 @@ This plan is intentionally product, architecture, and onboarding heavy. The hard
 - [x] 2026-06-05T07:05Z implement deploy-key-only publishing: replace Contents API upload with Git-over-SSH, add deploy-key generation/verification UI and secure private-key storage, update docs/tests, and validate live read/write access on `moorage/booking-test`
 - [x] 2026-06-14T07:24Z sync native Booking setup through iCloud shared configuration, including appointment types and page/inbox/publish fields, while keeping Keychain secrets and editable HTML/design template files device-local
 - [x] 2026-06-14T07:31Z add a per-appointment availability horizon, cap it at three months, publish all slots for every active appointment type across its configured horizon, and reuse the poll-driven GitHub publish path so hosted availability stays current
+- [x] 2026-06-15T00:00Z remove production reliance on `/usr/bin/git`, `/usr/bin/ssh`, and `/usr/bin/ssh-keygen` so App Store builds publish only through app-bundled Git/SSH helpers or a later in-process Git implementation
+- [x] 2026-06-15T00:00Z replace the raw Vercel inbox URL/admin-token setup with an app-managed Vercel flow that takes a Vercel token plus project ID/name, stores generated relay secrets locally, deploys/redeploys the relay template, and records the resulting inbox URL
 
 ## Surprises & Discoveries
 
@@ -109,7 +111,7 @@ This plan is intentionally product, architecture, and onboarding heavy. The hard
 - 2026-06-01: splitting `Continue setup` and `Booking settings` created a trust problem: the app says page files are written locally, but the user cannot see where, reveal them in Finder, publish them, or verify the exact live artifact from the same surface.
 - 2026-06-01: multiple appointment types are no longer just a static-template concern. The app needs a native editor because per-type hours, buffers, minimum notice, auto-acceptance, location, Google Meet, and share-link state are operational settings, not only Markdown copy.
 - 2026-06-01: Google Meet creation is only available through the Google Calendar event-write path. The app must create Google-backed bookings with `conferenceData.createRequest`, pass `conferenceDataVersion=1`, and send attendee updates; Apple / iCloud bookings cannot auto-create a Meet without using Google Calendar as the accepted-booking calendar.
-- 2026-06-01: Vercel automation is possible only if the user grants a Vercel token and chooses a scope/team/project name, or if they self-deploy and paste the resulting URL/admin token. The app can verify a relay without knowing Vercel credentials by probing the relay contract, but it cannot create/update the Vercel project without Vercel account access.
+- 2026-06-01: Vercel automation is possible only if the user grants a Vercel token and chooses a scope/team/project name. The app verifies the deployed inbox by probing the relay contract after it deploys the bundled template.
 - 2026-06-03: a follow-up UX audit found the booking flow still has two overlapping management surfaces: a four-step setup sheet and a six-section Booking workspace. The workspace is the better long-term IA, while the setup sheet should collapse into the workspace overview/readiness checklist.
 - 2026-06-03: the browser-rendered generated public page is clear once a visitor reaches the details step, but its n=1 first viewport has too much empty space and the full IANA timezone select dominates DOM and screen-reader order for a secondary setting.
 - 2026-06-03: macOS checkpoint capture succeeded for state/perf but rendered placeholder visual blocks in `window.png`, so this audit uses source-backed native findings plus browser-backed public-page findings rather than claiming a useful native screenshot.
@@ -122,6 +124,8 @@ This plan is intentionally product, architecture, and onboarding heavy. The hard
 - 2026-06-05: GitHub deploy keys fit the dedicated-repository contract better than a personal access token because the credential is attached to one repository. GitHub still documents important caveats: write-enabled deploy keys can push to the repo, do not expire, and are not tied to ongoing user membership, so the app must make revocation and key rotation clear.
 - 2026-06-14: Booking appointment types are currently local-only `UserDefaults` data even though shared configuration already roams calendar/account setup. The editable `BookingSiteTemplate` folder and generated page-files folder are intentionally filesystem-local and should not enter the iCloud KVS payload.
 - 2026-06-14: the prior 40-slot publishing cap conflicted with per-appointment booking windows because a busy user or multiple appointment types could exhaust the cap before the configured horizon. Publishing now emits every generated open slot for each active appointment type, bounded by the three-month per-type maximum.
+- 2026-06-15: the App Store build can hit `xcrun: error: cannot be used within an App Sandbox` when launching `/usr/bin/git`. System Git on macOS is not a reliable runtime dependency for a sandboxed App Store app, and the deploy-key path also currently assumes system `ssh` and `ssh-keygen`.
+- 2026-06-15: current Vercel REST docs support the user-facing shape requested here: project lookup accepts project `id` or `name`, environment variable upsert is available for a project `id` or `name`, and deployment creation accepts inline files for non-Git deployments. The existing relay template still depends on Vercel Blob for durable encrypted-envelope storage, so app-managed deploy can own relay secrets and code deployment but must surface missing Blob/project storage as a project setup health failure rather than asking users for an "inbox admin token."
 
 ## Decision Log
 
@@ -158,9 +162,11 @@ This plan is intentionally product, architecture, and onboarding heavy. The hard
 - 2026-06-01: for app-managed GitHub Pages publishing, prefer repository contents commits for generated static files and use Pages API only when enabling or changing Pages settings. The required user inputs are owner/repo, branch, Pages URL, and a fine-grained token stored in Keychain.
 - 2026-06-05: remove the GitHub publishing path/folder setting. The app treats a GitHub Pages repository as dedicated to the booking page, publishes to repository root, and blocks upload if root contains files outside the current generated site artifact set.
 - 2026-06-05: migrate GitHub Pages publishing to deploy keys only. The app will no longer store or ask for a GitHub token for normal publishing; it will generate a repository-specific SSH keypair locally, store the private key in secure storage, show the public key for the user to add as a write-enabled GitHub deploy key, and publish by committing to the repository root over SSH.
-- 2026-06-14: add a non-secret `SharedBookingConfiguration` to the iCloud shared settings payload. It carries native Booking setup such as page/inbox URLs, repository/branch, Vercel metadata, profile/theme fields, selected appointment type, automatic approval, and appointment-type definitions. It does not carry inbox admin tokens, booking private/signing keys, GitHub deploy-key private keys, generated page-file paths, or editable HTML/CSS/template file contents.
+- 2026-06-14: add a non-secret `SharedBookingConfiguration` to the iCloud shared settings payload. It carries native Booking setup such as page/inbox URLs, repository/branch, Vercel metadata, profile/theme fields, selected appointment type, automatic approval, and appointment-type definitions. It does not carry Vercel account tokens, inbox admin tokens, booking private/signing keys, GitHub deploy-key private keys, generated page-file paths, or editable HTML/CSS/template file contents.
 - 2026-06-14: appointment types own the booking availability horizon. The native editor offers up to three months, older saved appointment types default to 14 days, generated public config includes the horizon, and the background publish loop regenerates and pushes all active appointment-type availability on each poll when GitHub publishing is configured.
+- 2026-06-15: keep the deploy-key model, but make the runtime Git/SSH stack app-owned. The production app must not call `/usr/bin/git`, `/usr/bin/ssh`, or `/usr/bin/ssh-keygen`; the short-term code path resolves bundled helpers and fails clearly when a build is missing them, while the longer-term implementation can replace the helper binaries with an in-process libgit2-backed publisher.
 - 2026-06-01: for app-managed Vercel setup, require a Vercel account token, account scope/team slug when applicable, project name, allowed GitHub Pages origin, and generated inbox/admin secrets stored in Keychain. A no-token self-deploy path remains supported by pasting the relay URL and admin token.
+- 2026-06-15: for Vercel setup, the primary user contract is `Vercel token` plus `Vercel project ID or name`, with optional team ID/slug only when the project belongs to a team. The app generates and stores `INBOX_ADMIN_TOKEN` in Keychain, upserts relay environment variables, deploys/redeploys the bundled Vercel template, and saves the returned production URL as the inbox URL.
 - 2026-06-01: Google Meet is an appointment-type location option, but enabling it is gated on a Google accepted-booking calendar with write access and a calendar that supports `hangoutsMeet`; otherwise the UI explains the dependency and keeps the option disabled.
 - 2026-06-02: the first multiple appointment-type editor exposed correct fields but used raw text and stepper controls that make weekly hours hard to trust. The editor needs to show appointment types as shareable cards first, then edit one selected type with disclosure sections and day-by-day hour rows.
 - 2026-06-02: the macOS `NavigationStack` plus segmented `Picker` inside the sheet could reserve large vertical bands before and after the selector. A custom sheet header and selector make the layout deterministic.
@@ -218,7 +224,7 @@ The first implementation establishes the privacy boundary in code and docs:
 - booking request form notes are labeled `Notes:` in calendar event descriptions, Google Calendar event payloads, and generated iCloud `.ics` files, with focused tests covering both provider paths
 - the Booking settings sheet now uses a compact local header with Done, a custom segmented section selector, and top-pinned scroll content to avoid the large blank gaps seen in the macOS sheet
 - GitHub Pages publishing now assumes a dedicated empty repository, publishes generated files at repository root, and blocks upload when recursive root inspection finds files outside the generated artifact set. The Publish workspace no longer stores or renders a remote folder field.
-- iCloud shared settings now include non-secret native Booking setup through `SharedBookingConfiguration`: appointment type definitions, page/inbox URLs, repository and branch, Vercel metadata, native public profile/theme fields, selected appointment type, and automatic-approval preference. The sync path intentionally excludes inbox admin tokens, booking private/signing keys, GitHub deploy-key private keys, generated page-file paths, and editable HTML/CSS/template files.
+- iCloud shared settings now include non-secret native Booking setup through `SharedBookingConfiguration`: appointment type definitions, page/inbox URLs, repository and branch, Vercel metadata, native public profile/theme fields, selected appointment type, and automatic-approval preference. The sync path intentionally excludes Vercel account tokens, inbox admin tokens, booking private/signing keys, GitHub deploy-key private keys, generated page-file paths, and editable HTML/CSS/template files.
 - Appointment types now include `availabilityHorizonDays`; the Booking workspace exposes it as `Show availability`, validates a maximum of three months, and public availability generation emits all open slots for every active appointment type across its configured horizon on manual publish and each background poll publish.
 
 Remaining work for a production-ready booking release is live app-side GitHub publishing/token storage, promotion of the setup sheet into the full platform-adaptive assistant described above, persistent local request-ledger storage across launches, cleanup controls for stale duplicate requests, per-appointment automatic-acceptance policy, clearer UI affordances for opening iCloud `.ics` artifacts, and investigation of the current local macOS UI-test runner stall even though manual accessibility validation covers the setup flow.
@@ -427,11 +433,10 @@ Setup field labels and help text:
 | GitHub deploy key | `Deploy key` | none | `Add this public key to the repository with write access.` |
 | Pages URL | `Booking page URL` | `https://owner.github.io/repo/` | `This is the public page people open.` |
 | Allowed website | `Allowed website` | `https://owner.github.io` | `The inbox accepts requests only from this website.` |
-| Inbox URL | `Inbox URL` | `https://example.workers.dev` | `This is your encrypted request inbox.` |
 | Share link name | `Link name` | `Intro call` | `Use a name you can recognize later.` |
 | Vercel token | `Vercel token` | none | `Stored in Keychain and used only to create or update your request inbox.` |
-| Vercel scope | `Vercel scope` | `personal` or `team-slug` | `Choose the Vercel account that owns the inbox project.` |
-| Vercel project | `Vercel project` | `booking-inbox` | `The app creates or updates this Vercel project.` |
+| Vercel team | `Vercel team ID or slug (optional)` | `team_...` or `team-slug` | `Use this only when the project belongs to a Vercel team.` |
+| Vercel project | `Vercel project ID or name` | `prj_...` or `booking-inbox` | `The app creates or updates this Vercel project.` |
 
 Provider card copy:
 
@@ -459,8 +464,8 @@ Validation and status copy:
 | Inbox reachable | `checkmark.circle` | `Inbox is reachable.` |
 | Inbox unreachable | `exclamationmark.triangle` | `Cannot reach the inbox. Check the URL, then try again.` |
 | Allowed website mismatch | `exclamationmark.triangle` | `Inbox rejected the booking page. Copy the allowed website and update the inbox settings.` |
-| Vercel token valid | `checkmark.circle` | `Token works for this Vercel scope.` |
-| Vercel token rejected | `exclamationmark.triangle` | `Token does not work for this Vercel scope. Check the token, then validate again.` |
+| Vercel token valid | `checkmark.circle` | `Token works for this Vercel project.` |
+| Vercel token rejected | `exclamationmark.triangle` | `Token does not work for this Vercel project. Check the token, then validate again.` |
 | Vercel deployment ready | `checkmark.circle` | `Vercel inbox is deployed and reachable.` |
 | Google Meet unavailable | `exclamationmark.triangle` | `Choose a Google calendar before creating Google Meet links.` |
 | Test request sent | `paperplane` | `Test request sent.` |
@@ -593,11 +598,12 @@ Assumptions:
 
 Current follow-up slice:
 
-1. In `ContentView.swift`, replace the raw `bookingAppointmentTypeEditor` list with a card list plus a selected appointment editor. Cards show name, duration, location, one-on-one type, weekday hours summary, copy/open actions, duplicate, delete, and selection.
-2. Add small SwiftUI helpers in `ContentView.swift` for appointment editor disclosure sections, duration/minimum-notice/buffer menu controls, location row, visual weekly-hours rows, and day/window mutation.
-3. In `BookingCalendarEventContent.swift`, label the public form's long-text value as `Notes:` instead of the less-specific `Topic:` so Apple notes, Google event descriptions, and generated ICS descriptions make the form data obvious.
-4. Extend focused tests in `BookingTests.swift` and/or `Calendar_Busy_SyncTests.swift` so calendar descriptions and ICS output include the visitor notes.
-5. Validate with `python3 scripts/check_execplan.py`, focused booking tests, and the macOS build filter.
+1. Add a Vercel REST client under the Booking boundary that can upsert project env vars with `upsert=true`, create an inline-file deployment from `templates/booking-relay/vercel`, decode deployment URLs, and report phase-specific failures without logging tokens.
+2. Extend secure storage and `AppModel` state so the Vercel account token and generated inbox admin token stay in Keychain, while non-secret Vercel project/team identifiers persist in local/shared settings.
+3. Replace the Vercel Request Inbox UI so it asks for `Vercel token`, `Vercel project ID or name`, and optional team ID/slug, then exposes one `Deploy Vercel inbox` / `Redeploy Vercel inbox` action.
+4. After a Vercel deploy, save the returned `https://...vercel.app` URL as the inbox URL, run the existing `/healthz` check, and show resulting evidence. If Vercel Blob/storage is missing, keep the failure in the inbox health/status path instead of asking for unexplained relay internals.
+5. Update booking docs, Vercel template docs, this ExecPlan, and `.agents/DOCUMENTATION.md` to describe the project/token flow and the remaining Vercel Blob project prerequisite.
+6. Validate with `python3 scripts/check_execplan.py`, `python3 scripts/knowledge/check_docs.py`, focused Booking/AppModel tests, and `git diff --check`.
 
 1. Define the booking product and security contract.
 2. Build a provider-neutral booking domain in the native app.
@@ -812,7 +818,7 @@ Assumptions:
 
 - The booking page repository is dedicated to this app and GitHub Pages serves the repository root.
 - The app does not need to configure GitHub Pages settings through the GitHub API. The user configures Pages once in GitHub, then the app only publishes files.
-- The app can rely on `/usr/bin/git` and `/usr/bin/ssh` on macOS. iPhone and iPad cannot run arbitrary Git/SSH commands, so mobile builds keep generation and verification but do not perform app-managed GitHub publishing in this milestone.
+- The app cannot rely on `/usr/bin/git`, `/usr/bin/ssh`, or `/usr/bin/ssh-keygen` on macOS because App Store sandboxing can block Apple developer-tool shims such as `xcrun`. macOS app-managed publishing must use app-bundled helpers or an in-process Git implementation. iPhone and iPad keep generation and verification but do not perform app-managed GitHub publishing in this milestone.
 - The app generates a new deploy-key pair per configured repository. A deploy key is not reused across repositories.
 - The private key stays in secure storage. Temporary working trees and transient SSH wrapper files must live under app-owned Application Support or `TemporaryDirectory` paths and must not be checked in or logged.
 
@@ -933,18 +939,16 @@ Milestone 7: Vercel relay template.
 - Create `templates/booking-relay/vercel/` with a minimal Function API matching the Cloudflare relay contract.
 - Use Vercel environment variables for relay secrets and allowed origin.
 - Use Vercel Blob or a similarly minimal Vercel-supported storage path for encrypted envelopes.
-- Support two Vercel setup paths in the app:
-  - app-managed setup, where the user provides a Vercel token, scope/team slug, and project name
-  - manual setup, where the user deploys the template themselves and pastes the relay URL plus admin token
+- Support app-managed Vercel setup where the user provides a Vercel token, project ID or name, and optional team ID or slug.
 - App-managed Vercel setup needs:
   - Vercel account token stored in Keychain
-  - Vercel scope, either personal account or team slug
-  - desired project name
+  - optional Vercel team ID or slug
+  - Vercel project ID or name
   - generated inbox ID, share ID, admin token, and retention settings
   - allowed website origin derived from the configured GitHub Pages URL
-  - Blob/storage token or project integration values required by the chosen Vercel storage path
+  - Vercel Blob storage attached to the project so `BLOB_READ_WRITE_TOKEN` is available
 - App-managed Vercel setup performs:
-  - create or find the Vercel project
+  - target the Vercel project by ID or name
   - upsert encrypted environment variables
   - upload or redeploy the relay template
   - wait for the production deployment to become ready
@@ -1189,8 +1193,7 @@ Acceptance means:
 - browser-side code encrypts request details before sending anything to the relay
 - the Cloudflare relay template can be deployed by the user and stores only encrypted envelopes plus minimal metadata
 - the Vercel relay template can be deployed by the user and stores only encrypted envelopes plus minimal metadata
-- the app can verify a manually deployed Vercel relay from relay URL plus admin token without needing the user's Vercel account token
-- when the user chooses app-managed Vercel setup, the app asks for Vercel token, scope/team slug, project name, allowed origin, and generated inbox secrets; stores secrets in Keychain; creates or updates the project; and verifies the deployed relay contract
+- when the user chooses app-managed Vercel setup, the app asks for Vercel token, project ID or name, optional team ID or slug, and allowed origin; generates inbox secrets; stores secrets in Keychain; updates and deploys the project; and verifies the deployed relay contract
 - both relay templates enforce payload size caps, CORS allowlists, retention, dedupe, and rate/abuse controls appropriate to the platform
 - the native app can poll the relay, decrypt requests locally, dedupe them, validate slot tokens, recheck live calendar availability, and surface pending requests
 - approving a request writes a calendar event only into the user-selected booking calendar
@@ -1241,7 +1244,6 @@ Relay recovery:
 - revoking or rotating an inbox ID disables old share URLs without affecting local calendar credentials
 - if a relay provider fails, the user can deploy the other relay template and republish the static site with the new relay URL
 - app-managed Vercel setup is idempotent: finding an existing project, upserting env vars, and redeploying the same template should converge on one working inbox rather than creating duplicate projects
-- the app never needs a Vercel token to verify a manually deployed relay; relay URL plus admin token is enough for the encrypted request contract
 
 Calendar-write recovery:
 
@@ -1319,7 +1321,7 @@ External dependencies:
 
 - GitHub Pages for static hosting
 - GitHub deploy keys with write access for app-managed publishing
-- `/usr/bin/git` and `/usr/bin/ssh` on macOS for deploy-key publishing
+- app-bundled `booking-git`, `booking-ssh`, and `booking-ssh-keygen` helpers, or a later in-process Git implementation, for macOS deploy-key publishing
 - Cloudflare Workers plus Workers storage/rate-limit/optional Turnstile for the recommended relay
 - Vercel Functions plus Vercel-supported storage for the alternate relay
 - platform secure storage for private keys and relay admin tokens

@@ -6,20 +6,13 @@ The Vercel template receives encrypted envelopes only. It never receives calenda
 
 ## Deploy
 
-1. Open `templates/booking-relay/vercel/`.
-2. Create a Vercel project from the folder.
-3. Add Vercel Blob storage. Use a public Blob store; the relay stores encrypted envelopes only, and the admin API remains the only supported way to list request records.
-4. Set environment variables:
+1. Create or choose a Vercel project for the inbox.
+2. Add Vercel Blob storage to that project. Use a public Blob store; the relay stores encrypted envelopes only, and the admin API remains the only supported way to list request records.
+3. Create a Vercel account token at `https://vercel.com/account/settings/tokens`.
+4. In Calendar Busy Sync, choose `Vercel inbox`, enter the Vercel token, the project ID or project name, and the optional team ID or slug when the project belongs to a team.
+5. Run `Deploy Vercel inbox`. The app generates the inbox admin token, stores it locally, sets the relay environment variables, deploys this template, saves the deployment URL, and checks `/healthz`.
 
-```text
-ALLOWED_ORIGIN=https://owner.github.io
-INBOX_ADMIN_TOKEN=<long random value>
-BLOB_READ_WRITE_TOKEN=<created by Vercel Blob>
-MAX_PENDING_REQUESTS=100
-```
-
-5. Deploy the project.
-6. Paste the deployment URL into Calendar Busy Sync as `Inbox URL`.
+`GET /healthz` returns 503 until `BLOB_READ_WRITE_TOKEN` is available. That lets Calendar Busy Sync detect a Vercel project that was deployed before Blob storage was attached.
 
 ## Limits
 

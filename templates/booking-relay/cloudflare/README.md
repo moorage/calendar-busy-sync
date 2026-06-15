@@ -1,6 +1,6 @@
 # Cloudflare encrypted request inbox
 
-This Worker is a blind inbox for Calendar Busy Sync booking requests. It stores encrypted request envelopes only. It has no calendar credentials, no provider tokens, no calendar IDs, and no plaintext visitor details.
+This Worker is a blind inbox template for Calendar Busy Sync booking requests. It stores encrypted request envelopes only. It has no calendar credentials, no provider tokens, no calendar IDs, and no plaintext visitor details. The current in-app setup path deploys the Vercel inbox template from a Vercel token and project ID/name.
 
 Deploy:
 
@@ -10,7 +10,6 @@ Deploy:
 4. Set `INBOX_ADMIN_TOKEN` with `wrangler secret put INBOX_ADMIN_TOKEN`.
 5. Optionally set `TURNSTILE_SECRET_KEY` with `wrangler secret put TURNSTILE_SECRET_KEY`.
 6. Run `npx wrangler deploy`.
-7. Copy the Worker URL into Calendar Busy Sync as the `Inbox URL`.
 
 Abuse controls:
 

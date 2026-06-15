@@ -124,6 +124,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var isBookingTestRequestInFlight = false
     @Published private(set) var isBookingImportInFlight = false
     @Published private(set) var isBookingApprovalInFlight = false
+    @Published private(set) var isBookingVercelDeploymentInFlight = false
     @Published private(set) var bookingAvailabilityPublishSummary: String?
     @Published private(set) var importedBookingRequests: [BookingImportedRequest] = []
     @Published private(set) var bookingAppointmentTypes: [BookingAppointmentType] = []
@@ -203,6 +204,11 @@ final class AppModel: ObservableObject {
     @Published var bookingVercelProjectNameString: String {
         didSet {
             persistBookingSettings()
+        }
+    }
+    @Published var bookingVercelTokenString: String {
+        didSet {
+            persistBookingVercelToken()
         }
     }
     @Published var bookingPublicNameString: String {
@@ -448,6 +454,7 @@ final class AppModel: ObservableObject {
         self.bookingGitHubDeployKeyVerifiedAt = userDefaults.object(forKey: SettingKey.bookingGitHubDeployKeyVerifiedAt) as? Date
         self.bookingVercelScopeString = userDefaults.string(forKey: SettingKey.bookingVercelScope) ?? ""
         self.bookingVercelProjectNameString = userDefaults.string(forKey: SettingKey.bookingVercelProjectName) ?? ""
+        self.bookingVercelTokenString = (try? resolvedBookingSecretStore.loadVercelToken()) ?? ""
         self.bookingPublicNameString = userDefaults.string(forKey: SettingKey.bookingPublicName) ?? BookingProfile.example.publicName
         self.bookingPageTitleString = userDefaults.string(forKey: SettingKey.bookingPageTitle) ?? BookingProfile.example.pageTitle
         self.bookingPageSubtitleString = userDefaults.string(forKey: SettingKey.bookingPageSubtitle) ?? BookingProfile.example.pageSubtitle
@@ -1408,7 +1415,7 @@ final class AppModel: ObservableObject {
     var bookingVercelEnvironmentLines: [String] {
         [
             "ALLOWED_ORIGIN=\(bookingExpectedAllowedOriginString.isEmpty ? "https://owner.github.io" : bookingExpectedAllowedOriginString)",
-            "INBOX_ADMIN_TOKEN=(store only in Vercel and this app)",
+            "INBOX_ADMIN_TOKEN=(generated and stored locally)",
             "MAX_PENDING_REQUESTS=100",
         ]
     }
@@ -1419,12 +1426,17 @@ final class AppModel: ObservableObject {
             lines.append("Expected origin \(bookingExpectedAllowedOriginString)")
         }
         if !bookingInboxURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            lines.append("Inbox URL configured")
+            lines.append("Vercel inbox URL stored")
         }
         if !bookingInboxAdminTokenString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            lines.append("Admin token stored locally")
+            lines.append("Inbox secret stored locally")
         }
-        lines.append(contentsOf: bookingVercelEnvironmentLines)
+        if !bookingVercelProjectNameString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            lines.append("Vercel project \(bookingVercelProjectNameString.trimmingCharacters(in: .whitespacesAndNewlines))")
+        }
+        if !bookingVercelTokenString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            lines.append("Vercel token stored locally")
+        }
         return lines
     }
 
@@ -1606,6 +1618,13 @@ final class AppModel: ObservableObject {
 
     var canCheckBookingInbox: Bool {
         !bookingInboxURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var canDeployBookingVercelInbox: Bool {
+        !isBookingVercelDeploymentInFlight
+            && !bookingVercelTokenString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !bookingVercelProjectNameString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !bookingExpectedAllowedOriginString.isEmpty
     }
 
     var canSendBookingTestRequest: Bool {
@@ -2486,6 +2505,54 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func deployBookingVercelInbox() async {
+        guard !isBookingVercelDeploymentInFlight else { return }
+
+        isBookingVercelDeploymentInFlight = true
+        defer { isBookingVercelDeploymentInFlight = false }
+
+        do {
+            let adminToken = try bookingInboxAdminTokenForVercelDeployment()
+            let configuration = try BookingVercelDeploymentConfiguration(
+                token: bookingVercelTokenString,
+                project: BookingVercelProjectReference(bookingVercelProjectNameString),
+                team: BookingVercelTeamReference(bookingVercelScopeString),
+                allowedOrigin: bookingExpectedAllowedOriginString,
+                inboxAdminToken: adminToken
+            )
+            let templateDirectory = try BookingVercelDeploymentClient.defaultTemplateDirectory(fileManager: fileManager)
+            let result = try await BookingVercelDeploymentClient().deploy(
+                configuration: configuration,
+                templateDirectory: templateDirectory,
+                fileManager: fileManager
+            )
+
+            bookingInboxAdminTokenString = adminToken
+            bookingInboxURLString = result.inboxURL.absoluteString
+            updateBookingSetupSnapshot(
+                BookingSetupSnapshot(
+                    pageStatus: bookingSetupSnapshot.pageStatus,
+                    inboxStatus: .configured,
+                    pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
+                    lastMessage: "Vercel inbox deployed. Checking the inbox now."
+                ),
+                auditDetail: "Vercel booking inbox deployed as \(result.deploymentID)."
+            )
+            await checkBookingInbox()
+        } catch {
+            let message = Self.bookingConfigurationErrorMessage(error)
+            updateBookingSetupSnapshot(
+                BookingSetupSnapshot(
+                    pageStatus: bookingSetupSnapshot.pageStatus,
+                    inboxStatus: .cannotReachInbox,
+                    pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
+                    lastMessage: message
+                ),
+                auditDetail: "Vercel booking inbox deployment failed. \(message)"
+            )
+        }
+    }
+
     func sendBookingTestRequest() async {
         guard !isBookingTestRequestInFlight else { return }
         guard bookingSetupSnapshot.isReady,
@@ -2559,9 +2626,9 @@ final class AppModel: ObservableObject {
                     pageStatus: bookingSetupSnapshot.pageStatus,
                     inboxStatus: bookingSetupSnapshot.inboxStatus,
                     pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
-                    lastMessage: "Add the inbox admin token before importing requests."
+                    lastMessage: "Deploy the Vercel inbox before importing requests."
                 ),
-                auditDetail: "Inbox admin token is missing."
+                auditDetail: "Vercel inbox secret is missing."
             )
             return
         }
@@ -4039,6 +4106,36 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func persistBookingVercelToken() {
+        do {
+            try bookingSecretStore.saveVercelToken(bookingVercelTokenString)
+        } catch {
+            appendAuditTrailEntry(
+                title: "Booking",
+                detail: "Could not save the Vercel token to secure storage.",
+                status: "failed"
+            )
+        }
+    }
+
+    private func bookingInboxAdminTokenForVercelDeployment() throws -> String {
+        let existingToken = bookingInboxAdminTokenString.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !existingToken.isEmpty {
+            return existingToken
+        }
+        return try BookingVercelDeploymentClient.generateAdminToken()
+    }
+
+    private static func bookingConfigurationErrorMessage(_ error: Error) -> String {
+        if let error = error as? BookingConfigurationError {
+            return error.localizedDescription
+        }
+        if let error = error as? BookingVercelDeploymentError {
+            return error.errorDescription ?? error.localizedDescription
+        }
+        return error.localizedDescription
+    }
+
     private func recordBookingGitHubDeployKey(
         publicKey: String,
         fingerprint: String,
@@ -4171,12 +4268,12 @@ final class AppModel: ObservableObject {
         guard let inboxURL = URL(string: bookingInboxURLString.trimmingCharacters(in: .whitespacesAndNewlines)),
               let relayURL = try? BookingRelayURL(inboxURL)
         else {
-            throw BookingConfigurationError.invalidRelayURL("Inbox URL is not valid.")
+            throw BookingConfigurationError.invalidRelayURL("Vercel inbox URL is not valid.")
         }
 
         let adminToken = bookingInboxAdminTokenString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !adminToken.isEmpty else {
-            throw BookingConfigurationError.invalidField("Inbox admin token is required.")
+            throw BookingConfigurationError.invalidField("Vercel inbox secret is required.")
         }
 
         try await BookingRelayClient(

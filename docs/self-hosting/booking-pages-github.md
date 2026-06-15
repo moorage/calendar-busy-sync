@@ -48,7 +48,7 @@ weekly_hours: mon=09:00-16:30;tue=09:00-16:30;wed=09:00-16:30;thu=09:00-16:30;fr
 
 ## Publish
 
-The native app can generate the static page files, open the local page-file folder in Finder, and publish those files to the repository root over Git SSH with the repository deploy key. Repository, branch, public deploy-key metadata, and public page URL settings are stored locally. Publishing stops if the repository root already contains files that are not part of the generated booking page.
+The native app can generate the static page files, open the local page-file folder in Finder, and publish those files to the repository root over Git SSH with the repository deploy key. Repository, branch, public deploy-key metadata, and public page URL settings are stored locally. Publishing uses the app's bundled Git/SSH publishing stack, not the user's system Git or Xcode Command Line Tools. Publishing stops if the repository root already contains files that are not part of the generated booking page.
 
 Manual publishing is still supported. Publish the generated page-file folder contents to the GitHub Pages repository root using your normal Git workflow.
 

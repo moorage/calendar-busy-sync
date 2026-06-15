@@ -40,6 +40,8 @@ protocol BookingSecretStoring: Sendable {
     func saveSecrets(_ secrets: BookingLocalSecrets) throws
     func loadAdminToken() throws -> String?
     func saveAdminToken(_ token: String) throws
+    func loadVercelToken() throws -> String?
+    func saveVercelToken(_ token: String) throws
     func loadGitHubDeployKeyPrivateKey() throws -> String?
     func saveGitHubDeployKeyPrivateKey(_ privateKey: String) throws
     func deleteLegacyGitHubToken() throws
@@ -69,69 +71,135 @@ struct BookingKeychainSecretStore: BookingSecretStoring {
     private enum Account {
         static let localSecrets = "booking-local-secrets"
         static let adminToken = "booking-inbox-admin-token"
+        static let vercelToken = "booking-vercel-token"
         static let githubToken = "booking-github-token"
         static let githubDeployKeyPrivateKey = "booking-github-deploy-key-private-key"
     }
 
     private let service: String
+    private let vault: any AppCredentialVaultStoring
 
-    init(service: String? = nil) {
+    init(service: String? = nil, vault: (any AppCredentialVaultStoring)? = nil) {
         let bundleIdentifier = Bundle.main.bundleIdentifier ?? "CalendarBusySync"
         self.service = service ?? "\(bundleIdentifier).booking"
+        self.vault = vault ?? AppCredentialVault.shared
     }
 
     func loadSecrets() throws -> BookingLocalSecrets? {
-        guard let data = try loadData(account: Account.localSecrets) else {
-            return nil
-        }
-
-        do {
-            return try JSONDecoder().decode(BookingLocalSecrets.self, from: data)
-        } catch {
-            throw BookingSecretStoreError.corruptPayload
-        }
+        try bookingPayload().bookingLocalSecrets
     }
 
     func saveSecrets(_ secrets: BookingLocalSecrets) throws {
-        try saveData(try JSONEncoder().encode(secrets), account: Account.localSecrets)
+        var payload = try bookingPayload()
+        payload.bookingLocalSecrets = secrets
+        payload.didMigrateLegacyBookingSecrets = true
+        try vault.savePayload(payload)
     }
 
     func loadAdminToken() throws -> String? {
-        guard let data = try loadData(account: Account.adminToken) else {
-            return nil
-        }
-
-        return String(data: data, encoding: .utf8)
+        try bookingPayload().bookingInboxAdminToken
     }
 
     func saveAdminToken(_ token: String) throws {
-        try saveToken(token, account: Account.adminToken)
+        try saveToken(token) { payload, normalizedToken in
+            payload.bookingInboxAdminToken = normalizedToken
+        }
+    }
+
+    func loadVercelToken() throws -> String? {
+        try bookingPayload().bookingVercelToken
+    }
+
+    func saveVercelToken(_ token: String) throws {
+        try saveToken(token) { payload, normalizedToken in
+            payload.bookingVercelToken = normalizedToken
+        }
     }
 
     func loadGitHubDeployKeyPrivateKey() throws -> String? {
-        guard let data = try loadData(account: Account.githubDeployKeyPrivateKey) else {
-            return nil
-        }
-
-        return String(data: data, encoding: .utf8)
+        try bookingPayload().bookingGitHubDeployKeyPrivateKey
     }
 
     func saveGitHubDeployKeyPrivateKey(_ privateKey: String) throws {
-        try saveToken(privateKey, account: Account.githubDeployKeyPrivateKey)
+        try saveToken(privateKey) { payload, normalizedToken in
+            payload.bookingGitHubDeployKeyPrivateKey = normalizedToken
+        }
     }
 
     func deleteLegacyGitHubToken() throws {
         try deleteData(account: Account.githubToken)
     }
 
-    private func saveToken(_ token: String, account: String) throws {
+    private func saveToken(
+        _ token: String,
+        assign: (inout AppCredentialVaultPayload, String?) -> Void
+    ) throws {
         let trimmedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmedToken.isEmpty {
-            try deleteData(account: account)
+        var payload = try bookingPayload()
+        assign(&payload, trimmedToken.isEmpty ? nil : trimmedToken)
+        payload.didMigrateLegacyBookingSecrets = true
+        try vault.savePayload(payload)
+    }
+
+    private func bookingPayload() throws -> AppCredentialVaultPayload {
+        if var payload = try vault.loadPayloadIfPresent() {
+            let originalPayload = payload
+            try migrateLegacyBookingSecretsIfNeeded(into: &payload)
+            if !payload.didMigrateLegacyBookingSecrets {
+                payload.didMigrateLegacyBookingSecrets = true
+            }
+            if payload != originalPayload {
+                try vault.savePayload(payload)
+            }
+            return payload
+        } else {
+            var payload = AppCredentialVaultPayload()
+            try migrateLegacyBookingSecretsIfNeeded(into: &payload)
+            guard payload.didMigrateLegacyBookingSecrets else {
+                return payload
+            }
+            try vault.savePayload(payload)
+            return payload
+        }
+    }
+
+    private func migrateLegacyBookingSecretsIfNeeded(into payload: inout AppCredentialVaultPayload) throws {
+        guard !payload.didMigrateLegacyBookingSecrets else {
             return
         }
 
-        try saveData(Data(trimmedToken.utf8), account: account)
+        var didFindLegacySecret = false
+        if payload.bookingLocalSecrets == nil,
+           let data = try loadData(account: Account.localSecrets) {
+            do {
+                payload.bookingLocalSecrets = try JSONDecoder().decode(BookingLocalSecrets.self, from: data)
+                didFindLegacySecret = true
+            } catch {
+                throw BookingSecretStoreError.corruptPayload
+            }
+        }
+        if payload.bookingInboxAdminToken == nil,
+           let data = try loadData(account: Account.adminToken),
+           let token = String(data: data, encoding: .utf8) {
+            payload.bookingInboxAdminToken = token
+            didFindLegacySecret = true
+        }
+        if payload.bookingVercelToken == nil,
+           let data = try loadData(account: Account.vercelToken),
+           let token = String(data: data, encoding: .utf8) {
+            payload.bookingVercelToken = token
+            didFindLegacySecret = true
+        }
+        if payload.bookingGitHubDeployKeyPrivateKey == nil,
+           let data = try loadData(account: Account.githubDeployKeyPrivateKey),
+           let privateKey = String(data: data, encoding: .utf8) {
+            payload.bookingGitHubDeployKeyPrivateKey = privateKey
+            didFindLegacySecret = true
+        }
+
+        if didFindLegacySecret {
+            payload.didMigrateLegacyBookingSecrets = true
+        }
     }
 
     private func loadData(account: String) throws -> Data? {
@@ -154,25 +222,6 @@ struct BookingKeychainSecretStore: BookingSecretStoring {
         }
     }
 
-    private func saveData(_ data: Data, account: String) throws {
-        let addStatus = SecItemAdd(writeQuery(data: data, account: account) as CFDictionary, nil)
-        if addStatus == errSecSuccess {
-            return
-        }
-
-        guard addStatus == errSecDuplicateItem else {
-            throw BookingSecretStoreError.unwritable(addStatus)
-        }
-
-        let status = SecItemUpdate(
-            baseQuery(account: account) as CFDictionary,
-            [kSecValueData as String: data] as CFDictionary
-        )
-        guard status == errSecSuccess else {
-            throw BookingSecretStoreError.unwritable(status)
-        }
-    }
-
     private func deleteData(account: String) throws {
         let status = SecItemDelete(baseQuery(account: account) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
@@ -186,14 +235,5 @@ struct BookingKeychainSecretStore: BookingSecretStoring {
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
         ]
-    }
-
-    private func writeQuery(data: Data, account: String) -> [String: Any] {
-        var query = baseQuery(account: account)
-        query[kSecValueData as String] = data
-        #if os(iOS)
-        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        #endif
-        return query
     }
 }

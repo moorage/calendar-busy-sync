@@ -175,6 +175,46 @@ enum BookingGitCommandError: LocalizedError, Equatable {
 }
 
 #if os(macOS)
+struct BookingGitToolchain: Equatable, Sendable {
+    var gitURL: URL
+    var sshURL: URL
+    var sshKeygenURL: URL
+
+    static func bundled(
+        bundle: Bundle = .main,
+        fileManager: FileManager = .default
+    ) throws -> BookingGitToolchain {
+        BookingGitToolchain(
+            gitURL: try bundledExecutable(named: "booking-git", bundle: bundle, fileManager: fileManager),
+            sshURL: try bundledExecutable(named: "booking-ssh", bundle: bundle, fileManager: fileManager),
+            sshKeygenURL: try bundledExecutable(named: "booking-ssh-keygen", bundle: bundle, fileManager: fileManager)
+        )
+    }
+
+    static var injectedRunnerDefaults: BookingGitToolchain {
+        BookingGitToolchain(
+            gitURL: URL(fileURLWithPath: "/__calendar_busy_sync_injected__/booking-git"),
+            sshURL: URL(fileURLWithPath: "/__calendar_busy_sync_injected__/booking-ssh"),
+            sshKeygenURL: URL(fileURLWithPath: "/__calendar_busy_sync_injected__/booking-ssh-keygen")
+        )
+    }
+
+    private static func bundledExecutable(
+        named name: String,
+        bundle: Bundle,
+        fileManager: FileManager
+    ) throws -> URL {
+        guard let url = bundle.url(forAuxiliaryExecutable: name),
+              fileManager.isExecutableFile(atPath: url.path)
+        else {
+            throw BookingConfigurationError.invalidField(
+                "This build is missing its bundled Git publishing helper. Update the app, then try publishing again."
+            )
+        }
+        return url
+    }
+}
+
 struct ProcessBookingGitCommandRunner: BookingGitCommandRunning {
     func run(_ command: BookingGitCommand) async throws -> BookingGitCommandResult {
         try await Task.detached(priority: .utility) {
@@ -224,7 +264,8 @@ nonisolated enum BookingGitHubDeployKeyGenerator {
     static func generate(
         repository: BookingGitHubRepository,
         fileManager: FileManager = .default,
-        commandRunner: any BookingGitCommandRunning = ProcessBookingGitCommandRunner()
+        commandRunner: (any BookingGitCommandRunning)? = nil,
+        toolchain: BookingGitToolchain? = nil
     ) async throws -> BookingGitHubDeployKey {
         let tempRoot = fileManager.temporaryDirectory
             .appendingPathComponent("booking-github-key-\(UUID().uuidString)", isDirectory: true)
@@ -235,9 +276,11 @@ nonisolated enum BookingGitHubDeployKeyGenerator {
 
         let privateKeyURL = tempRoot.appendingPathComponent("deploy-key")
         let publicKeyURL = tempRoot.appendingPathComponent("deploy-key.pub")
-        _ = try await commandRunner.run(
+        let resolvedToolchain = try toolchain ?? (commandRunner == nil ? BookingGitToolchain.bundled(fileManager: fileManager) : .injectedRunnerDefaults)
+        let runner = commandRunner ?? ProcessBookingGitCommandRunner()
+        _ = try await runner.run(
             BookingGitCommand(
-                executableURL: URL(fileURLWithPath: "/usr/bin/ssh-keygen"),
+                executableURL: resolvedToolchain.sshKeygenURL,
                 arguments: [
                     "-t", "ed25519",
                     "-C", "calendar-busy-sync:\(repository.slug)",
@@ -249,9 +292,9 @@ nonisolated enum BookingGitHubDeployKeyGenerator {
             )
         )
 
-        let fingerprintResult = try await commandRunner.run(
+        let fingerprintResult = try await runner.run(
             BookingGitCommand(
-                executableURL: URL(fileURLWithPath: "/usr/bin/ssh-keygen"),
+                executableURL: resolvedToolchain.sshKeygenURL,
                 arguments: ["-lf", publicKeyURL.path],
                 environment: [:],
                 workingDirectory: tempRoot
@@ -307,6 +350,7 @@ nonisolated enum BookingGitHubPublisher {
         privateKeyPEM: String,
         fileManager: FileManager = .default,
         commandRunner: (any BookingGitCommandRunning)? = nil,
+        toolchain: BookingGitToolchain? = nil,
         workingDirectoryRoot: URL? = nil
     ) async throws -> PublishSummary {
         #if os(macOS)
@@ -325,13 +369,17 @@ nonisolated enum BookingGitHubPublisher {
 
         let privateKeyURL = tempRoot.appendingPathComponent("deploy-key")
         try writePrivateKey(privateKeyPEM, to: privateKeyURL, fileManager: fileManager)
-        let environment = gitSSHEngineEnvironment(privateKeyURL: privateKeyURL)
+        let resolvedToolchain = try toolchain ?? (commandRunner == nil ? BookingGitToolchain.bundled(fileManager: fileManager) : .injectedRunnerDefaults)
+        let environment = gitSSHEngineEnvironment(
+            privateKeyURL: privateKeyURL,
+            sshURL: resolvedToolchain.sshURL
+        )
         let runner = commandRunner ?? ProcessBookingGitCommandRunner()
         let worktreeURL = tempRoot.appendingPathComponent(repository.name, isDirectory: true)
 
         _ = try await runner.run(
             BookingGitCommand(
-                executableURL: URL(fileURLWithPath: "/usr/bin/git"),
+                executableURL: resolvedToolchain.gitURL,
                 arguments: ["clone", repository.sshRemoteURLString, worktreeURL.path],
                 environment: environment,
                 workingDirectory: tempRoot
@@ -341,6 +389,7 @@ nonisolated enum BookingGitHubPublisher {
             normalizedBranch,
             in: worktreeURL,
             environment: environment,
+            toolchain: resolvedToolchain,
             runner: runner
         )
 
@@ -375,7 +424,7 @@ nonisolated enum BookingGitHubPublisher {
 
         let status = try await runner.run(
             BookingGitCommand(
-                executableURL: URL(fileURLWithPath: "/usr/bin/git"),
+                executableURL: resolvedToolchain.gitURL,
                 arguments: ["status", "--porcelain"],
                 environment: environment,
                 workingDirectory: worktreeURL
@@ -387,7 +436,7 @@ nonisolated enum BookingGitHubPublisher {
 
         _ = try await runner.run(
             BookingGitCommand(
-                executableURL: URL(fileURLWithPath: "/usr/bin/git"),
+                executableURL: resolvedToolchain.gitURL,
                 arguments: ["add", "--all"],
                 environment: environment,
                 workingDirectory: worktreeURL
@@ -395,7 +444,7 @@ nonisolated enum BookingGitHubPublisher {
         )
         _ = try await runner.run(
             BookingGitCommand(
-                executableURL: URL(fileURLWithPath: "/usr/bin/git"),
+                executableURL: resolvedToolchain.gitURL,
                 arguments: [
                     "-c", "user.name=Calendar Busy Sync",
                     "-c", "user.email=calendar-busy-sync@users.noreply.github.com",
@@ -408,7 +457,7 @@ nonisolated enum BookingGitHubPublisher {
         )
         _ = try await runner.run(
             BookingGitCommand(
-                executableURL: URL(fileURLWithPath: "/usr/bin/git"),
+                executableURL: resolvedToolchain.gitURL,
                 arguments: ["push", "origin", "HEAD:\(normalizedBranch)"],
                 environment: environment,
                 workingDirectory: worktreeURL
@@ -425,7 +474,8 @@ nonisolated enum BookingGitHubPublisher {
         repository: BookingGitHubRepository,
         privateKeyPEM: String,
         fileManager: FileManager = .default,
-        commandRunner: (any BookingGitCommandRunning)? = nil
+        commandRunner: (any BookingGitCommandRunning)? = nil,
+        toolchain: BookingGitToolchain? = nil
     ) async throws {
         #if os(macOS)
         let tempRoot = fileManager.temporaryDirectory
@@ -437,11 +487,15 @@ nonisolated enum BookingGitHubPublisher {
 
         let privateKeyURL = tempRoot.appendingPathComponent("deploy-key")
         try writePrivateKey(privateKeyPEM, to: privateKeyURL, fileManager: fileManager)
+        let resolvedToolchain = try toolchain ?? (commandRunner == nil ? BookingGitToolchain.bundled(fileManager: fileManager) : .injectedRunnerDefaults)
         _ = try await (commandRunner ?? ProcessBookingGitCommandRunner()).run(
             BookingGitCommand(
-                executableURL: URL(fileURLWithPath: "/usr/bin/git"),
+                executableURL: resolvedToolchain.gitURL,
                 arguments: ["ls-remote", repository.sshRemoteURLString, "HEAD"],
-                environment: gitSSHEngineEnvironment(privateKeyURL: privateKeyURL),
+                environment: gitSSHEngineEnvironment(
+                    privateKeyURL: privateKeyURL,
+                    sshURL: resolvedToolchain.sshURL
+                ),
                 workingDirectory: tempRoot
             )
         )
@@ -544,12 +598,13 @@ nonisolated enum BookingGitHubPublisher {
         _ branch: String,
         in worktreeURL: URL,
         environment: [String: String],
+        toolchain: BookingGitToolchain,
         runner: any BookingGitCommandRunning
     ) async throws {
         do {
             _ = try await runner.run(
                 BookingGitCommand(
-                    executableURL: URL(fileURLWithPath: "/usr/bin/git"),
+                    executableURL: toolchain.gitURL,
                     arguments: ["rev-parse", "--verify", "HEAD"],
                     environment: environment,
                     workingDirectory: worktreeURL
@@ -558,7 +613,7 @@ nonisolated enum BookingGitHubPublisher {
             do {
                 _ = try await runner.run(
                     BookingGitCommand(
-                        executableURL: URL(fileURLWithPath: "/usr/bin/git"),
+                        executableURL: toolchain.gitURL,
                         arguments: ["checkout", branch],
                         environment: environment,
                         workingDirectory: worktreeURL
@@ -567,7 +622,7 @@ nonisolated enum BookingGitHubPublisher {
             } catch {
                 _ = try await runner.run(
                     BookingGitCommand(
-                        executableURL: URL(fileURLWithPath: "/usr/bin/git"),
+                        executableURL: toolchain.gitURL,
                         arguments: ["checkout", "-B", branch],
                         environment: environment,
                         workingDirectory: worktreeURL
@@ -577,7 +632,7 @@ nonisolated enum BookingGitHubPublisher {
         } catch {
             _ = try await runner.run(
                 BookingGitCommand(
-                    executableURL: URL(fileURLWithPath: "/usr/bin/git"),
+                    executableURL: toolchain.gitURL,
                     arguments: ["checkout", "-B", branch],
                     environment: environment,
                     workingDirectory: worktreeURL
@@ -596,10 +651,10 @@ nonisolated enum BookingGitHubPublisher {
         try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 
-    private static func gitSSHEngineEnvironment(privateKeyURL: URL) -> [String: String] {
+    private static func gitSSHEngineEnvironment(privateKeyURL: URL, sshURL: URL) -> [String: String] {
         [
             "GIT_TERMINAL_PROMPT": "0",
-            "GIT_SSH_COMMAND": "/usr/bin/ssh -i \(shellQuoted(privateKeyURL.path)) -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new",
+            "GIT_SSH_COMMAND": "\(shellQuoted(sshURL.path)) -i \(shellQuoted(privateKeyURL.path)) -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new",
         ]
     }
 

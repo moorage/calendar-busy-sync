@@ -2,23 +2,22 @@
 
 This Vercel template implements the same blind inbox API as the Cloudflare Worker. It stores encrypted request envelopes in Vercel Blob. It has no calendar credentials, no provider tokens, no calendar IDs, and no plaintext visitor details.
 
-Deploy:
+Deploy from Calendar Busy Sync:
 
-1. Create a Vercel project from this folder.
+1. Create or choose a Vercel project for the inbox.
 2. Add Vercel Blob storage to the project. Use a public Blob store because the Blob SDK write path requires public object access; the objects contain encrypted envelopes only.
-3. Set `ALLOWED_ORIGIN` to your GitHub Pages origin, such as `https://owner.github.io`.
-4. Set `INBOX_ADMIN_TOKEN` to a long random value.
-5. Confirm the Blob integration added `BLOB_READ_WRITE_TOKEN`.
-6. Optionally set `MAX_PENDING_REQUESTS`.
-7. Deploy and copy the deployment URL into Calendar Busy Sync as the `Inbox URL`.
+3. Create a Vercel account token at `https://vercel.com/account/settings/tokens`.
+4. In Calendar Busy Sync, choose `Vercel inbox`, enter the token, the project ID or project name, and the optional team ID or slug.
+5. Run `Deploy Vercel inbox`. The app generates and stores `INBOX_ADMIN_TOKEN`, upserts the relay environment variables, deploys this template, saves the deployment URL, and checks `/healthz`.
 
 After deploy, `GET /healthz` returns non-secret setup evidence:
 
 - `ok`
 - `allowedOrigin`
 - `storage`
+- `storageReady`
 
-Calendar Busy Sync compares `allowedOrigin` with the configured public booking page origin before showing the inbox as ready.
+Calendar Busy Sync compares `allowedOrigin` with the configured public booking page origin before showing the inbox as ready. `/healthz` returns 503 until the Vercel project has `BLOB_READ_WRITE_TOKEN`.
 
 Vercel limitations:
 

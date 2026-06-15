@@ -13,7 +13,6 @@ struct ContentView: View {
     @State private var isBookingSettingsPresented = false
     @State private var isBookingHistoryPresented = false
     @State private var bookingWorkspaceSection: BookingWorkspaceSection = .overview
-    @State private var bookingInboxSetupMode: BookingInboxSetupMode = .existing
     @State private var isBookingAppointmentTypeDetailVisible = false
     @State private var isBookingDurationSectionExpanded = false
     @State private var isBookingLocationSectionExpanded = false
@@ -39,22 +38,6 @@ struct ContentView: View {
             case .publish: return "Publish"
             case .requestInbox: return BookingCopy.StatusCard.inboxTitle
             case .history: return "History"
-            }
-        }
-    }
-
-    private enum BookingInboxSetupMode: String, CaseIterable, Identifiable {
-        case existing
-        case vercel
-
-        var id: String { rawValue }
-
-        var label: String {
-            switch self {
-            case .existing:
-                return "Use existing inbox"
-            case .vercel:
-                return "Guided Vercel deploy"
             }
         }
     }
@@ -2321,41 +2304,36 @@ struct ContentView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            Picker("Inbox setup mode", selection: $bookingInboxSetupMode) {
-                ForEach(BookingInboxSetupMode.allCases) { mode in
-                    Text(mode.label).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Vercel inbox", systemImage: "shippingbox")
+                    .font(.caption.weight(.semibold))
+                SecureField(BookingCopy.Field.vercelToken, text: $model.bookingVercelTokenString)
+                    .textFieldStyle(.roundedBorder)
+                TextField(BookingCopy.Field.vercelProject, text: $model.bookingVercelProjectNameString)
+                    .textFieldStyle(.roundedBorder)
+                TextField(BookingCopy.Field.vercelTeam, text: $model.bookingVercelScopeString)
+                    .textFieldStyle(.roundedBorder)
+                Text("Use a token from Vercel account settings. The app stores it locally, creates the inbox settings, deploys the relay template, saves the resulting inbox URL, and checks /healthz.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
-            TextField(BookingCopy.Field.inboxURL, text: $model.bookingInboxURLString)
-                .textFieldStyle(.roundedBorder)
-                .accessibilityIdentifier(AccessibilityIDs.bookingInboxURLField)
-            SecureField(BookingCopy.Field.inboxAdminToken, text: $model.bookingInboxAdminTokenString)
-                .textFieldStyle(.roundedBorder)
-                .accessibilityIdentifier(AccessibilityIDs.bookingInboxAdminTokenField)
-
-            if bookingInboxSetupMode == .vercel {
-                VStack(alignment: .leading, spacing: 10) {
-                    Label("Guided Vercel deploy", systemImage: "shippingbox")
-                        .font(.caption.weight(.semibold))
-                    TextField("Vercel team or account (optional)", text: $model.bookingVercelScopeString)
-                        .textFieldStyle(.roundedBorder)
-                    TextField("Vercel project", text: $model.bookingVercelProjectNameString)
-                        .textFieldStyle(.roundedBorder)
-                    Text("Deploy the Vercel relay template, set production environment variables, paste the production URL here, then run Check inbox. The team/account field is only needed when a Vercel CLI deploy must target a specific team.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    ForEach(model.bookingVercelEnvironmentLines, id: \.self) { line in
-                        Text(line)
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
+                Button {
+                    Task {
+                        await model.deployBookingVercelInbox()
                     }
+                } label: {
+                    Label(
+                        model.bookingInboxURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            ? BookingCopy.Action.deployVercelInbox
+                            : "Redeploy Vercel inbox",
+                        systemImage: "network"
+                    )
                 }
-                .padding(12)
-                .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+                .buttonStyle(.borderedProminent)
+                .disabled(!model.canDeployBookingVercelInbox)
             }
+            .padding(12)
+            .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
 
             VStack(alignment: .leading, spacing: 8) {
                 Label("Inbox evidence", systemImage: "checkmark.seal")

@@ -130,7 +130,7 @@ Recommended page states:
 Recommended inbox states:
 
 - `Not connected`: no inbox URL.
-- `Configured`: inbox URL/admin token saved, no health check yet.
+- `Configured`: app-managed inbox settings saved, no health check yet.
 - `Reachable`: health endpoint works.
 - `Allowed-origin mismatch`: inbox works but rejects the current booking page origin.
 - `Ready`: inbox health works and test request path succeeds.
@@ -205,7 +205,7 @@ This directly addresses the user confusion about customizing the HTML page.
 The app should offer two paths:
 
 - `Guided Vercel deploy`: open a Deploy Button URL with required environment variable names and safe defaults for non-secret values. The user fills `INBOX_ADMIN_TOKEN` and `BLOB_READ_WRITE_TOKEN`; the app then asks for or detects the deployment URL.
-- `Use existing inbox`: paste inbox URL and admin token, then verify.
+- `Vercel inbox`: enter a Vercel token and project ID/name, deploy, then verify.
 
 If the app uses `VERCEL_ACCOUNT_TOKEN` or a user-entered Vercel token, it should:
 

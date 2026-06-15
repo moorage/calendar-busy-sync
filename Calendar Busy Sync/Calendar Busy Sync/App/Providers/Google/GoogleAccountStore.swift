@@ -1,7 +1,7 @@
 import Foundation
 import Security
 
-struct StoredGoogleAccount: Codable, Equatable, Identifiable {
+struct StoredGoogleAccount: Codable, Equatable, Identifiable, Sendable {
     let id: String
     let email: String
     let displayName: String
@@ -53,17 +53,85 @@ enum GoogleAccountStoreError: LocalizedError, Equatable {
 struct GoogleAccountStore: GoogleAccountStoring {
     private let service: String
     private let accountName: String
+    private let vault: any AppCredentialVaultStoring
 
     init(
         service: String? = nil,
-        accountName: String = "connected-google-accounts"
+        accountName: String = "connected-google-accounts",
+        vault: (any AppCredentialVaultStoring)? = nil
     ) {
         let bundleIdentifier = Bundle.main.bundleIdentifier ?? "CalendarBusySync"
         self.service = service ?? "\(bundleIdentifier).google-accounts"
         self.accountName = accountName
+        self.vault = vault ?? AppCredentialVault.shared
     }
 
     func loadAccounts() throws -> [StoredGoogleAccount] {
+        try googlePayload().googleAccounts
+    }
+
+    func saveAccounts(_ accounts: [StoredGoogleAccount]) throws {
+        var payload = try googlePayload()
+        payload.googleAccounts = accounts
+        payload.didMigrateLegacyGoogleAccounts = true
+        try vault.savePayload(payload)
+    }
+
+    func upsertAccount(_ account: StoredGoogleAccount) throws -> [StoredGoogleAccount] {
+        let payload = try vault.updatePayload { payload in
+            try migrateLegacyGoogleAccountsIfNeeded(into: &payload)
+            payload.googleAccounts.removeAll(where: { $0.id == account.id })
+            payload.googleAccounts.insert(account, at: 0)
+            payload.didMigrateLegacyGoogleAccounts = true
+        }
+        return payload.googleAccounts
+    }
+
+    func removeAccount(id: String) throws -> [StoredGoogleAccount] {
+        let payload = try vault.updatePayload { payload in
+            try migrateLegacyGoogleAccountsIfNeeded(into: &payload)
+            payload.googleAccounts.removeAll(where: { $0.id == id })
+            payload.didMigrateLegacyGoogleAccounts = true
+        }
+        return payload.googleAccounts
+    }
+
+    private func googlePayload() throws -> AppCredentialVaultPayload {
+        if var payload = try vault.loadPayloadIfPresent() {
+            let originalPayload = payload
+            try migrateLegacyGoogleAccountsIfNeeded(into: &payload)
+            if payload != originalPayload {
+                try vault.savePayload(payload)
+            }
+            return payload
+        } else {
+            let legacyAccounts = try loadLegacyAccounts()
+            guard !legacyAccounts.isEmpty else {
+                return AppCredentialVaultPayload(didMigrateLegacyGoogleAccounts: true)
+            }
+
+            let payload = AppCredentialVaultPayload(
+                didMigrateLegacyGoogleAccounts: true,
+                googleAccounts: legacyAccounts
+            )
+            try vault.savePayload(payload)
+            return payload
+        }
+    }
+
+    private func migrateLegacyGoogleAccountsIfNeeded(into payload: inout AppCredentialVaultPayload) throws {
+        guard !payload.didMigrateLegacyGoogleAccounts else {
+            return
+        }
+
+        let legacyAccounts = try loadLegacyAccounts()
+        if payload.googleAccounts.isEmpty, !legacyAccounts.isEmpty {
+            payload.googleAccounts = legacyAccounts
+        }
+        payload.didMigrateLegacyGoogleAccounts = true
+    }
+
+    private func loadLegacyAccounts() throws -> [StoredGoogleAccount] {
         var query = baseQuery
         query[kSecReturnData as String] = kCFBooleanTrue
         query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -90,62 +158,11 @@ struct GoogleAccountStore: GoogleAccountStoring {
         }
     }
 
-    func saveAccounts(_ accounts: [StoredGoogleAccount]) throws {
-        if accounts.isEmpty {
-            let status = SecItemDelete(baseQuery as CFDictionary)
-            guard status == errSecSuccess || status == errSecItemNotFound else {
-                throw GoogleAccountStoreError.unwritable(status)
-            }
-            return
-        }
-
-        let data = try JSONEncoder().encode(accounts)
-        let addStatus = SecItemAdd(writeQuery(data: data) as CFDictionary, nil)
-        if addStatus == errSecSuccess {
-            return
-        }
-
-        guard addStatus == errSecDuplicateItem else {
-            throw GoogleAccountStoreError.unwritable(addStatus)
-        }
-
-        let status = SecItemUpdate(
-            baseQuery as CFDictionary,
-            [kSecValueData as String: data] as CFDictionary
-        )
-        guard status == errSecSuccess else {
-            throw GoogleAccountStoreError.unwritable(status)
-        }
-    }
-
-    func upsertAccount(_ account: StoredGoogleAccount) throws -> [StoredGoogleAccount] {
-        var accounts = try loadAccounts()
-        accounts.removeAll(where: { $0.id == account.id })
-        accounts.insert(account, at: 0)
-        try saveAccounts(accounts)
-        return accounts
-    }
-
-    func removeAccount(id: String) throws -> [StoredGoogleAccount] {
-        let accounts = try loadAccounts().filter { $0.id != id }
-        try saveAccounts(accounts)
-        return accounts
-    }
-
     private var baseQuery: [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: accountName,
         ]
-    }
-
-    private func writeQuery(data: Data) -> [String: Any] {
-        var query = baseQuery
-        query[kSecValueData as String] = data
-        #if os(iOS)
-        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        #endif
-        return query
     }
 }
