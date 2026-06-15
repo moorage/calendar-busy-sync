@@ -350,10 +350,57 @@ nonisolated enum BookingGitHubPublisher {
         privateKeyPEM: String,
         fileManager: FileManager = .default,
         commandRunner: (any BookingGitCommandRunning)? = nil,
-        toolchain: BookingGitToolchain? = nil,
         workingDirectoryRoot: URL? = nil
     ) async throws -> PublishSummary {
         #if os(macOS)
+        return try await publishDirectoryUsingGit(
+            at: directory,
+            repository: repository,
+            branch: branch,
+            privateKeyPEM: privateKeyPEM,
+            fileManager: fileManager,
+            commandRunner: commandRunner,
+            toolchain: nil,
+            workingDirectoryRoot: workingDirectoryRoot
+        )
+        #else
+        throw BookingConfigurationError.invalidField("GitHub publishing from the app is available on macOS.")
+        #endif
+    }
+
+    #if os(macOS)
+    static func publishDirectory(
+        at directory: URL,
+        repository: BookingGitHubRepository,
+        branch: String,
+        privateKeyPEM: String,
+        fileManager: FileManager = .default,
+        commandRunner: (any BookingGitCommandRunning)? = nil,
+        toolchain: BookingGitToolchain,
+        workingDirectoryRoot: URL? = nil
+    ) async throws -> PublishSummary {
+        try await publishDirectoryUsingGit(
+            at: directory,
+            repository: repository,
+            branch: branch,
+            privateKeyPEM: privateKeyPEM,
+            fileManager: fileManager,
+            commandRunner: commandRunner,
+            toolchain: toolchain,
+            workingDirectoryRoot: workingDirectoryRoot
+        )
+    }
+
+    private static func publishDirectoryUsingGit(
+        at directory: URL,
+        repository: BookingGitHubRepository,
+        branch: String,
+        privateKeyPEM: String,
+        fileManager: FileManager,
+        commandRunner: (any BookingGitCommandRunning)?,
+        toolchain: BookingGitToolchain?,
+        workingDirectoryRoot: URL?
+    ) async throws -> PublishSummary {
         let files = try localFiles(in: directory, fileManager: fileManager)
         guard !files.isEmpty else {
             throw BookingConfigurationError.invalidField("Generate page files before publishing.")
@@ -465,19 +512,52 @@ nonisolated enum BookingGitHubPublisher {
         )
 
         return publishSummary(from: plan)
-        #else
-        throw BookingConfigurationError.invalidField("GitHub publishing from the app is available on macOS.")
-        #endif
     }
+    #endif
 
     static func verifyDeployKey(
         repository: BookingGitHubRepository,
         privateKeyPEM: String,
         fileManager: FileManager = .default,
-        commandRunner: (any BookingGitCommandRunning)? = nil,
-        toolchain: BookingGitToolchain? = nil
+        commandRunner: (any BookingGitCommandRunning)? = nil
     ) async throws {
         #if os(macOS)
+        try await verifyDeployKeyUsingGit(
+            repository: repository,
+            privateKeyPEM: privateKeyPEM,
+            fileManager: fileManager,
+            commandRunner: commandRunner,
+            toolchain: nil
+        )
+        #else
+        throw BookingConfigurationError.invalidField("GitHub publishing from the app is available on macOS.")
+        #endif
+    }
+
+    #if os(macOS)
+    static func verifyDeployKey(
+        repository: BookingGitHubRepository,
+        privateKeyPEM: String,
+        fileManager: FileManager = .default,
+        commandRunner: (any BookingGitCommandRunning)? = nil,
+        toolchain: BookingGitToolchain
+    ) async throws {
+        try await verifyDeployKeyUsingGit(
+            repository: repository,
+            privateKeyPEM: privateKeyPEM,
+            fileManager: fileManager,
+            commandRunner: commandRunner,
+            toolchain: toolchain
+        )
+    }
+
+    private static func verifyDeployKeyUsingGit(
+        repository: BookingGitHubRepository,
+        privateKeyPEM: String,
+        fileManager: FileManager,
+        commandRunner: (any BookingGitCommandRunning)?,
+        toolchain: BookingGitToolchain?
+    ) async throws {
         let tempRoot = fileManager.temporaryDirectory
             .appendingPathComponent("booking-github-verify-\(UUID().uuidString)", isDirectory: true)
         try fileManager.createDirectory(at: tempRoot, withIntermediateDirectories: true)
@@ -499,10 +579,8 @@ nonisolated enum BookingGitHubPublisher {
                 workingDirectory: tempRoot
             )
         )
-        #else
-        throw BookingConfigurationError.invalidField("GitHub publishing from the app is available on macOS.")
-        #endif
     }
+    #endif
 
     static func unexpectedRootContentPaths(
         localPaths: [String],
