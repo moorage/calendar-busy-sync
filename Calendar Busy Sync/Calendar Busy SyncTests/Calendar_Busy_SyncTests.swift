@@ -2837,7 +2837,7 @@ final class Calendar_Busy_SyncTests: XCTestCase {
             try? deleteTestKeychainItem(service: vaultService, account: "app-credential-vault")
         }
 
-        let vault = AppCredentialVault(service: vaultService, accessPolicy: .unprotected)
+        let vault = AppCredentialVault(service: vaultService)
         let store = GoogleAccountStore(
             service: legacyService,
             accountName: "connected-google-accounts",
@@ -2914,7 +2914,7 @@ final class Calendar_Busy_SyncTests: XCTestCase {
             account: "connected-google-accounts"
         )
 
-        let vault = AppCredentialVault(service: vaultService, accessPolicy: .unprotected)
+        let vault = AppCredentialVault(service: vaultService)
         let bookingStore = BookingKeychainSecretStore(service: bookingService, vault: vault)
         let googleStore = GoogleAccountStore(
             service: googleService,

@@ -88,6 +88,7 @@ enum AppCredentialVaultError: LocalizedError, Equatable {
 }
 
 enum AppCredentialVaultAccessPolicy: Sendable {
+    case deviceKeychain
     case localUserPresence
     case unprotected
 }
@@ -112,7 +113,7 @@ final class AppCredentialVault: AppCredentialVaultStoring, @unchecked Sendable {
     init(
         service: String? = nil,
         accountName: String = "app-credential-vault",
-        accessPolicy: AppCredentialVaultAccessPolicy = .localUserPresence
+        accessPolicy: AppCredentialVaultAccessPolicy = .deviceKeychain
     ) {
         let bundleIdentifier = Bundle.main.bundleIdentifier ?? "CalendarBusySync"
         self.service = service ?? "\(bundleIdentifier).credentials"
@@ -124,24 +125,25 @@ final class AppCredentialVault: AppCredentialVaultStoring, @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
 
-        var query = baseQuery(includeAuthenticationContext: true)
+        var query = baseQuery()
         query[kSecReturnData as String] = kCFBooleanTrue
         query[kSecMatchLimit as String] = kSecMatchLimitOne
+        if accessPolicy == .deviceKeychain {
+            query[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUISkip
+        } else if accessPolicy == .localUserPresence {
+            query[kSecUseAuthenticationContext as String] = sharedAuthenticationContext()
+        }
 
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
         switch status {
         case errSecSuccess:
-            guard let data = item as? Data else {
-                throw AppCredentialVaultError.corruptPayload
-            }
-            do {
-                return try JSONDecoder().decode(AppCredentialVaultPayload.self, from: data)
-            } catch {
-                throw AppCredentialVaultError.corruptPayload
-            }
+            return try decodePayload(item)
         case errSecItemNotFound:
             return nil
+        case errSecInteractionNotAllowed where accessPolicy == .deviceKeychain,
+             errSecAuthFailed where accessPolicy == .deviceKeychain:
+            return try migrateLegacyLocalAuthenticationPayloadIfPresent()
         default:
             throw AppCredentialVaultError.unreadable(status)
         }
@@ -162,7 +164,7 @@ final class AppCredentialVault: AppCredentialVaultStoring, @unchecked Sendable {
         }
 
         let status = SecItemUpdate(
-            baseQuery(includeAuthenticationContext: true) as CFDictionary,
+            baseQuery() as CFDictionary,
             [kSecValueData as String: data] as CFDictionary
         )
         guard status == errSecSuccess else {
@@ -183,9 +185,11 @@ final class AppCredentialVault: AppCredentialVaultStoring, @unchecked Sendable {
     }
 
     private func addQuery(data: Data) throws -> [String: Any] {
-        var query = baseQuery(includeAuthenticationContext: false)
+        var query = baseQuery()
         query[kSecValueData as String] = data
         switch accessPolicy {
+        case .deviceKeychain:
+            query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         case .localUserPresence:
             query[kSecAttrAccessControl as String] = try localAuthenticationAccessControl()
         case .unprotected:
@@ -196,18 +200,62 @@ final class AppCredentialVault: AppCredentialVaultStoring, @unchecked Sendable {
         return query
     }
 
-    private func baseQuery(includeAuthenticationContext: Bool) -> [String: Any] {
-        var query: [String: Any] = [
+    private func baseQuery() -> [String: Any] {
+        [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: accountName,
         ]
+    }
 
-        if includeAuthenticationContext, case .localUserPresence = accessPolicy {
-            query[kSecUseAuthenticationContext as String] = sharedAuthenticationContext()
+    private func legacyLocalAuthenticationReadQuery() -> [String: Any] {
+        var query = baseQuery()
+        query[kSecReturnData as String] = kCFBooleanTrue
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        query[kSecUseAuthenticationContext as String] = sharedAuthenticationContext()
+        return query
+    }
+
+    private func decodePayload(_ item: CFTypeRef?) throws -> AppCredentialVaultPayload {
+        guard let data = item as? Data else {
+            throw AppCredentialVaultError.corruptPayload
+        }
+        do {
+            return try JSONDecoder().decode(AppCredentialVaultPayload.self, from: data)
+        } catch {
+            throw AppCredentialVaultError.corruptPayload
+        }
+    }
+
+    private func migrateLegacyLocalAuthenticationPayloadIfPresent() throws -> AppCredentialVaultPayload? {
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(legacyLocalAuthenticationReadQuery() as CFDictionary, &item)
+        switch status {
+        case errSecSuccess:
+            let payload = try decodePayload(item)
+            try replaceExistingItemWithDeviceKeychainPayload(payload)
+            return payload
+        case errSecItemNotFound:
+            return nil
+        default:
+            throw AppCredentialVaultError.unreadable(status)
+        }
+    }
+
+    private func replaceExistingItemWithDeviceKeychainPayload(_ payload: AppCredentialVaultPayload) throws {
+        let data = try JSONEncoder().encode(payload)
+        let deleteStatus = SecItemDelete(baseQuery() as CFDictionary)
+        guard deleteStatus == errSecSuccess || deleteStatus == errSecItemNotFound else {
+            throw AppCredentialVaultError.unwritable(deleteStatus)
         }
 
-        return query
+        var query = baseQuery()
+        query[kSecValueData as String] = data
+        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        let addStatus = SecItemAdd(query as CFDictionary, nil)
+        guard addStatus == errSecSuccess else {
+            throw AppCredentialVaultError.unwritable(addStatus)
+        }
     }
 
     private func sharedAuthenticationContext() -> LAContext {

@@ -14,6 +14,7 @@
   - `docs/exec-plans/active/2026-04-19-settings-shell-ia-refresh.md`
   - `docs/exec-plans/active/2026-04-19-menu-bar-login-item-utility.md`
 - recent completed ExecPlans:
+  - `docs/exec-plans/completed/2026-06-17-keychain-prompt-regression.md`
   - `docs/exec-plans/completed/2026-06-15-single-keychain-vault-touch-id.md`
   - `docs/exec-plans/completed/2026-06-03-booking-continuous-availability-publishing.md`
   - `docs/exec-plans/completed/2026-06-03-booking-ux-ia-refresh.md`
@@ -24,7 +25,7 @@
   - `docs/exec-plans/completed/2026-04-18-apple-codex-harness-bootstrap.md`
   - current milestone:
   - the repo now has live Google Sign-In wiring, a secure multi-account Google roster with per-account calendar selection, a live Apple / iCloud calendar slice backed by EventKit, a first full-mesh mirror-reconciliation engine, a settings-first shell with a separate audit-trail window plus a persistent bottom status line, a macOS menu bar utility shell with launch-at-login support and a Dock icon that appears only while Settings or Logs is open, iCloud-backed shared configuration for non-secret settings plus shared Google-account handoff metadata and native Booking setup, a best-effort iOS background refresh path backed by `BGAppRefreshTask`, and a privacy-first booking slice with Markdown config parsing, fixed copy/icon registries, local page-file generation, public page/inbox URL checks, encrypted request import, manual approval/decline, selected Apple Calendar writes, active-inbox/history UI, static GitHub Pages template files, and Cloudflare/Vercel encrypted inbox templates
-  - app-owned Google account archives and Booking secrets now migrate into one Keychain-backed `AppCredentialVault` item protected by local user presence in production, so supported Macs can show Touch ID, Apple Watch, or the login password fallback for one local credential vault instead of independent Booking and Calendars Keychain prompts
+  - app-owned Google account archives and Booking secrets now migrate into one Keychain-backed `AppCredentialVault` item using device-local Keychain availability, so routine polling and booking checks can read credentials without repeated Touch ID, Apple Watch, or login-password prompts
 - booking UX/IA audit:
 - completed booking UX/IA refresh:
   - `docs/ideas/backlog/booking-appointment-management-ux-ia-audit.md` records the June 3, 2026 audit of appointment-type CRUD, booking setup, publishing, verification, Vercel deployment, page customization, n=0/n=5 states, progressive disclosure, and iconography. The audit was completed through `docs/exec-plans/completed/2026-06-03-booking-ux-ia-refresh.md`, which collapsed the separate setup sheet into one Booking workspace, added explicit local/generated/uploaded/live/verified evidence, added appointment-type pause/resume, surfaced publish/deploy evidence, and made page customization and Vercel deployment guidance first-class native tasks.
@@ -47,6 +48,8 @@
   - bundle identifier: `com.matthewpaulmoore.Calendar-Busy-Sync`
   - Apple bundle ID resource ID: `7NFDF46V3H`
 - commands run:
+  - `xcodebuild -project 'Calendar Busy Sync/Calendar Busy Sync.xcodeproj' -scheme 'Calendar Busy Sync' -configuration Debug -derivedDataPath artifacts/DerivedData-keychain-prompt-regression -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY='' -only-testing:'Calendar Busy SyncTests/Calendar_Busy_SyncTests/testGoogleAccountStoreUpsertsAndRemovesAccounts' -only-testing:'Calendar Busy SyncTests/Calendar_Busy_SyncTests/testCredentialVaultMigratesBookingAndGoogleSecretsIntoOneItem' test` (2026-06-17 focused credential-vault tests passed under the new device-local Keychain default)
+  - `python3 scripts/check_execplan.py docs/exec-plans/active/2026-06-17-keychain-prompt-regression.md`, `python3 scripts/knowledge/check_docs.py`, and `git diff --check` (2026-06-17 keychain prompt regression validation passed before moving the plan to completed)
   - `xcodebuild -project 'Calendar Busy Sync/Calendar Busy Sync.xcodeproj' -scheme 'Calendar Busy Sync' -configuration Debug -derivedDataPath artifacts/DerivedData-single-keychain-vault -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY='' -only-testing:'Calendar Busy SyncTests/Calendar_Busy_SyncTests/testGoogleAccountStoreUpsertsAndRemovesAccounts' -only-testing:'Calendar Busy SyncTests/Calendar_Busy_SyncTests/testCredentialVaultMigratesBookingAndGoogleSecretsIntoOneItem' test` (2026-06-15 focused credential-vault tests passed, including legacy Booking/Google migration into one vault item)
   - `python3 scripts/check_execplan.py docs/exec-plans/completed/2026-06-15-single-keychain-vault-touch-id.md`, `python3 scripts/knowledge/check_docs.py`, and `git diff --check` (2026-06-15 single credential-vault final validation passed)
   - `git diff --check` (2026-06-04 booking Page/Publish action-affordance whitespace validation)

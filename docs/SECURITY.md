@@ -64,6 +64,7 @@ For each trust boundary, list the relevant threats and required controls. This i
 ## Secrets and credentials
 
 - provider tokens and private key material must never be committed
+- app-owned Google and Booking secrets stay in a device-local Keychain vault that routine sync paths can read without repeated local-auth prompts
 - local `.env` files may hold development-only secrets, but production credentials are out of scope for this repo
 - checked-in fixtures under `Fixtures/` must be synthetic and must not contain real account identifiers or event bodies
 
