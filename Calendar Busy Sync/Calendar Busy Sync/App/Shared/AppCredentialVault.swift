@@ -96,6 +96,7 @@ enum AppCredentialVaultAccessPolicy: Sendable {
 protocol AppCredentialVaultStoring: Sendable {
     func loadPayloadIfPresent() throws -> AppCredentialVaultPayload?
     func savePayload(_ payload: AppCredentialVaultPayload) throws
+    func invalidateCachedPayload()
     func updatePayload(
         _ transform: @Sendable (inout AppCredentialVaultPayload) throws -> Void
     ) throws -> AppCredentialVaultPayload
@@ -109,6 +110,7 @@ final class AppCredentialVault: AppCredentialVaultStoring, @unchecked Sendable {
     private let accessPolicy: AppCredentialVaultAccessPolicy
     private let lock = NSRecursiveLock()
     private var authenticationContext: LAContext?
+    private var cachedPayload: AppCredentialVaultPayload?
 
     init(
         service: String? = nil,
@@ -125,6 +127,10 @@ final class AppCredentialVault: AppCredentialVaultStoring, @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
 
+        if let cachedPayload {
+            return cachedPayload
+        }
+
         var query = baseQuery()
         query[kSecReturnData as String] = kCFBooleanTrue
         query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -138,7 +144,9 @@ final class AppCredentialVault: AppCredentialVaultStoring, @unchecked Sendable {
         let status = SecItemCopyMatching(query as CFDictionary, &item)
         switch status {
         case errSecSuccess:
-            return try decodePayload(item)
+            let payload = try decodePayload(item)
+            cachedPayload = payload
+            return payload
         case errSecItemNotFound:
             return nil
         case errSecInteractionNotAllowed where accessPolicy == .deviceKeychain,
@@ -156,6 +164,7 @@ final class AppCredentialVault: AppCredentialVaultStoring, @unchecked Sendable {
         let data = try JSONEncoder().encode(payload)
         let addStatus = SecItemAdd(try addQuery(data: data) as CFDictionary, nil)
         if addStatus == errSecSuccess {
+            cachedPayload = payload
             return
         }
 
@@ -170,6 +179,14 @@ final class AppCredentialVault: AppCredentialVaultStoring, @unchecked Sendable {
         guard status == errSecSuccess else {
             throw AppCredentialVaultError.unwritable(status)
         }
+        cachedPayload = payload
+    }
+
+    func invalidateCachedPayload() {
+        lock.lock()
+        defer { lock.unlock() }
+
+        cachedPayload = nil
     }
 
     func updatePayload(
@@ -256,6 +273,7 @@ final class AppCredentialVault: AppCredentialVaultStoring, @unchecked Sendable {
         guard addStatus == errSecSuccess else {
             throw AppCredentialVaultError.unwritable(addStatus)
         }
+        cachedPayload = payload
     }
 
     private func sharedAuthenticationContext() -> LAContext {

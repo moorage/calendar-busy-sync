@@ -208,7 +208,7 @@ struct BookingGitToolchain: Equatable, Sendable {
               fileManager.isExecutableFile(atPath: url.path)
         else {
             throw BookingConfigurationError.invalidField(
-                "This build is missing its bundled Git publishing helper. Update the app, then try publishing again."
+                "This app build is missing its bundled Git/SSH publishing helpers. Update the app, then try again."
             )
         }
         return url

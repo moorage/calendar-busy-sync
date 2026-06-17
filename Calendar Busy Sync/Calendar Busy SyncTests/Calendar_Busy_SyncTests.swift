@@ -14,6 +14,12 @@ final class Calendar_Busy_SyncTests: XCTestCase {
         XCTAssertEqual(AuditTrailLogLength.defaultValue(for: .ios), .last1000)
     }
 
+    func testBookingConfigurationErrorUsesHumanLocalizedDescription() {
+        let error: Error = BookingConfigurationError.invalidField("Generate a deploy key before publishing.")
+
+        XCTAssertEqual(error.localizedDescription, "Generate a deploy key before publishing.")
+    }
+
     @MainActor
     func testAppModelUsesCooperativeSyncSchedulingOnlyOnIOS() {
         let iosSuite = "\(#function).ios"
@@ -2066,6 +2072,48 @@ final class Calendar_Busy_SyncTests: XCTestCase {
     }
 
     @MainActor
+    func testBookingGitHubActionsSurfaceMissingLocalDeployKeyPrivateKey() async throws {
+        let suiteName = "CalendarBusySyncTests.\(#function)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        defaults.set("moorage/bookme", forKey: "settings.booking.github.repository")
+        defaults.set("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKey", forKey: "settings.booking.github.deployKey.publicKey")
+        defaults.set("moorage/bookme", forKey: "settings.booking.github.deployKey.repository")
+
+        let model = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: false,
+                platformTarget: .macos,
+                deviceClass: .mac
+            ),
+            userDefaults: defaults,
+            sharedConfigurationStore: MockSharedAppConfigurationStore(isAvailable: true),
+            bookingSecretStore: MockBookingSecretStore(secrets: BookingLocalSecrets.generate(), adminToken: nil),
+            googleAccountStore: MockGoogleAccountStore()
+        )
+
+        await model.verifyBookingGitHubDeployKey()
+
+        let expectedMessage = "Generate a new deploy key on this Mac, then add it to GitHub with write access. The private key is missing from Keychain."
+        XCTAssertEqual(model.bookingSetupSnapshot.lastMessage, expectedMessage)
+
+        await model.publishBookingPageToGitHub()
+
+        XCTAssertEqual(model.bookingSetupSnapshot.lastMessage, expectedMessage)
+    }
+
+    @MainActor
     func testUITestModeUsesEnvironmentBookingInboxAdminToken() throws {
         let suiteName = "CalendarBusySyncTests.\(#function)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
@@ -2124,6 +2172,36 @@ final class Calendar_Busy_SyncTests: XCTestCase {
         }
 
         VercelDeploymentURLProtocol.responders = [
+            "GET api.vercel.com /v9/projects/prj_booking": { request in
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer vercel-token")
+                XCTAssertEqual(request.url?.query, "teamId=team_123")
+                return (200, Data(#"{"id":"prj_booking_id","name":"prj_booking"}"#.utf8))
+            },
+            "GET api.vercel.com /v1/storage/stores": { request in
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer vercel-token")
+                XCTAssertEqual(request.url?.query, "teamId=team_123")
+                return (200, Data(#"{"stores":[]}"#.utf8))
+            },
+            "POST api.vercel.com /v1/storage/stores/blob": { request in
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer vercel-token")
+                XCTAssertEqual(request.url?.query, "teamId=team_123")
+                let body = try XCTUnwrap(request.httpBody)
+                let decoded = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+                XCTAssertEqual(decoded["access"] as? String, "public")
+                XCTAssertEqual(decoded["region"] as? String, "iad1")
+                XCTAssertEqual(decoded["name"] as? String, "calendar-busy-sync-prj-booking")
+                return (200, Data(#"{"store":{"id":"store_blob_123","name":"calendar-busy-sync-prj-booking","type":"blob"}}"#.utf8))
+            },
+            "POST api.vercel.com /v1/storage/stores/store_blob_123/connections": { request in
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer vercel-token")
+                XCTAssertEqual(request.url?.query, "teamId=team_123")
+                let body = try XCTUnwrap(request.httpBody)
+                let decoded = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+                XCTAssertEqual(decoded["projectId"] as? String, "prj_booking_id")
+                XCTAssertEqual(decoded["type"] as? String, "integration")
+                XCTAssertEqual(decoded["envVarEnvironments"] as? [String], ["production"])
+                return (200, Data("{}".utf8))
+            },
             "POST api.vercel.com /v10/projects/prj_booking/env": { request in
                 XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer vercel-token")
                 XCTAssertEqual(request.url?.query, "upsert=true&teamId=team_123")
@@ -2193,6 +2271,175 @@ final class Calendar_Busy_SyncTests: XCTestCase {
         XCTAssertEqual(
             VercelDeploymentURLProtocol.seenRequests,
             [
+                "GET api.vercel.com /v9/projects/prj_booking",
+                "GET api.vercel.com /v1/storage/stores",
+                "POST api.vercel.com /v1/storage/stores/blob",
+                "POST api.vercel.com /v1/storage/stores/store_blob_123/connections",
+                "POST api.vercel.com /v10/projects/prj_booking/env",
+                "POST api.vercel.com /v13/deployments",
+                "GET booking-inbox.vercel.app /healthz",
+            ]
+        )
+    }
+
+    @MainActor
+    func testDeployBookingVercelInboxReusesConnectedBlobStore() async throws {
+        let suiteName = "CalendarBusySyncTests.\(#function)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defaults.set("https://moorage.github.io/booking-test/", forKey: "settings.booking.pageURL")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        VercelDeploymentURLProtocol.responders = [
+            "GET api.vercel.com /v9/projects/prj_booking": { _ in
+                (200, Data(#"{"id":"prj_booking_id","name":"prj_booking"}"#.utf8))
+            },
+            "GET api.vercel.com /v1/storage/stores": { _ in
+                (
+                    200,
+                    Data(
+                        #"{"stores":[{"id":"store_existing","name":"existing","type":"blob","projectsMetadata":[{"projectId":"prj_booking_id"}]}]}"#.utf8
+                    )
+                )
+            },
+            "POST api.vercel.com /v10/projects/prj_booking/env": { _ in
+                (200, Data("{}".utf8))
+            },
+            "POST api.vercel.com /v13/deployments": { _ in
+                (200, Data(#"{"id":"dpl_123","url":"booking-inbox.vercel.app"}"#.utf8))
+            },
+            "GET booking-inbox.vercel.app /healthz": { _ in
+                (200, Data(#"{"ok":true,"allowedOrigin":"https://moorage.github.io","storage":"vercel-blob","storageReady":true}"#.utf8))
+            },
+        ]
+        VercelDeploymentURLProtocol.seenRequests = []
+        URLProtocol.registerClass(VercelDeploymentURLProtocol.self)
+        defer {
+            URLProtocol.unregisterClass(VercelDeploymentURLProtocol.self)
+            VercelDeploymentURLProtocol.responders = [:]
+            VercelDeploymentURLProtocol.seenRequests = []
+        }
+
+        let model = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: false,
+                platformTarget: .macos,
+                deviceClass: .mac
+            ),
+            userDefaults: defaults,
+            sharedConfigurationStore: MockSharedAppConfigurationStore(isAvailable: true),
+            bookingSecretStore: MockBookingSecretStore(secrets: BookingLocalSecrets.generate(), adminToken: nil),
+            googleAccountStore: MockGoogleAccountStore()
+        )
+
+        model.bookingVercelTokenString = "vercel-token"
+        model.bookingVercelProjectNameString = "prj_booking"
+
+        await model.deployBookingVercelInbox()
+
+        XCTAssertEqual(model.bookingSetupSnapshot.inboxStatus, .connected)
+        XCTAssertFalse(VercelDeploymentURLProtocol.seenRequests.contains("POST api.vercel.com /v1/storage/stores/blob"))
+        XCTAssertEqual(
+            VercelDeploymentURLProtocol.seenRequests,
+            [
+                "GET api.vercel.com /v9/projects/prj_booking",
+                "GET api.vercel.com /v1/storage/stores",
+                "POST api.vercel.com /v10/projects/prj_booking/env",
+                "POST api.vercel.com /v13/deployments",
+                "GET booking-inbox.vercel.app /healthz",
+            ]
+        )
+    }
+
+    @MainActor
+    func testDeployBookingVercelInboxConnectsExistingNamedBlobStore() async throws {
+        let suiteName = "CalendarBusySyncTests.\(#function)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defaults.set("https://moorage.github.io/booking-test/", forKey: "settings.booking.pageURL")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        VercelDeploymentURLProtocol.responders = [
+            "GET api.vercel.com /v9/projects/prj_booking": { _ in
+                (200, Data(#"{"id":"prj_booking_id","name":"prj_booking"}"#.utf8))
+            },
+            "GET api.vercel.com /v1/storage/stores": { _ in
+                (
+                    200,
+                    Data(
+                        #"{"stores":[{"id":"store_existing","name":"calendar-busy-sync-prj-booking","type":"blob","projectsMetadata":[]}]}"#.utf8
+                    )
+                )
+            },
+            "POST api.vercel.com /v1/storage/stores/store_existing/connections": { request in
+                let body = try XCTUnwrap(request.httpBody)
+                let decoded = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+                XCTAssertEqual(decoded["projectId"] as? String, "prj_booking_id")
+                XCTAssertEqual(decoded["type"] as? String, "integration")
+                XCTAssertEqual(decoded["envVarEnvironments"] as? [String], ["production"])
+                return (200, Data("{}".utf8))
+            },
+            "POST api.vercel.com /v10/projects/prj_booking/env": { _ in
+                (200, Data("{}".utf8))
+            },
+            "POST api.vercel.com /v13/deployments": { _ in
+                (200, Data(#"{"id":"dpl_123","url":"booking-inbox.vercel.app"}"#.utf8))
+            },
+            "GET booking-inbox.vercel.app /healthz": { _ in
+                (200, Data(#"{"ok":true,"allowedOrigin":"https://moorage.github.io","storage":"vercel-blob","storageReady":true}"#.utf8))
+            },
+        ]
+        VercelDeploymentURLProtocol.seenRequests = []
+        URLProtocol.registerClass(VercelDeploymentURLProtocol.self)
+        defer {
+            URLProtocol.unregisterClass(VercelDeploymentURLProtocol.self)
+            VercelDeploymentURLProtocol.responders = [:]
+            VercelDeploymentURLProtocol.seenRequests = []
+        }
+
+        let model = AppModel(
+            launchOptions: HarnessLaunchOptions(
+                scenarioRoot: nil,
+                scenarioName: nil,
+                windowSize: nil,
+                dumpVisibleStateURL: nil,
+                dumpPerfStateURL: nil,
+                screenshotPathURL: nil,
+                commandDirectoryURL: nil,
+                uiTestMode: false,
+                platformTarget: .macos,
+                deviceClass: .mac
+            ),
+            userDefaults: defaults,
+            sharedConfigurationStore: MockSharedAppConfigurationStore(isAvailable: true),
+            bookingSecretStore: MockBookingSecretStore(secrets: BookingLocalSecrets.generate(), adminToken: nil),
+            googleAccountStore: MockGoogleAccountStore()
+        )
+
+        model.bookingVercelTokenString = "vercel-token"
+        model.bookingVercelProjectNameString = "prj_booking"
+
+        await model.deployBookingVercelInbox()
+
+        XCTAssertEqual(model.bookingSetupSnapshot.inboxStatus, .connected)
+        XCTAssertFalse(VercelDeploymentURLProtocol.seenRequests.contains("POST api.vercel.com /v1/storage/stores/blob"))
+        XCTAssertEqual(
+            VercelDeploymentURLProtocol.seenRequests,
+            [
+                "GET api.vercel.com /v9/projects/prj_booking",
+                "GET api.vercel.com /v1/storage/stores",
+                "POST api.vercel.com /v1/storage/stores/store_existing/connections",
                 "POST api.vercel.com /v10/projects/prj_booking/env",
                 "POST api.vercel.com /v13/deployments",
                 "GET booking-inbox.vercel.app /healthz",
@@ -2937,6 +3184,59 @@ final class Calendar_Busy_SyncTests: XCTestCase {
         XCTAssertEqual(payload.bookingGitHubDeployKeyPrivateKey, "deploy-key")
         XCTAssertEqual(payload.googleAccounts, [googleAccount])
         XCTAssertEqual(try testKeychainItemCount(service: vaultService), 1)
+    }
+
+    func testCredentialVaultCachesDecodedPayloadUntilInvalidated() throws {
+        let vaultService = "test.credential-vault-cache.\(#function).\(UUID().uuidString)"
+        defer {
+            try? deleteTestKeychainItem(service: vaultService, account: "app-credential-vault")
+        }
+
+        let originalPayload = AppCredentialVaultPayload(bookingInboxAdminToken: "admin-token-1")
+        let replacementPayload = AppCredentialVaultPayload(bookingInboxAdminToken: "admin-token-2")
+        try saveTestKeychainData(
+            try JSONEncoder().encode(originalPayload),
+            service: vaultService,
+            account: "app-credential-vault"
+        )
+
+        let vault = AppCredentialVault(service: vaultService)
+        XCTAssertEqual(try vault.loadPayloadIfPresent()?.bookingInboxAdminToken, "admin-token-1")
+
+        try saveTestKeychainData(
+            try JSONEncoder().encode(replacementPayload),
+            service: vaultService,
+            account: "app-credential-vault"
+        )
+        XCTAssertEqual(try vault.loadPayloadIfPresent()?.bookingInboxAdminToken, "admin-token-1")
+
+        vault.invalidateCachedPayload()
+
+        XCTAssertEqual(try vault.loadPayloadIfPresent()?.bookingInboxAdminToken, "admin-token-2")
+    }
+
+    func testCredentialVaultSaveUpdatesCachedPayload() throws {
+        let vaultService = "test.credential-vault-save-cache.\(#function).\(UUID().uuidString)"
+        defer {
+            try? deleteTestKeychainItem(service: vaultService, account: "app-credential-vault")
+        }
+
+        let vault = AppCredentialVault(service: vaultService)
+        try vault.savePayload(AppCredentialVaultPayload(bookingVercelToken: "vercel-token-1"))
+        try vault.savePayload(AppCredentialVaultPayload(bookingVercelToken: "vercel-token-2"))
+
+        try deleteTestKeychainItem(service: vaultService, account: "app-credential-vault")
+
+        XCTAssertEqual(try vault.loadPayloadIfPresent()?.bookingVercelToken, "vercel-token-2")
+    }
+
+    func testCredentialCacheInvalidationClassifiesAuthenticationFailures() {
+        XCTAssertTrue(GoogleCalendarServiceError.api(statusCode: 401, message: "Unauthorized").isAuthenticationFailure)
+        XCTAssertFalse(GoogleCalendarServiceError.api(statusCode: 403, message: "Forbidden").isAuthenticationFailure)
+        XCTAssertTrue(BookingVercelDeploymentError.api(statusCode: 401, message: "Unauthorized").isAuthenticationFailure)
+        XCTAssertFalse(BookingVercelDeploymentError.api(statusCode: 403, message: "Forbidden").isAuthenticationFailure)
+        XCTAssertTrue(BookingRelayClientError.requestRejected(statusCode: 401).isAuthenticationFailure)
+        XCTAssertFalse(BookingRelayClientError.requestRejected(statusCode: 403).isAuthenticationFailure)
     }
 
     func testBusyMirrorPlannerOnlyMirrorsPresentAndFutureTime() {

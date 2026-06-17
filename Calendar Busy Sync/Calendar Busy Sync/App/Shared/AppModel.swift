@@ -1415,6 +1415,7 @@ final class AppModel: ObservableObject {
     var bookingVercelEnvironmentLines: [String] {
         [
             "ALLOWED_ORIGIN=\(bookingExpectedAllowedOriginString.isEmpty ? "https://owner.github.io" : bookingExpectedAllowedOriginString)",
+            "BLOB_READ_WRITE_TOKEN=(created by connected Vercel Blob storage)",
             "INBOX_ADMIN_TOKEN=(generated and stored locally)",
             "MAX_PENDING_REQUESTS=100",
         ]
@@ -1437,6 +1438,7 @@ final class AppModel: ObservableObject {
         if !bookingVercelTokenString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             lines.append("Vercel token stored locally")
         }
+        lines.append("Vercel Blob storage is created and connected during deploy")
         return lines
     }
 
@@ -1922,7 +1924,10 @@ final class AppModel: ObservableObject {
                     pageStatus: .publishFailed,
                     inboxStatus: bookingSetupSnapshot.inboxStatus,
                     pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
-                    lastMessage: "Could not generate a deploy key."
+                    lastMessage: Self.bookingConfigurationFailureMessage(
+                        error,
+                        fallback: "Could not generate a deploy key."
+                    )
                 ),
                 auditDetail: "Deploy key generation failed. \(error.localizedDescription)"
             )
@@ -1959,7 +1964,10 @@ final class AppModel: ObservableObject {
                     pageStatus: .publishFailed,
                     inboxStatus: bookingSetupSnapshot.inboxStatus,
                     pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
-                    lastMessage: "Deploy key could not reach this GitHub repository."
+                    lastMessage: Self.bookingConfigurationFailureMessage(
+                        error,
+                        fallback: "Deploy key could not reach this GitHub repository."
+                    )
                 ),
                 auditDetail: "GitHub deploy key verification failed. \(error.localizedDescription)"
             )
@@ -2093,7 +2101,10 @@ final class AppModel: ObservableObject {
                         pageStatus: .publishFailed,
                         inboxStatus: bookingSetupSnapshot.inboxStatus,
                         pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
-                        lastMessage: BookingCopy.Validation.publishFailed
+                        lastMessage: Self.bookingConfigurationFailureMessage(
+                            error,
+                            fallback: BookingCopy.Validation.publishFailed
+                        )
                     ),
                     auditDetail: "GitHub Pages publish failed. \(error.localizedDescription)"
                 )
@@ -2456,12 +2467,22 @@ final class AppModel: ObservableObject {
         do {
             let request = BookingRelayRequestBuilder.healthRequest(relayURL: relayURL)
             let (data, response) = try await URLSession.shared.data(for: request)
+            let health = try? JSONDecoder().decode(BookingRelayHealthResponse.self, from: data)
             guard let httpResponse = response as? HTTPURLResponse,
                   (200..<300).contains(httpResponse.statusCode)
             else {
+                if health?.storageReady == false {
+                    throw BookingConfigurationError.invalidField(
+                        "Vercel Blob storage is not ready. Redeploy the Vercel inbox so the app can create and connect Blob storage."
+                    )
+                }
                 throw BookingRelayClientError.invalidResponse
             }
-            let health = try? JSONDecoder().decode(BookingRelayHealthResponse.self, from: data)
+            if health?.storageReady == false {
+                throw BookingConfigurationError.invalidField(
+                    "Vercel Blob storage is not ready. Redeploy the Vercel inbox so the app can create and connect Blob storage."
+                )
+            }
             let expectedOrigin = bookingExpectedAllowedOriginString
             if let allowedOrigin = health?.allowedOrigin,
                !expectedOrigin.isEmpty,
@@ -2534,12 +2555,13 @@ final class AppModel: ObservableObject {
                     pageStatus: bookingSetupSnapshot.pageStatus,
                     inboxStatus: .configured,
                     pendingRequestCount: bookingSetupSnapshot.pendingRequestCount,
-                    lastMessage: "Vercel inbox deployed. Checking the inbox now."
+                    lastMessage: "Vercel inbox deployed with Blob storage. Checking the inbox now."
                 ),
-                auditDetail: "Vercel booking inbox deployed as \(result.deploymentID)."
+                auditDetail: "Vercel booking inbox deployed as \(result.deploymentID) with Blob store \(result.blobStoreID)."
             )
             await checkBookingInbox()
         } catch {
+            invalidateBookingSecretCacheIfNeeded(for: error)
             let message = Self.bookingConfigurationErrorMessage(error)
             updateBookingSetupSnapshot(
                 BookingSetupSnapshot(
@@ -2709,6 +2731,7 @@ final class AppModel: ObservableObject {
                 )
             )
         } catch {
+            invalidateBookingSecretCacheIfNeeded(for: error)
             updateBookingSetupSnapshot(
                 BookingSetupSnapshot(
                     pageStatus: bookingSetupSnapshot.pageStatus,
@@ -2783,6 +2806,7 @@ final class AppModel: ObservableObject {
             do {
                 try await deleteBookingRequestFromInbox(request)
             } catch {
+                invalidateBookingSecretCacheIfNeeded(for: error)
                 appendAuditTrailEntry(
                     title: "Booking",
                     detail: "Booking was added to the calendar, but the app could not remove the encrypted inbox record.",
@@ -2910,6 +2934,7 @@ final class AppModel: ObservableObject {
             do {
                 try await deleteBookingRequestFromInbox(request)
             } catch {
+                invalidateBookingSecretCacheIfNeeded(for: error)
                 appendAuditTrailEntry(
                     title: "Booking",
                     detail: "Decline notice was prepared, but the app could not remove the encrypted inbox record.",
@@ -3439,6 +3464,7 @@ final class AppModel: ObservableObject {
         } catch let error as GoogleSignInServiceError {
             setGoogleMessage(error.localizedDescription, for: accountID)
         } catch let error as GoogleCalendarServiceError {
+            invalidateGoogleCredentialCacheIfNeeded(for: error)
             setGoogleMessage(error.localizedDescription, for: accountID)
         } catch let error as GoogleAccountStoreError {
             setGoogleMessage(error.localizedDescription, for: accountID)
@@ -3516,6 +3542,7 @@ final class AppModel: ObservableObject {
         } catch let error as GoogleSignInServiceError {
             setGoogleMessage(error.localizedDescription, for: accountID)
         } catch let error as GoogleCalendarServiceError {
+            invalidateGoogleCredentialCacheIfNeeded(for: error)
             setGoogleMessage(error.localizedDescription, for: accountID)
         } catch let error as GoogleAccountStoreError {
             setGoogleMessage(error.localizedDescription, for: accountID)
@@ -4136,6 +4163,29 @@ final class AppModel: ObservableObject {
         return error.localizedDescription
     }
 
+    private static func bookingConfigurationFailureMessage(_ error: Error, fallback: String) -> String {
+        if let error = error as? BookingConfigurationError {
+            return error.localizedDescription
+        }
+        return fallback
+    }
+
+    private func invalidateGoogleCredentialCacheIfNeeded(for error: GoogleCalendarServiceError) {
+        if error.isAuthenticationFailure {
+            googleAccountStore.invalidateCachedCredentials()
+        }
+    }
+
+    private func invalidateBookingSecretCacheIfNeeded(for error: Error) {
+        if let error = error as? BookingVercelDeploymentError,
+           error.isAuthenticationFailure {
+            bookingSecretStore.invalidateCachedSecrets()
+        } else if let error = error as? BookingRelayClientError,
+                  error.isAuthenticationFailure {
+            bookingSecretStore.invalidateCachedSecrets()
+        }
+    }
+
     private func recordBookingGitHubDeployKey(
         publicKey: String,
         fingerprint: String,
@@ -4160,7 +4210,9 @@ final class AppModel: ObservableObject {
         guard let privateKey = try bookingSecretStore.loadGitHubDeployKeyPrivateKey(),
               !privateKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else {
-            throw BookingConfigurationError.invalidField("Generate a deploy key before publishing.")
+            throw BookingConfigurationError.invalidField(
+                "Generate a new deploy key on this Mac, then add it to GitHub with write access. The private key is missing from Keychain."
+            )
         }
         return privateKey
     }
@@ -5039,6 +5091,7 @@ final class AppModel: ObservableObject {
             setGoogleMessage(message, for: accountID)
             liveGoogleSmokeStatus = .failed(message)
         } catch let error as GoogleCalendarServiceError {
+            invalidateGoogleCredentialCacheIfNeeded(for: error)
             let message = error.localizedDescription
             setGoogleMessage(message, for: accountID)
             liveGoogleSmokeStatus = .failed(message)
@@ -5170,6 +5223,7 @@ final class AppModel: ObservableObject {
         } catch let error as GoogleSignInServiceError {
             setGoogleMessage(error.localizedDescription, for: accountID)
         } catch let error as GoogleCalendarServiceError {
+            invalidateGoogleCredentialCacheIfNeeded(for: error)
             setGoogleMessage(error.localizedDescription, for: accountID)
         } catch let error as GoogleAccountStoreError {
             setGoogleMessage(error.localizedDescription, for: accountID)

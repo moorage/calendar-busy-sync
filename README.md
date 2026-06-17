@@ -99,7 +99,7 @@ Build the static booking page artifact:
 ./scripts/build-booking-site --output artifacts/booking-site
 ```
 
-The booking template is self-hosted by design. The developer seed template lives under `templates/booking-site/`, and the Mac app seeds an editable user copy in Application Support from the Public Page workspace. Encrypted request inbox templates live under `templates/booking-relay/`, and setup guides live under `docs/self-hosting/`. The page can be deployed to GitHub Pages; the inbox can be deployed to Cloudflare Workers or Vercel without either provider receiving calendar tokens or plaintext booking details. The Vercel inbox path can be app-managed from a Vercel token plus project ID/name; the app stores the token locally, generates the inbox admin token, deploys the bundled relay template, and saves the returned inbox URL.
+The booking template is self-hosted by design. The developer seed template lives under `templates/booking-site/`, and the Mac app seeds an editable user copy in Application Support from the Public Page workspace. Encrypted request inbox templates live under `templates/booking-relay/`, and setup guides live under `docs/self-hosting/`. The page can be deployed to GitHub Pages; the inbox can be deployed to Cloudflare Workers or Vercel without either provider receiving calendar tokens or plaintext booking details. The Vercel inbox path can be app-managed from a Vercel token plus project ID/name; the app stores the token locally, creates and connects Vercel Blob storage when needed, generates the inbox admin token, deploys the bundled relay template, and saves the returned inbox URL.
 
 Run the fast Codex loop:
 

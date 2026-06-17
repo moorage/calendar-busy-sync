@@ -17,11 +17,19 @@ nonisolated struct BookingRelayHealthResponse: Codable, Equatable, Sendable {
     var ok: Bool
     var allowedOrigin: String?
     var storage: String?
+    var storageReady: Bool?
 }
 
 enum BookingRelayClientError: Error, Equatable {
     case invalidResponse
     case requestRejected(statusCode: Int)
+
+    var isAuthenticationFailure: Bool {
+        if case let .requestRejected(statusCode) = self {
+            return statusCode == 401
+        }
+        return false
+    }
 }
 
 struct BookingRelayClient: Sendable {

@@ -1005,7 +1005,7 @@ final class BookingTests: XCTestCase {
         } catch {
             XCTAssertEqual(
                 error as? BookingConfigurationError,
-                .invalidField("This build is missing its bundled Git publishing helper. Update the app, then try publishing again.")
+                .invalidField("This app build is missing its bundled Git/SSH publishing helpers. Update the app, then try again.")
             )
         }
     }

@@ -316,7 +316,7 @@ nonisolated struct BookingConfigurationDiagnostic: Codable, Equatable, Sendable 
     var message: String
 }
 
-enum BookingConfigurationError: Error, Equatable {
+enum BookingConfigurationError: LocalizedError, Equatable {
     case missingFrontMatter
     case invalidFrontMatter(String)
     case missingRequiredField(String)
@@ -327,7 +327,7 @@ enum BookingConfigurationError: Error, Equatable {
     case invalidRelayURL(String)
     case diagnostics([BookingConfigurationDiagnostic])
 
-    var localizedDescription: String {
+    var errorDescription: String? {
         switch self {
         case .missingFrontMatter:
             return "Add front matter before publishing."
@@ -348,6 +348,10 @@ enum BookingConfigurationError: Error, Equatable {
         case let .diagnostics(diagnostics):
             return diagnostics.map(\.message).joined(separator: "\n")
         }
+    }
+
+    var localizedDescription: String {
+        errorDescription ?? "Booking configuration failed."
     }
 }
 

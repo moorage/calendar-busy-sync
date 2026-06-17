@@ -18,6 +18,13 @@ enum GoogleCalendarServiceError: LocalizedError, Equatable {
             return "Google Calendar returned an event with an invalid date."
         }
     }
+
+    var isAuthenticationFailure: Bool {
+        if case let .api(statusCode, _) = self {
+            return statusCode == 401
+        }
+        return false
+    }
 }
 
 struct GoogleCalendarService {

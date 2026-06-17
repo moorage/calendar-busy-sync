@@ -31,6 +31,11 @@ protocol GoogleAccountStoring {
     func saveAccounts(_ accounts: [StoredGoogleAccount]) throws
     func upsertAccount(_ account: StoredGoogleAccount) throws -> [StoredGoogleAccount]
     func removeAccount(id: String) throws -> [StoredGoogleAccount]
+    func invalidateCachedCredentials()
+}
+
+extension GoogleAccountStoring {
+    func invalidateCachedCredentials() {}
 }
 
 enum GoogleAccountStoreError: LocalizedError, Equatable {
@@ -94,6 +99,10 @@ struct GoogleAccountStore: GoogleAccountStoring {
             payload.didMigrateLegacyGoogleAccounts = true
         }
         return payload.googleAccounts
+    }
+
+    func invalidateCachedCredentials() {
+        vault.invalidateCachedPayload()
     }
 
     private func googlePayload() throws -> AppCredentialVaultPayload {

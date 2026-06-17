@@ -71,6 +71,7 @@ struct BookingVercelDeploymentConfiguration: Equatable, Sendable {
 struct BookingVercelDeploymentResult: Equatable, Sendable {
     let deploymentID: String
     let inboxURL: URL
+    let blobStoreID: String
 }
 
 struct BookingVercelDeploymentClient: Sendable {
@@ -90,6 +91,11 @@ struct BookingVercelDeploymentClient: Sendable {
         templateDirectory: URL,
         fileManager: FileManager = .default
     ) async throws -> BookingVercelDeploymentResult {
+        let project = try await resolveProject(configuration: configuration)
+        let blobStore = try await ensureBlobStore(
+            configuration: configuration,
+            project: project
+        )
         try await upsertEnvironment(configuration: configuration)
         let files = try Self.deploymentFiles(
             from: templateDirectory,
@@ -97,8 +103,104 @@ struct BookingVercelDeploymentClient: Sendable {
         )
         return try await createDeployment(
             configuration: configuration,
-            files: files
+            files: files,
+            blobStoreID: blobStore.id
         )
+    }
+
+    func resolveProject(
+        configuration: BookingVercelDeploymentConfiguration
+    ) async throws -> Project {
+        let request = try authorizedRequest(
+            path: "/v9/projects/\(Self.pathComponent(configuration.project.rawValue))",
+            method: "GET",
+            token: configuration.token,
+            team: configuration.team
+        )
+        return try await send(request, expecting: Project.self)
+    }
+
+    func ensureBlobStore(
+        configuration: BookingVercelDeploymentConfiguration,
+        project: Project
+    ) async throws -> BlobStore {
+        let stores = try await listBlobStores(configuration: configuration)
+        let expectedStoreName = Self.blobStoreName(for: configuration.project.rawValue)
+        if let existingStore = stores.first(where: { store in
+            (store.type == nil || store.type == "blob")
+                && (store.projectsMetadata?.contains { $0.projectID == project.id } == true)
+        }) {
+            return existingStore
+        }
+        if let unconnectedStore = stores.first(where: { store in
+            (store.type == nil || store.type == "blob") && store.name == expectedStoreName
+        }) {
+            try await connectBlobStore(
+                unconnectedStore,
+                project: project,
+                configuration: configuration
+            )
+            return unconnectedStore
+        }
+
+        let createdStore = try await createBlobStore(configuration: configuration)
+        try await connectBlobStore(
+            createdStore,
+            project: project,
+            configuration: configuration
+        )
+        return createdStore
+    }
+
+    func listBlobStores(
+        configuration: BookingVercelDeploymentConfiguration
+    ) async throws -> [BlobStore] {
+        let request = try authorizedRequest(
+            path: "/v1/storage/stores",
+            method: "GET",
+            token: configuration.token,
+            team: configuration.team
+        )
+        let response = try await send(request, expecting: ListBlobStoresResponse.self)
+        return response.stores
+    }
+
+    func createBlobStore(
+        configuration: BookingVercelDeploymentConfiguration
+    ) async throws -> BlobStore {
+        var request = try authorizedRequest(
+            path: "/v1/storage/stores/blob",
+            method: "POST",
+            token: configuration.token,
+            team: configuration.team
+        )
+        request.httpBody = try Self.encoder.encode(
+            CreateBlobStoreBody(
+                name: Self.blobStoreName(for: configuration.project.rawValue)
+            )
+        )
+        let response = try await send(request, expecting: CreateBlobStoreResponse.self)
+        return response.store
+    }
+
+    func connectBlobStore(
+        _ store: BlobStore,
+        project: Project,
+        configuration: BookingVercelDeploymentConfiguration
+    ) async throws {
+        var request = try authorizedRequest(
+            path: "/v1/storage/stores/\(Self.pathComponent(store.id))/connections",
+            method: "POST",
+            token: configuration.token,
+            team: configuration.team
+        )
+        request.httpBody = try Self.encoder.encode(
+            ConnectBlobStoreBody(
+                envVarEnvironments: ["production"],
+                projectId: project.id
+            )
+        )
+        try await sendIgnoringBody(request)
     }
 
     func upsertEnvironment(configuration: BookingVercelDeploymentConfiguration) async throws {
@@ -132,7 +234,8 @@ struct BookingVercelDeploymentClient: Sendable {
 
     func createDeployment(
         configuration: BookingVercelDeploymentConfiguration,
-        files: [DeploymentFile]
+        files: [DeploymentFile],
+        blobStoreID: String
     ) async throws -> BookingVercelDeploymentResult {
         var request = try authorizedRequest(
             path: "/v13/deployments",
@@ -154,7 +257,8 @@ struct BookingVercelDeploymentClient: Sendable {
 
         return BookingVercelDeploymentResult(
             deploymentID: response.id,
-            inboxURL: inboxURL
+            inboxURL: inboxURL,
+            blobStoreID: blobStoreID
         )
     }
 
@@ -282,6 +386,22 @@ struct BookingVercelDeploymentClient: Sendable {
         return URL(string: "https://\(value)")
     }
 
+    private static func blobStoreName(for projectName: String) -> String {
+        let normalized = projectName
+            .lowercased()
+            .map { character -> Character in
+                if character.isLetter || character.isNumber {
+                    return character
+                }
+                return "-"
+            }
+        let collapsed = String(normalized)
+            .split(separator: "-", omittingEmptySubsequences: true)
+            .joined(separator: "-")
+        let suffix = collapsed.isEmpty ? "inbox" : collapsed
+        return "calendar-busy-sync-\(suffix)"
+    }
+
     static func generateAdminToken() throws -> String {
         var bytes = [UInt8](repeating: 0, count: 32)
         let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
@@ -306,6 +426,26 @@ extension BookingVercelDeploymentClient {
         var data: String
         var encoding = "base64"
     }
+
+    struct Project: Codable, Equatable, Sendable {
+        var id: String
+        var name: String
+    }
+
+    struct BlobStore: Codable, Equatable, Sendable {
+        var id: String
+        var name: String?
+        var type: String?
+        var projectsMetadata: [ProjectMetadata]?
+    }
+
+    struct ProjectMetadata: Codable, Equatable, Sendable {
+        var projectID: String
+
+        enum CodingKeys: String, CodingKey {
+            case projectID = "projectId"
+        }
+    }
 }
 
 private extension BookingVercelDeploymentClient {
@@ -326,6 +466,26 @@ private extension BookingVercelDeploymentClient {
     struct CreateDeploymentResponse: Decodable {
         var id: String
         var url: String
+    }
+
+    struct ListBlobStoresResponse: Decodable {
+        var stores: [BlobStore]
+    }
+
+    struct CreateBlobStoreBody: Encodable {
+        var name: String
+        var region = "iad1"
+        var access = "public"
+    }
+
+    struct CreateBlobStoreResponse: Decodable {
+        var store: BlobStore
+    }
+
+    struct ConnectBlobStoreBody: Encodable {
+        var envVarEnvironments: [String]
+        var projectId: String
+        var type = "integration"
     }
 
     struct ErrorResponse: Decodable {
@@ -352,6 +512,13 @@ enum BookingVercelDeploymentError: LocalizedError, Equatable {
         case .invalidDeploymentURL:
             return "Vercel did not return a deployment URL."
         }
+    }
+
+    var isAuthenticationFailure: Bool {
+        if case let .api(statusCode, _) = self {
+            return statusCode == 401
+        }
+        return false
     }
 }
 
