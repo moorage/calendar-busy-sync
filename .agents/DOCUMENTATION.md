@@ -54,6 +54,7 @@
   - bundle identifier: `com.matthewpaulmoore.Calendar-Busy-Sync`
   - Apple bundle ID resource ID: `7NFDF46V3H`
 - commands run:
+  - `./scripts/upload-appstore --platform macos --package "artifacts/exports/CalendarBusySync-macos-20260707-001032/Calendar Busy Sync.pkg" --skip-build --wait` (2026-07-07 after DSA compliance became active, App Store Connect rejected duplicate bundle version `6`; the shared project build number is now `7` for the next archive/upload)
   - `./scripts/upload-appstore --platform macos --wait` (2026-07-07 archived and exported `artifacts/exports/CalendarBusySync-macos-20260707-001032/Calendar Busy Sync.pkg`; initial upload could not infer the Apple ID from the macOS bundle id, so `scripts/upload-appstore` now passes App Store Connect app id `6762634278`; retry reached App Store Connect and is blocked by `FORBIDDEN.REQUIRED_AGREEMENTS_MISSING_OR_EXPIRED`)
   - `xcodebuild -project 'Calendar Busy Sync/Calendar Busy Sync.xcodeproj' -scheme 'Calendar Busy Sync' -configuration Debug -derivedDataPath artifacts/DerivedData-keychain-cache -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY='' -only-testing:'Calendar Busy SyncTests/Calendar_Busy_SyncTests/testCredentialVaultSaveUpdatesCachedPayload' -only-testing:'Calendar Busy SyncTests/Calendar_Busy_SyncTests/testCredentialVaultSkipsIdenticalCachedPayloadWrite' test` (2026-06-19 focused credential-vault cache/write tests passed)
   - `git diff --check` (2026-06-19 credential-vault cache whitespace validation)

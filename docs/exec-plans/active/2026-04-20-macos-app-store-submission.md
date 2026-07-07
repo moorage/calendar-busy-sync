@@ -13,6 +13,8 @@ Package the current macOS app for App Store submission, upload the newest build,
 - [x] 2026-04-21T00:55Z attach the valid `1.0 (2)` macOS build to the App Store Connect submission record after fixing the stale-upload and false-error harness bugs
 - [x] 2026-04-20T22:45Z populate the macOS submission assets and metadata that the current API and credentials can edit, then record remaining manual-only steps
 - [x] 2026-07-07T07:12Z archive/export the current macOS app successfully, then verify the upload now reaches App Store Connect's agreement gate when the app id is passed explicitly
+- [x] 2026-07-07T16:54Z verify the DSA compliance requirement is active and capture the next upload blocker: App Store Connect rejects duplicate build number `6`
+- [x] 2026-07-07T17:00Z bump the shared project build number to `7` for the next macOS App Store upload attempt
 
 ## Surprises & Discoveries
 
@@ -23,6 +25,7 @@ Package the current macOS app for App Store submission, upload the newest build,
 - 2026-04-20: `scripts/upload-appstore` originally chose the alphabetically last exported package, which accidentally uploaded a stale `auto-macos-test` build instead of the newest App Store export; the selector now uses modification time
 - 2026-04-20: App Store Connect returns `204 No Content` for a successful build-attachment PATCH, so the submission helper must treat both `200` and `204` as success
 - 2026-07-07: `altool --upload-package` can fail to infer the app record from `com.matthewpaulmoore.Calendar-Busy-Sync` on macOS; passing App Store Connect app id `6762634278` gets past that lookup and exposes the current account blocker.
+- 2026-07-07: after DSA compliance became active, App Store Connect accepted the upload request far enough to reject the package as duplicate bundle version `6`; the next archive needs `CURRENT_PROJECT_VERSION = 7`.
 
 ## Decision Log
 
@@ -31,6 +34,7 @@ Package the current macOS app for App Store submission, upload the newest build,
 - 2026-04-20: let the App Store submission prep helper continue when no matching macOS build exists so metadata, category, age rating, and screenshots can still be applied before the final upload blocker is removed
 - 2026-04-20: prefer newest-by-modification-time export discovery over lexicographic path ordering in `scripts/upload-appstore`, because repo-local helper exports like `auto-macos-test` can sort after timestamped App Store exports while still being stale
 - 2026-07-07: have `scripts/upload-appstore` pass the known App Store Connect app id to `altool`, while still allowing `--app-id` or `APPSTORE_CONNECT_APP_ID` overrides.
+- 2026-07-07: advance the shared Xcode build number from `6` to `7` before rebuilding, matching App Store Connect's requirement that the next `CFBundleVersion` be higher than the previous macOS upload.
 
 ## Outcomes & Retrospective
 
@@ -52,7 +56,7 @@ Completed:
 Still blocked:
 
 - App Store review contact details are still unset because the required review-contact phone number is not present locally; first name, last name, and email are now populated in `.env`
-- A fresh 1.3 macOS package archived and exported successfully on 2026-07-07, but upload is blocked until the Apple account holder accepts the required App Store Connect business agreement: `FORBIDDEN.REQUIRED_AGREEMENTS_MISSING_OR_EXPIRED`.
+- A fresh 1.3 macOS package archived and exported successfully on 2026-07-07; the first upload was blocked by missing agreements/compliance, and the next upload attempt was blocked by duplicate bundle version `6`. The workspace now targets build `7` for the next archive.
 
 ## Context and Orientation
 
