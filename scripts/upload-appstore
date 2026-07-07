@@ -11,6 +11,7 @@ PLATFORM=""
 PACKAGE_PATH=""
 BUILD_FIRST=1
 WAIT_FLAG=0
+APP_ID="${APPSTORE_CONNECT_APP_ID:-6762634278}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -22,6 +23,10 @@ while [[ $# -gt 0 ]]; do
       PACKAGE_PATH="${2:-}"
       shift 2
       ;;
+    --app-id)
+      APP_ID="${2:-}"
+      shift 2
+      ;;
     --skip-build)
       BUILD_FIRST=0
       shift
@@ -31,14 +36,19 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     *)
-      echo "usage: ./scripts/upload-appstore --platform macos|ios [--package path] [--skip-build] [--wait]" >&2
+      echo "usage: ./scripts/upload-appstore --platform macos|ios [--package path] [--app-id id] [--skip-build] [--wait]" >&2
       exit 1
       ;;
   esac
 done
 
 if [[ -z "${PLATFORM}" ]]; then
-  echo "usage: ./scripts/upload-appstore --platform macos|ios [--package path] [--skip-build] [--wait]" >&2
+  echo "usage: ./scripts/upload-appstore --platform macos|ios [--package path] [--app-id id] [--skip-build] [--wait]" >&2
+  exit 1
+fi
+
+if [[ -z "${APP_ID}" ]]; then
+  echo "missing App Store Connect app id; pass --app-id or set APPSTORE_CONNECT_APP_ID" >&2
   exit 1
 fi
 
@@ -109,6 +119,7 @@ fi
 
 ALTOOL_ARGS=(
   --upload-package "${PACKAGE_PATH}"
+  --apple-id "${APP_ID}"
   --api-key "${API_KEY_ID}"
   --api-issuer "${API_ISSUER_ID}"
   --p8-file-path "${API_KEY_PATH}"
