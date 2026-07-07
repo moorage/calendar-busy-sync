@@ -43,3 +43,14 @@ for link in "${GIT_CORE_DEST}"/git(N) "${GIT_CORE_DEST}"/git-*(N); do
     ln -s "../booking-git" "${link}"
   fi
 done
+
+SIGNING_IDENTITY="${EXPANDED_CODE_SIGN_IDENTITY:-${CODE_SIGN_IDENTITY:-}}"
+if [[ "${CODE_SIGNING_ALLOWED:-NO}" == "YES" && -n "${SIGNING_IDENTITY}" && "${SIGNING_IDENTITY}" != "-" ]]; then
+  for executable in "${HELPER_DIR}/booking-git" "${HELPER_DIR}/booking-ssh" "${HELPER_DIR}/booking-ssh-keygen"; do
+    codesign --force --sign "${SIGNING_IDENTITY}" "${executable}"
+  done
+
+  while IFS= read -r -d '' executable; do
+    codesign --force --sign "${SIGNING_IDENTITY}" "${executable}"
+  done < <(find "${GIT_CORE_DEST}" -type f -perm +111 -print0)
+fi
