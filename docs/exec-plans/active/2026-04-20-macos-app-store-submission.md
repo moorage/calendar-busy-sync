@@ -19,6 +19,10 @@ Package the current macOS app for App Store submission, upload the newest build,
 - [x] 2026-07-07T18:05Z bump marketing version to `1.4` and re-sign/thin bundled Git/SSH helpers for App Store validation
 - [x] 2026-07-07T18:03Z capture App Store server validation failure for build `1.4 (7)`: copied Git's embedded Mach-O plist lacked `CFBundleIdentifier`
 - [x] 2026-07-07T18:08Z patch copied helpers' embedded Mach-O plist sections to app-owned `CFBundleIdentifier` values before signing
+- [x] 2026-07-07T17:10Z upload and process macOS build `1.4 (7)` successfully; App Store Connect marked delivery `c278abd8-20fb-46df-babf-9fe0bd455571` as `VALID`
+- [x] 2026-07-07T17:14Z create macOS App Store version `1.4`, attach build `1.4 (7)`, and refresh the automated macOS screenshot set
+- [x] 2026-07-07T17:16Z remove availability from the 27 EU App Store territories at the user's direction, leaving 148 non-EU territories available
+- [x] 2026-07-07T17:16Z submit macOS version `1.4` for App Review; review submission `c1e1c8c5-e591-4b63-ba64-fd3ec419a3e0` is `WAITING_FOR_REVIEW`
 
 ## Surprises & Discoveries
 
@@ -33,6 +37,7 @@ Package the current macOS app for App Store submission, upload the newest build,
 - 2026-07-07: App Store Connect now rejects additional copied-helper details that local export did not catch: copied Apple SSH helpers keep reserved `com.apple.*` signing identifiers unless re-signed with explicit app-owned identifiers, all embedded executables need sandbox entitlements, and `arm64e` helper slices are invalid unless paired with `arm64`.
 - 2026-07-07: version `1.3` is closed for new macOS build uploads, so the next upload must use `CFBundleShortVersionString` `1.4`.
 - 2026-07-07: CodeDirectory identifiers are not enough for copied command-line tools. App Store Connect also reads the Mach-O `__TEXT,__info_plist` section, so copied helpers need that embedded plist patched before signing.
+- 2026-07-07: App Store Connect's `appAvailabilities` resource is not patchable. Existing EU territory removals have to use per-territory `PATCH /v1/territoryAvailabilities/{id}` updates; the account still reports `availableInNewTerritories = true`, which may require App Store Connect UI if future storefront policy needs to be disabled globally.
 
 ## Decision Log
 
@@ -44,6 +49,8 @@ Package the current macOS app for App Store submission, upload the newest build,
 - 2026-07-07: advance the shared Xcode build number from `6` to `7` before rebuilding, matching App Store Connect's requirement that the next `CFBundleVersion` be higher than the previous macOS upload.
 - 2026-07-07: advance the shared marketing version from `1.3` to `1.4`, prefer the Command Line Tools universal Git binary when available, strip `arm64e` slices from bundled helpers, and sign helpers with app-owned identifiers plus sandbox/network entitlements.
 - 2026-07-07: rewrite copied helpers' embedded Mach-O plist sections in-place with app-owned `CFBundleIdentifier` values before re-signing, because the original Apple tool plists either lack that key or use reserved `com.apple.*` identifiers.
+- 2026-07-07: create the new macOS App Store version through the App Store Connect API instead of Safari, because the repo prep helper can attach builds and screenshots once the editable `1.4` version exists.
+- 2026-07-07: remove current EU storefront availability before App Review submission, matching the user's direction not to distribute in the EU while leaving non-EU storefront availability intact.
 
 ## Outcomes & Retrospective
 
@@ -53,19 +60,21 @@ Completed:
 - the app has dedicated App Store screenshot launch flags and renders `overview`, `mirrors`, and `logs` shots directly to 2880x1800 PNGs
 - the repo now has `scripts/prepare-appstore-macos-submission.py`, which uploaded the macOS screenshot set and populated App Store Connect metadata for app `6762634278`
 - the repo now has a fully working macOS App Store archive/upload path again, including local installer-certificate creation/import, correct newest-export selection in `scripts/upload-appstore`, and successful upload of macOS build `1.0 (2)`
+- macOS build `1.4 (7)` uploaded successfully from the current `main` line, processed as `VALID`, and is attached to App Store Connect macOS version `1.4`
+- App Store availability now has the 27 EU territories marked unavailable and processing toward not-available; 148 non-EU territories remain available
+- macOS version `1.4` is submitted for App Review and review submission `c1e1c8c5-e591-4b63-ba64-fd3ec419a3e0` is in `WAITING_FOR_REVIEW`
 - App Store Connect now shows:
   - primary category `PRODUCTIVITY`
   - macOS age rating `4+`
   - support URL `https://souschefstudio.com/`
   - marketing URL `https://souschefstudio.com/`
   - privacy policy URL `https://souschefstudio.com/privacy`
-  - one `APP_DESKTOP` screenshot set with 3 uploaded screenshots
-  - attached macOS build `1.0 (2)` with build id `339b417e-16e4-485d-82ca-eca5874f4c38`
+  - one `APP_DESKTOP` screenshot set with 4 uploaded screenshots
+  - attached macOS build `1.4 (7)` with build id `c278abd8-20fb-46df-babf-9fe0bd455571`
 
-Still blocked:
+Follow-up:
 
-- App Store review contact details are still unset because the required review-contact phone number is not present locally; first name, last name, and email are now populated in `.env`
-- A fresh 1.3 macOS package archived and exported successfully on 2026-07-07; the first upload was blocked by missing agreements/compliance, the next upload attempt was blocked by duplicate bundle version `6`, and build `1.3 (7)` reached server validation before failing because version `1.3` is closed and copied helper executables needed App Store-compatible signing/architecture treatment. The workspace now targets version `1.4 (7)` for the next archive.
+- App Store Connect still reports `availableInNewTerritories = true`. Existing EU countries are removed, but if Apple adds future EU storefronts, disable automatic new-territory availability in the web UI or through a confirmed newer API path.
 
 ## Context and Orientation
 
