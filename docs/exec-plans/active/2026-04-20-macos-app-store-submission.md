@@ -15,6 +15,8 @@ Package the current macOS app for App Store submission, upload the newest build,
 - [x] 2026-07-07T07:12Z archive/export the current macOS app successfully, then verify the upload now reaches App Store Connect's agreement gate when the app id is passed explicitly
 - [x] 2026-07-07T16:54Z verify the DSA compliance requirement is active and capture the next upload blocker: App Store Connect rejects duplicate build number `6`
 - [x] 2026-07-07T17:00Z bump the shared project build number to `7` for the next macOS App Store upload attempt
+- [x] 2026-07-07T17:57Z capture App Store server validation failures for build `1.3 (7)`: closed train, helper sandbox/signing identifiers, and `arm64e` helper slices
+- [x] 2026-07-07T18:05Z bump marketing version to `1.4` and re-sign/thin bundled Git/SSH helpers for App Store validation
 
 ## Surprises & Discoveries
 
@@ -26,6 +28,8 @@ Package the current macOS app for App Store submission, upload the newest build,
 - 2026-04-20: App Store Connect returns `204 No Content` for a successful build-attachment PATCH, so the submission helper must treat both `200` and `204` as success
 - 2026-07-07: `altool --upload-package` can fail to infer the app record from `com.matthewpaulmoore.Calendar-Busy-Sync` on macOS; passing App Store Connect app id `6762634278` gets past that lookup and exposes the current account blocker.
 - 2026-07-07: after DSA compliance became active, App Store Connect accepted the upload request far enough to reject the package as duplicate bundle version `6`; the next archive needs `CURRENT_PROJECT_VERSION = 7`.
+- 2026-07-07: App Store Connect now rejects additional copied-helper details that local export did not catch: copied Apple SSH helpers keep reserved `com.apple.*` signing identifiers unless re-signed with explicit app-owned identifiers, all embedded executables need sandbox entitlements, and `arm64e` helper slices are invalid unless paired with `arm64`.
+- 2026-07-07: version `1.3` is closed for new macOS build uploads, so the next upload must use `CFBundleShortVersionString` `1.4`.
 
 ## Decision Log
 
@@ -35,6 +39,7 @@ Package the current macOS app for App Store submission, upload the newest build,
 - 2026-04-20: prefer newest-by-modification-time export discovery over lexicographic path ordering in `scripts/upload-appstore`, because repo-local helper exports like `auto-macos-test` can sort after timestamped App Store exports while still being stale
 - 2026-07-07: have `scripts/upload-appstore` pass the known App Store Connect app id to `altool`, while still allowing `--app-id` or `APPSTORE_CONNECT_APP_ID` overrides.
 - 2026-07-07: advance the shared Xcode build number from `6` to `7` before rebuilding, matching App Store Connect's requirement that the next `CFBundleVersion` be higher than the previous macOS upload.
+- 2026-07-07: advance the shared marketing version from `1.3` to `1.4`, prefer the Command Line Tools universal Git binary when available, strip `arm64e` slices from bundled helpers, and sign helpers with app-owned identifiers plus sandbox/network entitlements.
 
 ## Outcomes & Retrospective
 
@@ -56,7 +61,7 @@ Completed:
 Still blocked:
 
 - App Store review contact details are still unset because the required review-contact phone number is not present locally; first name, last name, and email are now populated in `.env`
-- A fresh 1.3 macOS package archived and exported successfully on 2026-07-07; the first upload was blocked by missing agreements/compliance, and the next upload attempt was blocked by duplicate bundle version `6`. The workspace now targets build `7` for the next archive.
+- A fresh 1.3 macOS package archived and exported successfully on 2026-07-07; the first upload was blocked by missing agreements/compliance, the next upload attempt was blocked by duplicate bundle version `6`, and build `1.3 (7)` reached server validation before failing because version `1.3` is closed and copied helper executables needed App Store-compatible signing/architecture treatment. The workspace now targets version `1.4 (7)` for the next archive.
 
 ## Context and Orientation
 

@@ -12,6 +12,9 @@ fi
 
 HELPER_DIR="${TARGET_BUILD_DIR}/${EXECUTABLE_FOLDER_PATH}"
 GIT_SOURCE="${DEVELOPER_DIR}/usr/bin/git"
+if [[ -x "/Library/Developer/CommandLineTools/usr/bin/git" ]]; then
+  GIT_SOURCE="/Library/Developer/CommandLineTools/usr/bin/git"
+fi
 SSH_SOURCE="/usr/bin/ssh"
 SSH_KEYGEN_SOURCE="/usr/bin/ssh-keygen"
 GIT_CORE_DEST="${HELPER_DIR}/booking-git-core"
@@ -28,13 +31,37 @@ install -m 0755 "${GIT_SOURCE}" "${HELPER_DIR}/booking-git"
 install -m 0755 "${SSH_SOURCE}" "${HELPER_DIR}/booking-ssh"
 install -m 0755 "${SSH_KEYGEN_SOURCE}" "${HELPER_DIR}/booking-ssh-keygen"
 
+for executable in "${HELPER_DIR}/booking-git" "${HELPER_DIR}/booking-ssh" "${HELPER_DIR}/booking-ssh-keygen"; do
+  if lipo -archs "${executable}" 2>/dev/null | tr ' ' '\n' | grep -qx "arm64e"; then
+    lipo -remove arm64e "${executable}" -output "${executable}.thin"
+    mv "${executable}.thin" "${executable}"
+    chmod 0755 "${executable}"
+  fi
+done
+
 rm -rf "${GIT_CORE_DEST}"
 mkdir -p "${GIT_CORE_DEST}"
 ln -s "../booking-git" "${GIT_CORE_DEST}/git"
 
 SIGNING_IDENTITY="${EXPANDED_CODE_SIGN_IDENTITY:-${CODE_SIGN_IDENTITY:-}}"
 if [[ "${CODE_SIGNING_ALLOWED:-NO}" == "YES" && -n "${SIGNING_IDENTITY}" && "${SIGNING_IDENTITY}" != "-" ]]; then
+  HELPER_ENTITLEMENTS="${TARGET_TEMP_DIR:-/tmp}/booking-helper-entitlements.plist"
+  cat >"${HELPER_ENTITLEMENTS}" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.app-sandbox</key>
+  <true/>
+  <key>com.apple.security.network.client</key>
+  <true/>
+</dict>
+</plist>
+PLIST
+
+  HELPER_BUNDLE_PREFIX="${PRODUCT_BUNDLE_IDENTIFIER:-com.matthewpaulmoore.Calendar-Busy-Sync}"
   for executable in "${HELPER_DIR}/booking-git" "${HELPER_DIR}/booking-ssh" "${HELPER_DIR}/booking-ssh-keygen"; do
-    codesign --force --sign "${SIGNING_IDENTITY}" "${executable}"
+    helper_name="$(basename "${executable}")"
+    codesign --force --sign "${SIGNING_IDENTITY}" --identifier "${HELPER_BUNDLE_PREFIX}.${helper_name}" --entitlements "${HELPER_ENTITLEMENTS}" "${executable}"
   done
 fi
