@@ -23,6 +23,8 @@ Package the current macOS app for App Store submission, upload the newest build,
 - [x] 2026-07-07T17:14Z create macOS App Store version `1.4`, attach build `1.4 (7)`, and refresh the automated macOS screenshot set
 - [x] 2026-07-07T17:16Z remove availability from the 27 EU App Store territories at the user's direction, leaving 148 non-EU territories available
 - [x] 2026-07-07T17:16Z submit macOS version `1.4` for App Review; review submission `c1e1c8c5-e591-4b63-ba64-fd3ec419a3e0` is `WAITING_FOR_REVIEW`
+- [x] 2026-07-07T19:07Z capture automated App Review blocker for build `1.4 (7)`: the binary uses or references non-public or deprecated APIs
+- [x] 2026-07-07T19:15Z remove copied Git/SSH helper binaries from archive/install builds and bump the replacement App Store build number to `8`
 
 ## Surprises & Discoveries
 
@@ -38,6 +40,7 @@ Package the current macOS app for App Store submission, upload the newest build,
 - 2026-07-07: version `1.3` is closed for new macOS build uploads, so the next upload must use `CFBundleShortVersionString` `1.4`.
 - 2026-07-07: CodeDirectory identifiers are not enough for copied command-line tools. App Store Connect also reads the Mach-O `__TEXT,__info_plist` section, so copied helpers need that embedded plist patched before signing.
 - 2026-07-07: App Store Connect's `appAvailabilities` resource is not patchable. Existing EU territory removals have to use per-territory `PATCH /v1/territoryAvailabilities/{id}` updates; the account still reports `availableInNewTerritories = true`, which may require App Store Connect UI if future storefront policy needs to be disabled globally.
+- 2026-07-07: App Review's non-public/deprecated API blocker appeared only after the build started shipping copied Apple Git/SSH command-line tools. The submitted app binary did not add comparable linked libraries, while `booking-ssh` and `booking-ssh-keygen` linked system libraries such as `libEndpointSecuritySystem.dylib` and carried `csops` strings. App Store archives should not bundle those copied tools.
 
 ## Decision Log
 
@@ -51,6 +54,7 @@ Package the current macOS app for App Store submission, upload the newest build,
 - 2026-07-07: rewrite copied helpers' embedded Mach-O plist sections in-place with app-owned `CFBundleIdentifier` values before re-signing, because the original Apple tool plists either lack that key or use reserved `com.apple.*` identifiers.
 - 2026-07-07: create the new macOS App Store version through the App Store Connect API instead of Safari, because the repo prep helper can attach builds and screenshots once the editable `1.4` version exists.
 - 2026-07-07: remove current EU storefront availability before App Review submission, matching the user's direction not to distribute in the EU while leaving non-EU storefront availability intact.
+- 2026-07-07: omit copied Booking Git/SSH helpers from archive/install builds by default and rely on the existing missing-helper error path for App Store builds until the publishing path has a review-safe in-process implementation.
 
 ## Outcomes & Retrospective
 
@@ -63,6 +67,7 @@ Completed:
 - macOS build `1.4 (7)` uploaded successfully from the current `main` line, processed as `VALID`, and is attached to App Store Connect macOS version `1.4`
 - App Store availability now has the 27 EU territories marked unavailable and processing toward not-available; 148 non-EU territories remain available
 - macOS version `1.4` is submitted for App Review and review submission `c1e1c8c5-e591-4b63-ba64-fd3ec419a3e0` is in `WAITING_FOR_REVIEW`
+- after App Review flagged build `1.4 (7)` for non-public/deprecated API references, archive/install builds now remove `booking-git`, `booking-ssh`, `booking-ssh-keygen`, and `booking-git-core` before packaging; the replacement upload uses build number `8`
 - App Store Connect now shows:
   - primary category `PRODUCTIVITY`
   - macOS age rating `4+`

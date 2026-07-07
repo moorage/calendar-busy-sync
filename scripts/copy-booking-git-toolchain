@@ -11,13 +11,25 @@ fi
 : "${DEVELOPER_DIR:?}"
 
 HELPER_DIR="${TARGET_BUILD_DIR}/${EXECUTABLE_FOLDER_PATH}"
+GIT_CORE_DEST="${HELPER_DIR}/booking-git-core"
+
+remove_bundled_helpers() {
+  rm -f "${HELPER_DIR}/booking-git" "${HELPER_DIR}/booking-ssh" "${HELPER_DIR}/booking-ssh-keygen"
+  rm -rf "${GIT_CORE_DEST}"
+}
+
+if [[ "${ACTION:-}" == "install" && "${BOOKING_INCLUDE_GIT_HELPERS_IN_ARCHIVE:-NO}" != "YES" ]]; then
+  remove_bundled_helpers
+  echo "skipping bundled Booking Git helpers for archive/install build"
+  exit 0
+fi
+
 GIT_SOURCE="${DEVELOPER_DIR}/usr/bin/git"
 if [[ -x "/Library/Developer/CommandLineTools/usr/bin/git" ]]; then
   GIT_SOURCE="/Library/Developer/CommandLineTools/usr/bin/git"
 fi
 SSH_SOURCE="/usr/bin/ssh"
 SSH_KEYGEN_SOURCE="/usr/bin/ssh-keygen"
-GIT_CORE_DEST="${HELPER_DIR}/booking-git-core"
 HELPER_BUNDLE_PREFIX="${PRODUCT_BUNDLE_IDENTIFIER:-com.matthewpaulmoore.Calendar-Busy-Sync}"
 
 for executable in "${GIT_SOURCE}" "${SSH_SOURCE}" "${SSH_KEYGEN_SOURCE}"; do
