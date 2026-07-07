@@ -262,7 +262,6 @@
 			);
 			inputPaths = (
 				"$(DEVELOPER_DIR)/usr/bin/git",
-				"$(DEVELOPER_DIR)/usr/libexec/git-core",
 				/usr/bin/ssh,
 				/usr/bin/ssh-keygen,
 			);
