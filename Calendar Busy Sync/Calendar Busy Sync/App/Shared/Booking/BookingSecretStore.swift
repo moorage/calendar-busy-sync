@@ -45,11 +45,6 @@ protocol BookingSecretStoring: Sendable {
     func loadGitHubDeployKeyPrivateKey() throws -> String?
     func saveGitHubDeployKeyPrivateKey(_ privateKey: String) throws
     func deleteLegacyGitHubToken() throws
-    func invalidateCachedSecrets()
-}
-
-extension BookingSecretStoring {
-    func invalidateCachedSecrets() {}
 }
 
 enum BookingSecretStoreError: LocalizedError, Equatable {
@@ -133,10 +128,6 @@ struct BookingKeychainSecretStore: BookingSecretStoring {
 
     func deleteLegacyGitHubToken() throws {
         try deleteData(account: Account.githubToken)
-    }
-
-    func invalidateCachedSecrets() {
-        vault.invalidateCachedPayload()
     }
 
     private func saveToken(

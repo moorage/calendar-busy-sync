@@ -175,20 +175,40 @@ enum BookingGitCommandError: LocalizedError, Equatable {
 }
 
 #if os(macOS)
-struct BookingGitToolchain: Equatable, Sendable {
+nonisolated struct BookingGitToolchain: Equatable, Sendable {
     var gitURL: URL
     var sshURL: URL
     var sshKeygenURL: URL
+    var gitExecPathURL: URL
+
+    init(
+        gitURL: URL,
+        sshURL: URL,
+        sshKeygenURL: URL,
+        gitExecPathURL: URL? = nil
+    ) {
+        self.gitURL = gitURL
+        self.sshURL = sshURL
+        self.sshKeygenURL = sshKeygenURL
+        self.gitExecPathURL = gitExecPathURL ?? gitURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("booking-git-core", isDirectory: true)
+    }
 
     static func bundled(
         bundle: Bundle = .main,
         fileManager: FileManager = .default
     ) throws -> BookingGitToolchain {
-        BookingGitToolchain(
-            gitURL: try bundledExecutable(named: "booking-git", bundle: bundle, fileManager: fileManager),
+        let gitURL = try bundledExecutable(named: "booking-git", bundle: bundle, fileManager: fileManager)
+        let toolchain = BookingGitToolchain(
+            gitURL: gitURL,
             sshURL: try bundledExecutable(named: "booking-ssh", bundle: bundle, fileManager: fileManager),
             sshKeygenURL: try bundledExecutable(named: "booking-ssh-keygen", bundle: bundle, fileManager: fileManager)
         )
+        guard bundledGitExecPathExists(at: toolchain.gitExecPathURL, fileManager: fileManager) else {
+            throw missingBundledToolchainError()
+        }
+        return toolchain
     }
 
     static var injectedRunnerDefaults: BookingGitToolchain {
@@ -207,11 +227,28 @@ struct BookingGitToolchain: Equatable, Sendable {
         guard let url = bundle.url(forAuxiliaryExecutable: name),
               fileManager.isExecutableFile(atPath: url.path)
         else {
-            throw BookingConfigurationError.invalidField(
-                "This app build is missing its bundled Git/SSH publishing helpers. Update the app, then try again."
-            )
+            throw missingBundledToolchainError()
         }
         return url
+    }
+
+    private static func bundledGitExecPathExists(
+        at url: URL,
+        fileManager: FileManager
+    ) -> Bool {
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory),
+              isDirectory.boolValue
+        else {
+            return false
+        }
+        return fileManager.fileExists(atPath: url.appendingPathComponent("git").path)
+    }
+
+    private static func missingBundledToolchainError() -> BookingConfigurationError {
+        BookingConfigurationError.invalidField(
+            "This app build is missing its bundled Git/SSH publishing helpers. Update the app, then try again."
+        )
     }
 }
 
@@ -350,6 +387,7 @@ nonisolated enum BookingGitHubPublisher {
         privateKeyPEM: String,
         fileManager: FileManager = .default,
         commandRunner: (any BookingGitCommandRunning)? = nil,
+        bundledToolchainBundle: Bundle = .main,
         workingDirectoryRoot: URL? = nil
     ) async throws -> PublishSummary {
         #if os(macOS)
@@ -361,6 +399,7 @@ nonisolated enum BookingGitHubPublisher {
             fileManager: fileManager,
             commandRunner: commandRunner,
             toolchain: nil,
+            bundledToolchainBundle: bundledToolchainBundle,
             workingDirectoryRoot: workingDirectoryRoot
         )
         #else
@@ -387,6 +426,7 @@ nonisolated enum BookingGitHubPublisher {
             fileManager: fileManager,
             commandRunner: commandRunner,
             toolchain: toolchain,
+            bundledToolchainBundle: .main,
             workingDirectoryRoot: workingDirectoryRoot
         )
     }
@@ -399,6 +439,7 @@ nonisolated enum BookingGitHubPublisher {
         fileManager: FileManager,
         commandRunner: (any BookingGitCommandRunning)?,
         toolchain: BookingGitToolchain?,
+        bundledToolchainBundle: Bundle,
         workingDirectoryRoot: URL?
     ) async throws -> PublishSummary {
         let files = try localFiles(in: directory, fileManager: fileManager)
@@ -416,10 +457,14 @@ nonisolated enum BookingGitHubPublisher {
 
         let privateKeyURL = tempRoot.appendingPathComponent("deploy-key")
         try writePrivateKey(privateKeyPEM, to: privateKeyURL, fileManager: fileManager)
-        let resolvedToolchain = try toolchain ?? (commandRunner == nil ? BookingGitToolchain.bundled(fileManager: fileManager) : .injectedRunnerDefaults)
-        let environment = gitSSHEngineEnvironment(
+        let resolvedToolchain = try toolchain ?? (
+            commandRunner == nil
+                ? BookingGitToolchain.bundled(bundle: bundledToolchainBundle, fileManager: fileManager)
+                : .injectedRunnerDefaults
+        )
+        let environment = gitEngineEnvironment(
             privateKeyURL: privateKeyURL,
-            sshURL: resolvedToolchain.sshURL
+            toolchain: resolvedToolchain
         )
         let runner = commandRunner ?? ProcessBookingGitCommandRunner()
         let worktreeURL = tempRoot.appendingPathComponent(repository.name, isDirectory: true)
@@ -572,9 +617,9 @@ nonisolated enum BookingGitHubPublisher {
             BookingGitCommand(
                 executableURL: resolvedToolchain.gitURL,
                 arguments: ["ls-remote", repository.sshRemoteURLString, "HEAD"],
-                environment: gitSSHEngineEnvironment(
+                environment: gitEngineEnvironment(
                     privateKeyURL: privateKeyURL,
-                    sshURL: resolvedToolchain.sshURL
+                    toolchain: resolvedToolchain
                 ),
                 workingDirectory: tempRoot
             )
@@ -729,10 +774,14 @@ nonisolated enum BookingGitHubPublisher {
         try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 
-    private static func gitSSHEngineEnvironment(privateKeyURL: URL, sshURL: URL) -> [String: String] {
+    private static func gitEngineEnvironment(
+        privateKeyURL: URL,
+        toolchain: BookingGitToolchain
+    ) -> [String: String] {
         [
+            "GIT_EXEC_PATH": toolchain.gitExecPathURL.path,
             "GIT_TERMINAL_PROMPT": "0",
-            "GIT_SSH_COMMAND": "\(shellQuoted(sshURL.path)) -i \(shellQuoted(privateKeyURL.path)) -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new",
+            "GIT_SSH_COMMAND": "\(shellQuoted(toolchain.sshURL.path)) -i \(shellQuoted(privateKeyURL.path)) -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new",
         ]
     }
 

@@ -161,6 +161,10 @@ final class AppCredentialVault: AppCredentialVaultStoring, @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
 
+        guard cachedPayload != payload else {
+            return
+        }
+
         let data = try JSONEncoder().encode(payload)
         let addStatus = SecItemAdd(try addQuery(data: data) as CFDictionary, nil)
         if addStatus == errSecSuccess {

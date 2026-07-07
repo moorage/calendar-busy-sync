@@ -1,0 +1,45 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+if [[ "${PLATFORM_NAME:-}" != "macosx" && "${SDK_NAME:-}" != macosx* ]]; then
+  exit 0
+fi
+
+: "${TARGET_BUILD_DIR:?}"
+: "${EXECUTABLE_FOLDER_PATH:?}"
+: "${DEVELOPER_DIR:?}"
+
+HELPER_DIR="${TARGET_BUILD_DIR}/${EXECUTABLE_FOLDER_PATH}"
+GIT_SOURCE="${DEVELOPER_DIR}/usr/bin/git"
+GIT_CORE_SOURCE="${DEVELOPER_DIR}/usr/libexec/git-core"
+SSH_SOURCE="/usr/bin/ssh"
+SSH_KEYGEN_SOURCE="/usr/bin/ssh-keygen"
+GIT_CORE_DEST="${HELPER_DIR}/booking-git-core"
+
+for executable in "${GIT_SOURCE}" "${SSH_SOURCE}" "${SSH_KEYGEN_SOURCE}"; do
+  if [[ ! -x "${executable}" ]]; then
+    echo "missing executable required for booking publishing helper bundle: ${executable}" >&2
+    exit 1
+  fi
+done
+
+if [[ ! -d "${GIT_CORE_SOURCE}" ]]; then
+  echo "missing Git helper directory required for booking publishing helper bundle: ${GIT_CORE_SOURCE}" >&2
+  exit 1
+fi
+
+mkdir -p "${HELPER_DIR}"
+install -m 0755 "${GIT_SOURCE}" "${HELPER_DIR}/booking-git"
+install -m 0755 "${SSH_SOURCE}" "${HELPER_DIR}/booking-ssh"
+install -m 0755 "${SSH_KEYGEN_SOURCE}" "${HELPER_DIR}/booking-ssh-keygen"
+
+rm -rf "${GIT_CORE_DEST}"
+ditto --noextattr --noqtn "${GIT_CORE_SOURCE}" "${GIT_CORE_DEST}"
+
+for link in "${GIT_CORE_DEST}"/git(N) "${GIT_CORE_DEST}"/git-*(N); do
+  if [[ -L "${link}" && "$(readlink "${link}")" == "../../bin/git" ]]; then
+    rm "${link}"
+    ln -s "../booking-git" "${link}"
+  fi
+done

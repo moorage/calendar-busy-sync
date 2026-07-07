@@ -3230,13 +3230,22 @@ final class Calendar_Busy_SyncTests: XCTestCase {
         XCTAssertEqual(try vault.loadPayloadIfPresent()?.bookingVercelToken, "vercel-token-2")
     }
 
-    func testCredentialCacheInvalidationClassifiesAuthenticationFailures() {
-        XCTAssertTrue(GoogleCalendarServiceError.api(statusCode: 401, message: "Unauthorized").isAuthenticationFailure)
-        XCTAssertFalse(GoogleCalendarServiceError.api(statusCode: 403, message: "Forbidden").isAuthenticationFailure)
-        XCTAssertTrue(BookingVercelDeploymentError.api(statusCode: 401, message: "Unauthorized").isAuthenticationFailure)
-        XCTAssertFalse(BookingVercelDeploymentError.api(statusCode: 403, message: "Forbidden").isAuthenticationFailure)
-        XCTAssertTrue(BookingRelayClientError.requestRejected(statusCode: 401).isAuthenticationFailure)
-        XCTAssertFalse(BookingRelayClientError.requestRejected(statusCode: 403).isAuthenticationFailure)
+    func testCredentialVaultSkipsIdenticalCachedPayloadWrite() throws {
+        let vaultService = "test.credential-vault-no-op-save.\(#function).\(UUID().uuidString)"
+        defer {
+            try? deleteTestKeychainItem(service: vaultService, account: "app-credential-vault")
+        }
+
+        let payload = AppCredentialVaultPayload(bookingInboxAdminToken: "admin-token")
+        let vault = AppCredentialVault(service: vaultService)
+        try vault.savePayload(payload)
+        try deleteTestKeychainItem(service: vaultService, account: "app-credential-vault")
+
+        try vault.savePayload(payload)
+        XCTAssertEqual(try vault.loadPayloadIfPresent(), payload)
+
+        vault.invalidateCachedPayload()
+        XCTAssertNil(try vault.loadPayloadIfPresent())
     }
 
     func testBusyMirrorPlannerOnlyMirrorsPresentAndFutureTime() {

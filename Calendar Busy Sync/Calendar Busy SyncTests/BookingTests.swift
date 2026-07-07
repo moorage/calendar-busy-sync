@@ -970,6 +970,9 @@ final class BookingTests: XCTestCase {
         XCTAssertTrue(runner.commands.contains { command in
             command.environment["GIT_SSH_COMMAND"]?.contains(toolchain.sshURL.path) == true
         })
+        XCTAssertTrue(runner.commands.contains { command in
+            command.environment["GIT_EXEC_PATH"] == toolchain.gitExecPathURL.path
+        })
         XCTAssertFalse(runner.commands.contains { command in
             command.executableURL.path == "/usr/bin/git"
         })
@@ -987,6 +990,9 @@ final class BookingTests: XCTestCase {
 
         try fileManager.createDirectory(at: localRoot, withIntermediateDirectories: true)
         try Data("<html>Booking</html>".utf8).write(to: localRoot.appendingPathComponent("index.html"))
+        let emptyBundleURL = tempRoot.appendingPathComponent("Empty.bundle", isDirectory: true)
+        try fileManager.createDirectory(at: emptyBundleURL, withIntermediateDirectories: true)
+        let emptyBundle = try XCTUnwrap(Bundle(url: emptyBundleURL))
 
         do {
             _ = try await BookingGitHubPublisher.publishDirectory(
@@ -999,6 +1005,7 @@ final class BookingTests: XCTestCase {
                 -----END OPENSSH PRIVATE KEY-----
                 """,
                 fileManager: fileManager,
+                bundledToolchainBundle: emptyBundle,
                 workingDirectoryRoot: workRoot
             )
             XCTFail("Expected App Store publishing to require bundled Git helpers.")

@@ -23,13 +23,6 @@ nonisolated struct BookingRelayHealthResponse: Codable, Equatable, Sendable {
 enum BookingRelayClientError: Error, Equatable {
     case invalidResponse
     case requestRejected(statusCode: Int)
-
-    var isAuthenticationFailure: Bool {
-        if case let .requestRejected(statusCode) = self {
-            return statusCode == 401
-        }
-        return false
-    }
 }
 
 struct BookingRelayClient: Sendable {

@@ -2561,7 +2561,6 @@ final class AppModel: ObservableObject {
             )
             await checkBookingInbox()
         } catch {
-            invalidateBookingSecretCacheIfNeeded(for: error)
             let message = Self.bookingConfigurationErrorMessage(error)
             updateBookingSetupSnapshot(
                 BookingSetupSnapshot(
@@ -2731,7 +2730,6 @@ final class AppModel: ObservableObject {
                 )
             )
         } catch {
-            invalidateBookingSecretCacheIfNeeded(for: error)
             updateBookingSetupSnapshot(
                 BookingSetupSnapshot(
                     pageStatus: bookingSetupSnapshot.pageStatus,
@@ -2806,7 +2804,6 @@ final class AppModel: ObservableObject {
             do {
                 try await deleteBookingRequestFromInbox(request)
             } catch {
-                invalidateBookingSecretCacheIfNeeded(for: error)
                 appendAuditTrailEntry(
                     title: "Booking",
                     detail: "Booking was added to the calendar, but the app could not remove the encrypted inbox record.",
@@ -2934,7 +2931,6 @@ final class AppModel: ObservableObject {
             do {
                 try await deleteBookingRequestFromInbox(request)
             } catch {
-                invalidateBookingSecretCacheIfNeeded(for: error)
                 appendAuditTrailEntry(
                     title: "Booking",
                     detail: "Decline notice was prepared, but the app could not remove the encrypted inbox record.",
@@ -3464,7 +3460,6 @@ final class AppModel: ObservableObject {
         } catch let error as GoogleSignInServiceError {
             setGoogleMessage(error.localizedDescription, for: accountID)
         } catch let error as GoogleCalendarServiceError {
-            invalidateGoogleCredentialCacheIfNeeded(for: error)
             setGoogleMessage(error.localizedDescription, for: accountID)
         } catch let error as GoogleAccountStoreError {
             setGoogleMessage(error.localizedDescription, for: accountID)
@@ -3542,7 +3537,6 @@ final class AppModel: ObservableObject {
         } catch let error as GoogleSignInServiceError {
             setGoogleMessage(error.localizedDescription, for: accountID)
         } catch let error as GoogleCalendarServiceError {
-            invalidateGoogleCredentialCacheIfNeeded(for: error)
             setGoogleMessage(error.localizedDescription, for: accountID)
         } catch let error as GoogleAccountStoreError {
             setGoogleMessage(error.localizedDescription, for: accountID)
@@ -4168,22 +4162,6 @@ final class AppModel: ObservableObject {
             return error.localizedDescription
         }
         return fallback
-    }
-
-    private func invalidateGoogleCredentialCacheIfNeeded(for error: GoogleCalendarServiceError) {
-        if error.isAuthenticationFailure {
-            googleAccountStore.invalidateCachedCredentials()
-        }
-    }
-
-    private func invalidateBookingSecretCacheIfNeeded(for error: Error) {
-        if let error = error as? BookingVercelDeploymentError,
-           error.isAuthenticationFailure {
-            bookingSecretStore.invalidateCachedSecrets()
-        } else if let error = error as? BookingRelayClientError,
-                  error.isAuthenticationFailure {
-            bookingSecretStore.invalidateCachedSecrets()
-        }
     }
 
     private func recordBookingGitHubDeployKey(
@@ -5091,7 +5069,6 @@ final class AppModel: ObservableObject {
             setGoogleMessage(message, for: accountID)
             liveGoogleSmokeStatus = .failed(message)
         } catch let error as GoogleCalendarServiceError {
-            invalidateGoogleCredentialCacheIfNeeded(for: error)
             let message = error.localizedDescription
             setGoogleMessage(message, for: accountID)
             liveGoogleSmokeStatus = .failed(message)
@@ -5223,7 +5200,6 @@ final class AppModel: ObservableObject {
         } catch let error as GoogleSignInServiceError {
             setGoogleMessage(error.localizedDescription, for: accountID)
         } catch let error as GoogleCalendarServiceError {
-            invalidateGoogleCredentialCacheIfNeeded(for: error)
             setGoogleMessage(error.localizedDescription, for: accountID)
         } catch let error as GoogleAccountStoreError {
             setGoogleMessage(error.localizedDescription, for: accountID)

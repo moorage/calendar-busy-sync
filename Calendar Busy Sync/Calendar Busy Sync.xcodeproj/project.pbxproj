@@ -115,6 +115,7 @@
 				CB0000000000000000000501 /* Sources */,
 				CB0000000000000000000401 /* Frameworks */,
 				CB0000000000000000000701 /* Resources */,
+				CB0000000000000000000A01 /* Bundle Booking Git Toolchain */,
 			);
 			buildRules = (
 			);
@@ -250,6 +251,35 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		CB0000000000000000000A01 /* Bundle Booking Git Toolchain */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(DEVELOPER_DIR)/usr/bin/git",
+				"$(DEVELOPER_DIR)/usr/libexec/git-core",
+				/usr/bin/ssh,
+				/usr/bin/ssh-keygen,
+			);
+			name = "Bundle Booking Git Toolchain";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(EXECUTABLE_FOLDER_PATH)/booking-git",
+				"$(TARGET_BUILD_DIR)/$(EXECUTABLE_FOLDER_PATH)/booking-ssh",
+				"$(TARGET_BUILD_DIR)/$(EXECUTABLE_FOLDER_PATH)/booking-ssh-keygen",
+				"$(TARGET_BUILD_DIR)/$(EXECUTABLE_FOLDER_PATH)/booking-git-core/",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/zsh;
+			shellScript = "\"${SRCROOT}/../scripts/copy-booking-git-toolchain\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		CB0000000000000000000501 /* Sources */ = {
@@ -416,6 +446,7 @@
 				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_TEAM = GG34PA8F4A;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Calendar Busy Sync";
@@ -461,6 +492,7 @@
 				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_TEAM = GG34PA8F4A;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Calendar Busy Sync";
