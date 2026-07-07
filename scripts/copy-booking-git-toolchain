@@ -18,6 +18,7 @@ fi
 SSH_SOURCE="/usr/bin/ssh"
 SSH_KEYGEN_SOURCE="/usr/bin/ssh-keygen"
 GIT_CORE_DEST="${HELPER_DIR}/booking-git-core"
+HELPER_BUNDLE_PREFIX="${PRODUCT_BUNDLE_IDENTIFIER:-com.matthewpaulmoore.Calendar-Busy-Sync}"
 
 for executable in "${GIT_SOURCE}" "${SSH_SOURCE}" "${SSH_KEYGEN_SOURCE}"; do
   if [[ ! -x "${executable}" ]]; then
@@ -39,6 +40,101 @@ for executable in "${HELPER_DIR}/booking-git" "${HELPER_DIR}/booking-ssh" "${HEL
   fi
 done
 
+patch_thin_helper_info_plist() {
+  local executable="$1"
+  local helper_identifier="$2"
+
+  python3 - "${executable}" "${helper_identifier}" <<'PY'
+from pathlib import Path
+import struct
+import sys
+
+path = Path(sys.argv[1])
+identifier = sys.argv[2]
+data = bytearray(path.read_bytes())
+
+MH_MAGIC_64 = 0xFEEDFACF
+LC_SEGMENT_64 = 0x19
+
+if len(data) < 32:
+    sys.exit(0)
+
+magic = struct.unpack_from("<I", data, 0)[0]
+if magic != MH_MAGIC_64:
+    sys.exit(0)
+
+_, _, _, _, ncmds, _, _, _ = struct.unpack_from("<IiiIIIII", data, 0)
+command_offset = 32
+plist_payload = (
+    '<?xml version="1.0" encoding="UTF-8"?>\n'
+    '<plist version="1.0"><dict><key>CFBundleIdentifier</key>'
+    f'<string>{identifier}</string></dict></plist>\n'
+).encode("utf-8")
+
+for _ in range(ncmds):
+    if command_offset + 8 > len(data):
+        break
+    cmd, cmdsize = struct.unpack_from("<II", data, command_offset)
+    if cmd == LC_SEGMENT_64 and command_offset + 72 <= len(data):
+        nsects = struct.unpack_from("<I", data, command_offset + 64)[0]
+        section_offset = command_offset + 72
+        for _ in range(nsects):
+            if section_offset + 80 > len(data):
+                break
+            sectname = bytes(data[section_offset : section_offset + 16]).split(b"\0", 1)[0]
+            segname = bytes(data[section_offset + 16 : section_offset + 32]).split(b"\0", 1)[0]
+            if sectname == b"__info_plist" and segname == b"__TEXT":
+                size = struct.unpack_from("<Q", data, section_offset + 40)[0]
+                offset = struct.unpack_from("<I", data, section_offset + 48)[0]
+                if len(plist_payload) > size:
+                    raise SystemExit(
+                        f"replacement Info.plist for {path} is {len(plist_payload)} bytes, "
+                        f"but embedded section is only {size} bytes"
+                    )
+                data[offset : offset + size] = plist_payload + (b" " * (size - len(plist_payload)))
+                path.write_bytes(data)
+                sys.exit(0)
+            section_offset += 80
+    command_offset += cmdsize
+PY
+}
+
+patch_helper_info_plist() {
+  local executable="$1"
+  local helper_identifier="$2"
+  local archs
+  archs=("${(@f)$(lipo -archs "${executable}" 2>/dev/null | tr ' ' '\n')}")
+
+  if [[ "${#archs[@]}" -eq 0 ]]; then
+    patch_thin_helper_info_plist "${executable}" "${helper_identifier}"
+    return
+  fi
+
+  mkdir -p "${TARGET_TEMP_DIR:-/tmp}"
+  local slice_dir
+  slice_dir="$(mktemp -d "${TARGET_TEMP_DIR:-/tmp}/booking-helper-slices.XXXXXX")"
+  local slices=()
+  local arch
+  for arch in "${archs[@]}"; do
+    local slice_path="${slice_dir}/${arch}"
+    lipo -thin "${arch}" "${executable}" -output "${slice_path}"
+    patch_thin_helper_info_plist "${slice_path}" "${helper_identifier}"
+    slices+=("${slice_path}")
+  done
+  if [[ "${#slices[@]}" -eq 1 ]]; then
+    cp "${slices[1]}" "${executable}"
+  else
+    lipo -create "${slices[@]}" -output "${executable}"
+  fi
+  rm -rf "${slice_dir}"
+}
+
+for executable in "${HELPER_DIR}/booking-git" "${HELPER_DIR}/booking-ssh" "${HELPER_DIR}/booking-ssh-keygen"; do
+  helper_name="$(basename "${executable}")"
+  patch_helper_info_plist "${executable}" "${HELPER_BUNDLE_PREFIX}.${helper_name}"
+  chmod 0755 "${executable}"
+done
+
 rm -rf "${GIT_CORE_DEST}"
 mkdir -p "${GIT_CORE_DEST}"
 ln -s "../booking-git" "${GIT_CORE_DEST}/git"
@@ -58,8 +154,6 @@ if [[ "${CODE_SIGNING_ALLOWED:-NO}" == "YES" && -n "${SIGNING_IDENTITY}" && "${S
 </dict>
 </plist>
 PLIST
-
-  HELPER_BUNDLE_PREFIX="${PRODUCT_BUNDLE_IDENTIFIER:-com.matthewpaulmoore.Calendar-Busy-Sync}"
   for executable in "${HELPER_DIR}/booking-git" "${HELPER_DIR}/booking-ssh" "${HELPER_DIR}/booking-ssh-keygen"; do
     helper_name="$(basename "${executable}")"
     codesign --force --sign "${SIGNING_IDENTITY}" --identifier "${HELPER_BUNDLE_PREFIX}.${helper_name}" --entitlements "${HELPER_ENTITLEMENTS}" "${executable}"

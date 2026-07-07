@@ -17,6 +17,8 @@ Package the current macOS app for App Store submission, upload the newest build,
 - [x] 2026-07-07T17:00Z bump the shared project build number to `7` for the next macOS App Store upload attempt
 - [x] 2026-07-07T17:57Z capture App Store server validation failures for build `1.3 (7)`: closed train, helper sandbox/signing identifiers, and `arm64e` helper slices
 - [x] 2026-07-07T18:05Z bump marketing version to `1.4` and re-sign/thin bundled Git/SSH helpers for App Store validation
+- [x] 2026-07-07T18:03Z capture App Store server validation failure for build `1.4 (7)`: copied Git's embedded Mach-O plist lacked `CFBundleIdentifier`
+- [x] 2026-07-07T18:08Z patch copied helpers' embedded Mach-O plist sections to app-owned `CFBundleIdentifier` values before signing
 
 ## Surprises & Discoveries
 
@@ -30,6 +32,7 @@ Package the current macOS app for App Store submission, upload the newest build,
 - 2026-07-07: after DSA compliance became active, App Store Connect accepted the upload request far enough to reject the package as duplicate bundle version `6`; the next archive needs `CURRENT_PROJECT_VERSION = 7`.
 - 2026-07-07: App Store Connect now rejects additional copied-helper details that local export did not catch: copied Apple SSH helpers keep reserved `com.apple.*` signing identifiers unless re-signed with explicit app-owned identifiers, all embedded executables need sandbox entitlements, and `arm64e` helper slices are invalid unless paired with `arm64`.
 - 2026-07-07: version `1.3` is closed for new macOS build uploads, so the next upload must use `CFBundleShortVersionString` `1.4`.
+- 2026-07-07: CodeDirectory identifiers are not enough for copied command-line tools. App Store Connect also reads the Mach-O `__TEXT,__info_plist` section, so copied helpers need that embedded plist patched before signing.
 
 ## Decision Log
 
@@ -40,6 +43,7 @@ Package the current macOS app for App Store submission, upload the newest build,
 - 2026-07-07: have `scripts/upload-appstore` pass the known App Store Connect app id to `altool`, while still allowing `--app-id` or `APPSTORE_CONNECT_APP_ID` overrides.
 - 2026-07-07: advance the shared Xcode build number from `6` to `7` before rebuilding, matching App Store Connect's requirement that the next `CFBundleVersion` be higher than the previous macOS upload.
 - 2026-07-07: advance the shared marketing version from `1.3` to `1.4`, prefer the Command Line Tools universal Git binary when available, strip `arm64e` slices from bundled helpers, and sign helpers with app-owned identifiers plus sandbox/network entitlements.
+- 2026-07-07: rewrite copied helpers' embedded Mach-O plist sections in-place with app-owned `CFBundleIdentifier` values before re-signing, because the original Apple tool plists either lack that key or use reserved `com.apple.*` identifiers.
 
 ## Outcomes & Retrospective
 
